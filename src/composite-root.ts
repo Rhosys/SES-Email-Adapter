@@ -144,6 +144,7 @@ export class CompositeRoot {
 
     const SES_CONFIG_SET_ARN = process.env["SES_CONFIGURATION_SET_ARN"]!;
     const SES_CONFIG_SET_NAME = SES_CONFIG_SET_ARN.split("/").pop()!;
+    const PLATFORM_TENANT = SES_CONFIG_SET_NAME.replace(/-sending$/, "-platform");
     const MAIL_DOMAIN = process.env["MAIL_DOMAIN"]!;
     const NOTIFICATION_FROM = `noreply@${MAIL_DOMAIN}`;
     const DKIM_PRIVATE_KEY = process.env["DKIM_PRIVATE_KEY"] ?? "";
@@ -155,7 +156,7 @@ export class CompositeRoot {
       logger.error("DKIM_PRIVATE_KEY not set — domain identity registration will fail", { code: "handler.env.dkim_key_missing" });
     }
 
-    const emailService = new EmailService(sesv2, { from: NOTIFICATION_FROM, configSetName: SES_CONFIG_SET_NAME }, logger, processingDb);
+    const emailService = new EmailService(sesv2, { from: NOTIFICATION_FROM, configSetName: SES_CONFIG_SET_NAME, platformTenantName: PLATFORM_TENANT, mailDomain: MAIL_DOMAIN }, logger, processingDb);
     const domainIdentityService = new SesDomainIdentityService(
       sesv2, "mail", DKIM_PRIVATE_KEY, MAIL_DOMAIN, SES_CONFIG_SET_ARN,
     );

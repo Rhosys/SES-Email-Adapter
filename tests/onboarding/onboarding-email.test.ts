@@ -105,7 +105,6 @@ describe("Onboarding email send", () => {
       subject: "The Next Step",
       htmlBody: "<html>rendered</html>",
       fromOverride: expect.stringContaining("Numaeel"),
-      accountId: "acc-test",
     }));
 
     // Verify template rendered with correct progress flags

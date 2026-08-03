@@ -19,7 +19,7 @@ export interface EmailSendOptions {
   headers?: Array<{ Name: string; Value: string }>;
   tags?: Array<{ Name: string; Value: string }>;
   fromOverride?: string;
-  /** Account sending on behalf of — maps to SES TenantName at the boundary. */
+  /** SES TenantName — must match the sending identity. Platform tenant for platform sends, customer accountId for customer sends. */
   accountId: string;
 }
 
@@ -39,16 +39,23 @@ export class EmailService {
   private readonly sesv2: SESv2Client;
   private readonly from: string;
   private readonly configSetName: string;
+  private readonly platformTenantName: string;
+  private readonly mailDomain: string;
   private readonly logger: Logger;
   private readonly suppressionChecker: SuppressionChecker | undefined;
 
-  constructor(sesv2: SESv2Client, opts: { from: string; configSetName: string }, logger: Logger, suppressionChecker?: SuppressionChecker) {
+  constructor(sesv2: SESv2Client, opts: { from: string; configSetName: string; platformTenantName: string; mailDomain: string }, logger: Logger, suppressionChecker?: SuppressionChecker) {
     this.sesv2 = sesv2;
     this.from = opts.from;
     this.configSetName = opts.configSetName;
+    this.platformTenantName = opts.platformTenantName;
+    this.mailDomain = opts.mailDomain;
     this.logger = logger;
     this.suppressionChecker = suppressionChecker;
   }
+
+  /** The SES tenant name for platform-originated sends (verification, onboarding, invites). */
+  get platformTenant(): string { return this.platformTenantName; }
 
   /**
    * Sanitize SES message tags at the boundary: names and values may only contain
@@ -71,9 +78,32 @@ export class EmailService {
     return ok(null);
   }
 
+  /**
+   * Guards against tenant/domain misalignment:
+   * - Platform or SYSTEM tenant → from address must be on our mail domain
+   * - Customer tenant → from address must NOT be on our mail domain
+   */
+  private validateTenantDomainAlignment(accountId: string, fromAddress: string): Result<null, InvalidArgumentError> {
+    const fromDomain = fromAddress.split("@").pop()?.replace(/>$/, "") ?? "";
+    const isPlatformTenant = accountId === this.platformTenantName || accountId === "SYSTEM";
+    const isOurDomain = fromDomain === this.mailDomain || fromDomain.endsWith(`.${this.mailDomain}`);
+
+    if (isPlatformTenant && !isOurDomain) {
+      return err({ kind: "invalid_argument", argument: "accountId", message: `Platform tenant "${accountId}" cannot send from external domain "${fromDomain}" — use a customer tenant.` });
+    }
+    if (!isPlatformTenant && isOurDomain) {
+      return err({ kind: "invalid_argument", argument: "accountId", message: `Customer tenant "${accountId}" cannot send from platform domain "${fromDomain}" — use the platform tenant.` });
+    }
+    return ok(null);
+  }
+
   async send(opts: EmailSendOptions): Promise<Result<{ messageId: string }, EmailServiceError>> {
     const validation = this.validateAccountId(opts.accountId);
     if (validation.isErr()) return err(validation.error);
+
+    const fromAddress = opts.fromOverride ?? this.from;
+    const tenantMismatch = this.validateTenantDomainAlignment(opts.accountId, fromAddress);
+    if (tenantMismatch.isErr()) return err(tenantMismatch.error);
 
     // Check if recipient is on the suppression list — log but still send
     if (this.suppressionChecker) {
@@ -91,7 +121,7 @@ export class EmailService {
     const emailTags = this.sanitizeTags(opts.tags);
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
-        FromEmailAddress: opts.fromOverride ?? this.from,
+        FromEmailAddress: fromAddress,
         Destination: { ToAddresses: [opts.to] },
         Content: {
           Simple: {
@@ -165,7 +195,8 @@ export class EmailService {
     const isPermanent =
       (errorName === "MessageRejected" && errorMessage.includes("Email address is not verified")) ||
       errorName === "ConfigurationSetSendingPausedException" ||
-      errorName === "ConfigurationSetDoesNotExistException";
+      errorName === "ConfigurationSetDoesNotExistException" ||
+      errorName === "AccessDeniedException";
 
     if (isPermanent) {
       this.logger.error(`SES permanent failure [${errorName}]: ${errorMessage}.`, {

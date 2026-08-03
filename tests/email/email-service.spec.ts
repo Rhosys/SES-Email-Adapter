@@ -27,7 +27,7 @@ describe("EmailService.send()", () => {
     mockSend = vi.fn();
     sesClient = { send: mockSend } as unknown as SESv2Client;
     logger = createMockLogger();
-    service = new EmailService(sesClient, { from: "noreply@example.com", configSetName: "my-config-set" }, logger);
+    service = new EmailService(sesClient, { from: "noreply@example.com", configSetName: "my-config-set", platformTenantName: "test-platform", mailDomain: "example.com" }, logger);
   });
 
   it("successful send returns Ok with messageId and logs info", async () => {
@@ -37,7 +37,7 @@ describe("EmailService.send()", () => {
       to: "user@example.com",
       subject: "Welcome",
       textBody: "Hello there",
-      accountId: "acct-test",
+      accountId: "test-platform",
     });
 
     expect(result.isOk()).toBe(true);
@@ -55,7 +55,7 @@ describe("EmailService.send()", () => {
     });
     mockSend.mockRejectedValueOnce(sesError);
 
-    const opts = { to: "user@example.com", subject: "Test", textBody: "Body", accountId: "acct-test" };
+    const opts = { to: "user@example.com", subject: "Test", textBody: "Body", accountId: "test-platform" };
     const result = await service.send(opts);
 
     expect(result.isErr()).toBe(true);
@@ -73,7 +73,7 @@ describe("EmailService.send()", () => {
     });
     mockSend.mockRejectedValueOnce(sesError);
 
-    const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "a" });
+    const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "test-platform" });
 
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr().kind).toBe("transient_ses_error");
@@ -87,7 +87,7 @@ describe("EmailService.send()", () => {
     });
     mockSend.mockRejectedValueOnce(sesError);
 
-    const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "a" });
+    const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "test-platform" });
 
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr().kind).toBe("transient_ses_error");
@@ -101,7 +101,7 @@ describe("EmailService.send()", () => {
     });
     mockSend.mockRejectedValueOnce(sesError);
 
-    const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "a" });
+    const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "test-platform" });
 
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr().kind).toBe("transient_ses_error");
@@ -115,7 +115,7 @@ describe("EmailService.send()", () => {
     });
     mockSend.mockRejectedValueOnce(sesError);
 
-    const opts = { to: "u@e.com", subject: "S", textBody: "B", accountId: "a" };
+    const opts = { to: "u@e.com", subject: "S", textBody: "B", accountId: "test-platform" };
     const result = await service.send(opts);
 
     expect(result.isErr()).toBe(true);
@@ -136,7 +136,7 @@ describe("EmailService.send()", () => {
     const networkError = new Error("ECONNRESET");
     mockSend.mockRejectedValueOnce(networkError);
 
-    const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "a" });
+    const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "test-platform" });
 
     expect(result.isErr()).toBe(true);
     const error = result._unsafeUnwrapErr();
@@ -155,7 +155,7 @@ describe("EmailService.send()", () => {
     });
     mockSend.mockRejectedValueOnce(sesError);
 
-    const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "a" });
+    const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "test-platform" });
 
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr()).toEqual(expect.objectContaining({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400 }));
@@ -169,7 +169,7 @@ describe("EmailService.send()", () => {
       subject: "Reply",
       textBody: "Body",
       fromOverride: "custom-sender@example.com",
-      accountId: "acct-test",
+      accountId: "test-platform",
     });
 
     const command = mockSend.mock.calls[0]![0] as SendEmailCommand;
@@ -183,7 +183,7 @@ describe("EmailService.send()", () => {
       to: "user@example.com",
       subject: "With headers",
       textBody: "Body",
-      accountId: "acct-test",
+      accountId: "test-platform",
       headers: [
         { Name: "In-Reply-To", Value: "<original-msg-id@example.com>" },
         { Name: "References", Value: "<ref-1@example.com>" },
@@ -204,7 +204,7 @@ describe("EmailService.send()", () => {
       to: "user@example.com",
       subject: "Tagged",
       textBody: "Body",
-      accountId: "acct-test",
+      accountId: "test-platform",
       tags: [
         // '@' and '.' are invalid in tag values and get stripped
         { Name: "X-Numaeel-Healthcheck-Id", Value: "healthcheck-2026-07-08@platform.email.rhosys.cloud" },
@@ -236,7 +236,7 @@ describe("EmailService.sendRaw()", () => {
     mockSend = vi.fn();
     sesClient = { send: mockSend } as unknown as SESv2Client;
     logger = createMockLogger();
-    service = new EmailService(sesClient, { from: "noreply@example.com", configSetName: "my-config-set" }, logger);
+    service = new EmailService(sesClient, { from: "noreply@example.com", configSetName: "my-config-set", platformTenantName: "test-platform", mailDomain: "example.com" }, logger);
   });
 
   it("successful raw send returns Ok with messageId and logs info", async () => {
@@ -260,7 +260,7 @@ describe("EmailService.sendRaw()", () => {
     });
     mockSend.mockRejectedValueOnce(sesError);
 
-    const result = await service.sendRaw({ to: "r@e.com", rawData: new Uint8Array([1]), accountId: "a" });
+    const result = await service.sendRaw({ to: "r@e.com", rawData: new Uint8Array([1]), accountId: "acct-test" });
 
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr().kind).toBe("transient_ses_error");
@@ -274,7 +274,7 @@ describe("EmailService.sendRaw()", () => {
     });
     mockSend.mockRejectedValueOnce(sesError);
 
-    const result = await service.sendRaw({ to: "r@e.com", rawData: new Uint8Array([1]), accountId: "a" });
+    const result = await service.sendRaw({ to: "r@e.com", rawData: new Uint8Array([1]), accountId: "acct-test" });
 
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr()).toEqual(expect.objectContaining({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400 }));

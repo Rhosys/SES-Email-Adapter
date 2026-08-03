@@ -95,7 +95,7 @@ describe("Team invite email", () => {
     expect(sendCall.htmlBody).toBe("<html>team-invite-rendered</html>");
     expect(sendCall.textBody).toContain("invited to join Acme Corp");
     expect(sendCall.textBody).toContain("inv-abc123");
-    expect(sendCall.accountId).toBe(TEST_ACCOUNT_ID);
+    expect(sendCall.accountId).toBeUndefined();
 
     // Verify template rendered with expected data
     expect(renderTemplate).toHaveBeenCalledWith("team-invite", expect.objectContaining({

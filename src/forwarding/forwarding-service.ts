@@ -164,7 +164,7 @@ export class ForwardingService implements IForwardingService {
       htmlBody,
       tags,
       fromOverride: `"Numaeel" <noreply@${this.mailDomain}>`,
-      accountId,
+      accountId: this.emailService.platformTenant,
     })
 
     if (result.isErr()) {

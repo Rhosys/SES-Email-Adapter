@@ -23,7 +23,7 @@ describe("EmailService error classifications — REQ-0.6", () => {
     mockSend = vi.fn();
     sesClient = { send: mockSend } as unknown as SESv2Client;
     logger = createMockLogger();
-    service = new EmailService(sesClient, { from: "noreply@example.com", configSetName: "my-config-set" }, logger);
+    service = new EmailService(sesClient, { from: "noreply@example.com", configSetName: "my-config-set", platformTenantName: "test-platform", mailDomain: "example.com" }, logger);
   });
 
   it("ConfigurationSetSendingPausedException classified as permanent — returns err with permanent_ses_error", async () => {
@@ -33,7 +33,7 @@ describe("EmailService error classifications — REQ-0.6", () => {
     });
     mockSend.mockRejectedValueOnce(sesError);
 
-    const opts = { to: "u@e.com", subject: "S", textBody: "B", accountId: "a" };
+    const opts = { to: "u@e.com", subject: "S", textBody: "B", accountId: "test-platform" };
     const result = await service.send(opts);
 
     expect(result.isErr()).toBe(true);
@@ -67,7 +67,7 @@ describe("EmailService error classifications — REQ-0.6", () => {
     });
     mockSend.mockRejectedValueOnce(sesError);
 
-    const opts = { to: "u@e.com", subject: "S", textBody: "B", accountId: "a" };
+    const opts = { to: "u@e.com", subject: "S", textBody: "B", accountId: "test-platform" };
     const result = await service.send(opts);
 
     expect(result.isErr()).toBe(true);
