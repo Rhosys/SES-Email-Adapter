@@ -26,7 +26,7 @@ function mockDb(overrides?: Partial<AccountDatabase>): AccountDatabase {
 }
 
 function mockSignalQueue(): SignalQueue & { send: ReturnType<typeof vi.fn> } {
-  return { send: vi.fn(async () => {}) } as unknown as SignalQueue & { send: ReturnType<typeof vi.fn> };
+  return { send: vi.fn(async () => ({ isOk: () => true, isErr: () => false, value: undefined })) } as unknown as SignalQueue & { send: ReturnType<typeof vi.fn> };
 }
 
 function mockLogger(): Logger {

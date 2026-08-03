@@ -275,12 +275,15 @@ export class JmapAdapter implements ProviderAdapter {
 
     // Enqueue emx_inbound per added email (capped at 500 by maxChanges)
     for (const entry of added) {
-      await this.signalQueue.send("emx_inbound", {
+      const sendResult = await this.signalQueue.send("emx_inbound", {
         source: "jmap",
         providerMessageId: entry.id,
         emxId: emx.id,
         accountId: emx.accountId,
       });
+      if (sendResult.isErr()) {
+        this.logger.warn("JMAP: failed to enqueue emx_inbound", { code: "jmap.renew.enqueue_failed", emxId: emx.id, providerMessageId: entry.id, error: sendResult.error });
+      }
     }
 
     // Update syncCursor and lastSyncAt
@@ -400,12 +403,15 @@ export class JmapAdapter implements ProviderAdapter {
 
     // Enqueue all IDs — pipeline deduplicates
     for (const emailId of ids) {
-      await this.signalQueue.send("emx_inbound", {
+      const sendResult = await this.signalQueue.send("emx_inbound", {
         source: "jmap",
         providerMessageId: emailId,
         emxId: emx.id,
         accountId: emx.accountId,
       });
+      if (sendResult.isErr()) {
+        this.logger.warn("JMAP fallback: failed to enqueue emx_inbound", { code: "jmap.renew.fallback_enqueue_failed", emxId: emx.id, providerMessageId: emailId, error: sendResult.error });
+      }
     }
 
     await this.db.updateExternalExchange(emx.accountId, emx.id, {

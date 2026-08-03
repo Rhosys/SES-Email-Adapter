@@ -110,6 +110,8 @@ async function handlerInner(
 
     for (const record of event.Records) {
       const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
+      const messageType = record.messageAttributes?.["messageType"]?.stringValue ?? "unknown";
+      logger.info("SQS message received", { code: "handler.sqs.received", messageId: record.messageId, messageType, receiveCount });
 
       let body: unknown;
       try {
@@ -120,14 +122,14 @@ async function handlerInner(
         continue;
       }
 
-      const messageType = record.messageAttributes?.["messageType"]?.stringValue ?? (body as { sqsMessageAttributeMessageType?: string }).sqsMessageAttributeMessageType;
-      const result = await processSqsRecord(body, messageType, receiveCount, record.messageId);
+      const resolvedMessageType = record.messageAttributes?.["messageType"]?.stringValue ?? (body as { sqsMessageAttributeMessageType?: string }).sqsMessageAttributeMessageType;
+      const result = await processSqsRecord(body, resolvedMessageType, receiveCount, record.messageId);
 
       if (result.isErr()) {
         if (receiveCount > RETRY_TRACK_THRESHOLD) {
-          logger.error("SQS message failed after exceeding retry threshold.", { code: "handler.sqs.retry_threshold_exceeded", messageId: record.messageId, receiveCount, messageType, error: result.error, record });
+          logger.error("SQS message failed after exceeding retry threshold.", { code: "handler.sqs.retry_threshold_exceeded", messageId: record.messageId, receiveCount, messageType: resolvedMessageType, error: result.error, record });
         } else {
-          logger.info("SQS message processing failed. Will be retried automatically.", { code: "handler.sqs.processing_failed", messageId: record.messageId, receiveCount, messageType, error: result.error, record });
+          logger.info("SQS message processing failed. Will be retried automatically.", { code: "handler.sqs.processing_failed", messageId: record.messageId, receiveCount, messageType: resolvedMessageType, error: result.error, record });
         }
         failures.push({ itemIdentifier: record.messageId });
       }

@@ -249,12 +249,15 @@ export class ImapAdapter implements ProviderAdapter {
 
         // Enqueue emx_inbound per UID
         for (const uid of batch) {
-          await this.signalQueue.send("emx_inbound", {
+          const sendResult = await this.signalQueue.send("emx_inbound", {
             source: "imap",
             providerMessageId: String(uid),
             emxId: emx.id,
             accountId: emx.accountId,
           });
+          if (sendResult.isErr()) {
+            this.logger.warn("IMAP: failed to enqueue emx_inbound", { code: "imap.renew.enqueue_failed", emxId: emx.id, uid, error: sendResult.error });
+          }
         }
 
         // Update syncCursor to highest UID in batch

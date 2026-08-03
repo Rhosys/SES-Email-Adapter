@@ -128,7 +128,10 @@ export class EmxDispatchWorker {
         let enqueued = 0;
         for (const entry of historyData.history ?? []) {
           for (const added of entry.messagesAdded ?? []) {
-            await this.signalQueue.send("emx_inbound", { source: "gmail", providerMessageId: added.message.id, emxId: emx.id, accountId: emx.accountId });
+            const sendResult = await this.signalQueue.send("emx_inbound", { source: "gmail", providerMessageId: added.message.id, emxId: emx.id, accountId: emx.accountId });
+            if (sendResult.isErr()) {
+              this.logger.warn("emx_dispatch: Gmail enqueue failed", { code: "emx.dispatch.gmail_enqueue_failed", emxId: emx.id, providerMessageId: added.message.id, error: sendResult.error });
+            }
             enqueued++;
           }
         }
@@ -151,7 +154,10 @@ export class EmxDispatchWorker {
         }
         const page = await deltaResp.json() as { value?: Array<{ id: string }>; "@odata.nextLink"?: string; "@odata.deltaLink"?: string };
         for (const msg of page.value ?? []) {
-          await this.signalQueue.send("emx_inbound", { source: "outlook", providerMessageId: msg.id, emxId: emx.id, accountId: emx.accountId });
+          const sendResult = await this.signalQueue.send("emx_inbound", { source: "outlook", providerMessageId: msg.id, emxId: emx.id, accountId: emx.accountId });
+          if (sendResult.isErr()) {
+            this.logger.warn("emx_dispatch: Outlook enqueue failed", { code: "emx.dispatch.outlook_enqueue_failed", emxId: emx.id, providerMessageId: msg.id, error: sendResult.error });
+          }
           enqueued++;
         }
         nextLink = page["@odata.nextLink"] ?? null;
