@@ -73,7 +73,7 @@ function makeDeps(overrides: {
   const logger = overrides.logger ?? createMockLogger();
 
   const threadDb = {
-    listThreads: vi.fn().mockResolvedValue(ok({ items: overrides.threads ?? [makeThread()] })),
+    listActiveThreadsSince: vi.fn().mockResolvedValue(ok(overrides.threads ?? [makeThread()])),
   } as unknown as HealthcheckJobDeps["threadDb"];
   const searchDatabase = {
     hasEmbedding: vi.fn().mockResolvedValue(ok(overrides.hasEmbedding ?? true)),

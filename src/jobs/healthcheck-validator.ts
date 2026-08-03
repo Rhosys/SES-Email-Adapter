@@ -1,7 +1,6 @@
 import dns from "node:dns/promises";
 import { DateTime } from "luxon";
 import type { Logger } from "../logger.js";
-import type { ThreadDatabase } from "../database/thread-database.js";
 import type { DbError, Result } from "../errors.js";
 import type { Domain, DnsRecord } from "../types/index.js";
 import { SYSTEM_ACCOUNT_ID } from "../database/system-account-db.js";
@@ -55,7 +54,7 @@ export interface ValidationChecks {
 }
 
 export interface HealthcheckValidatorDeps {
-  threadDb: ThreadDatabase;
+  threadDb: { listActiveThreadsSince(accountId: string, sinceDate: string): Promise<Result<Array<{ id: string; createdAt: string; workflow: string }>, DbError>> };
   searchDatabase: { hasEmbedding(threadId: string): Promise<Result<boolean, DbError>> };
   sesChecker: { canSendFrom(domain: string): Promise<{ verified: boolean; dkimEnabled: boolean; accountSendingEnabled: boolean; detail?: string }> };
   dnsChecker: { checkDomain(domain: Domain): Promise<DnsRecord[]> };
@@ -69,16 +68,70 @@ const CHECK_LABELS = {
   embeddingIndexed: "Embedding indexed for search",
 } as const;
 
-// How far back to list SYSTEM threads when searching for the target day.
-const LOOKBACK_LIMIT = 100;
+// How far back to search for a successful healthcheck day.
+const MAX_LOOKBACK_DAYS = 7;
 
 export class HealthcheckValidator {
   constructor(private readonly deps: HealthcheckValidatorDeps) {}
 
-  /** Validate the most recent healthcheck (yesterday's). */
-  validateLatest(): Promise<HealthCheckValidation> {
-    const yesterday = DateTime.utc().minus({ days: 1 }).toFormat("yyyy-MM-dd");
-    return this.validate(yesterday);
+  /** Validate the most recent healthcheck (yesterday's), with lookback up to 7 days for context. */
+  async validateLatest(): Promise<HealthCheckValidation> {
+    const now = DateTime.utc();
+    const checkedAt = now.toISO()!;
+    const yesterday = now.minus({ days: 1 }).toFormat("yyyy-MM-dd");
+
+    // Infra checks are point-in-time — run once
+    const dnsChecks = await this.checkPlatformDns();
+    const delegationChecks = await this.checkDelegation();
+    const sesChecks = await this.checkSesIdentity();
+    const infraChecks = [...dnsChecks, ...delegationChecks, ...sesChecks];
+
+    // Fetch active SYSTEM threads from the last 7 days (bounded query, single DDB call)
+    const sinceDate = now.minus({ days: MAX_LOOKBACK_DAYS }).toFormat("yyyy-MM-dd");
+    let threads: Array<{ id: string; createdAt: string; workflow: string }>;
+    try {
+      const result = await this.deps.threadDb.listActiveThreadsSince(SYSTEM_ACCOUNT_ID, sinceDate);
+      if (result.isErr()) {
+        this.deps.logger.error("Healthcheck validation query failed — could not list SYSTEM threads.", {
+          code: "healthcheck.validation_error",
+          error: result.error,
+        });
+        return { checkedDate: yesterday, checkedAt, status: "unknown", rawChecks: null, checks: [...infraChecks, ...this.errorChecks("Validation query failed — could not list threads.")] };
+      }
+      threads = result.value;
+    } catch (e) {
+      this.deps.logger.error("Healthcheck validation threw unexpected error.", {
+        code: "healthcheck.validation_error",
+        error: e,
+      });
+      return { checkedDate: yesterday, checkedAt, status: "unknown", rawChecks: null, checks: [...infraChecks, ...this.errorChecks("Validation threw an unexpected error.")] };
+    }
+
+    // Check day-by-day starting from yesterday, going back up to MAX_LOOKBACK_DAYS.
+    // Collect pipeline checks for each failed day (with date in detail). Stop on first success.
+    const pipelineChecks: HealthCheckItem[] = [];
+    let rawChecks: ValidationChecks | null = null;
+    let yesterdayPassed = false;
+
+    for (let daysBack = 1; daysBack <= MAX_LOOKBACK_DAYS; daysBack++) {
+      const date = now.minus({ days: daysBack }).toFormat("yyyy-MM-dd");
+      const dayResult = await this.validateDay(date, threads);
+
+      for (const check of dayResult.checks) {
+        pipelineChecks.push(check);
+      }
+      rawChecks = dayResult.rawChecks;
+
+      if (dayResult.status === "pass") {
+        if (daysBack === 1) yesterdayPassed = true;
+        break;
+      }
+    }
+
+    const allInfraPassed = infraChecks.every(c => c.status === "pass");
+    const overallStatus: HealthCheckStatus = yesterdayPassed && allInfraPassed ? "pass" : "fail";
+
+    return { checkedDate: yesterday, checkedAt, status: overallStatus, rawChecks, checks: [...infraChecks, ...pipelineChecks] };
   }
 
   async validate(date: string): Promise<HealthCheckValidation> {
@@ -91,9 +144,11 @@ export class HealthcheckValidator {
     const sesChecks = await this.checkSesIdentity();
     const infraChecks = [...dnsChecks, ...delegationChecks, ...sesChecks];
 
+    // Fetch threads for just this single day (use a 2-day window to cover edge cases)
+    const sinceDate = DateTime.fromISO(date).minus({ days: 1 }).toFormat("yyyy-MM-dd");
     let threads: Array<{ id: string; createdAt: string; workflow: string }>;
     try {
-      const result = await this.deps.threadDb.listThreads(SYSTEM_ACCOUNT_ID, { limit: LOOKBACK_LIMIT });
+      const result = await this.deps.threadDb.listActiveThreadsSince(SYSTEM_ACCOUNT_ID, sinceDate);
       if (result.isErr()) {
         this.deps.logger.error("Healthcheck validation query failed — could not list SYSTEM threads.", {
           code: "healthcheck.validation_error",
@@ -102,7 +157,7 @@ export class HealthcheckValidator {
         });
         return { ...base, status: "unknown", rawChecks: null, checks: [...infraChecks, ...this.errorChecks("Validation query failed — could not list threads.")] };
       }
-      threads = result.value.items;
+      threads = result.value;
     } catch (e) {
       this.deps.logger.error("Healthcheck validation threw unexpected error.", {
         code: "healthcheck.validation_error",
@@ -112,26 +167,29 @@ export class HealthcheckValidator {
       return { ...base, status: "unknown", rawChecks: null, checks: [...infraChecks, ...this.errorChecks("Validation threw an unexpected error.")] };
     }
 
-    // Find the healthcheck thread created on the target day. Prefer one already
-    // classified as the healthcheck workflow; fall back to any thread from that
-    // day (SYSTEM only ever receives the healthcheck email).
+    const dayResult = await this.validateDay(date, threads);
+    const allInfraPassed = infraChecks.every(c => c.status === "pass");
+    const status: HealthCheckStatus = dayResult.status === "pass" && allInfraPassed ? "pass" : dayResult.status === "unknown" ? "unknown" : "fail";
+
+    return { ...base, status, rawChecks: dayResult.rawChecks, checks: [...infraChecks, ...dayResult.checks] };
+  }
+
+  private async validateDay(date: string, threads: Array<{ id: string; createdAt: string; workflow: string }>): Promise<{ status: HealthCheckStatus; rawChecks: ValidationChecks | null; checks: HealthCheckItem[] }> {
     const createdOnDay = threads.filter((t) => t.createdAt.slice(0, 10) === date);
     const thread = createdOnDay.find((t) => t.workflow === "healthcheck") ?? createdOnDay[0];
 
     if (!thread) {
-      this.deps.logger.error(`Healthcheck thread not found for ${date} — cannot verify that the healthcheck was ever run.`, {
+      this.deps.logger.error(`Healthcheck thread not found for ${date}.`, {
         code: "healthcheck.thread_not_found",
         date,
       });
       return {
-        ...base,
         status: "fail",
         rawChecks: null,
         checks: [
-          ...infraChecks,
-          { id: "thread-created", label: CHECK_LABELS.threadCreated, status: "fail", detail: `No healthcheck thread was created for ${date}.`, section: "pipeline" as const },
-          { id: "workflow-classified", label: CHECK_LABELS.workflowClassified, status: "unknown", section: "pipeline" as const },
-          { id: "embedding-indexed", label: CHECK_LABELS.embeddingIndexed, status: "unknown", section: "pipeline" as const },
+          { id: "thread-created", label: CHECK_LABELS.threadCreated, status: "fail", detail: `[${date}] No healthcheck thread was created.`, section: "pipeline" as const },
+          { id: "workflow-classified", label: CHECK_LABELS.workflowClassified, status: "unknown", detail: `[${date}]`, section: "pipeline" as const },
+          { id: "embedding-indexed", label: CHECK_LABELS.embeddingIndexed, status: "unknown", detail: `[${date}]`, section: "pipeline" as const },
         ],
       };
     }
@@ -142,25 +200,21 @@ export class HealthcheckValidator {
       hasEmbedding: false,
     };
 
-    // Default detail for a failed embedding check; overridden below when we can
-    // pinpoint the cause (e.g. schema/migration mismatch) so the healthcheck
-    // report names the real problem instead of a vague "no embedding found".
-    let embeddingDetail = "No embedding found in the search index for this thread.";
+    let embeddingDetail = `[${date}] No embedding found in the search index for this thread.`;
 
     try {
       const embeddingResult = await this.deps.searchDatabase.hasEmbedding(thread.id);
       if (embeddingResult.isOk()) {
         checks.hasEmbedding = embeddingResult.value;
       } else if (embeddingResult.error.schemaMismatch) {
-        embeddingDetail = `Aurora schema mismatch — the applied migrations are behind the code: ${embeddingResult.error.message}. Check that src/migrations is up to date with src/database/schema.ts.`;
-        this.deps.logger.error("Healthcheck embedding check failed — Aurora schema mismatch (migrations behind code).", {
+        embeddingDetail = `[${date}] Aurora schema mismatch — migrations behind code: ${embeddingResult.error.message}.`;
+        this.deps.logger.error("Healthcheck embedding check failed — Aurora schema mismatch.", {
           code: "healthcheck.embedding_check_schema_mismatch",
           date,
           threadId: thread.id,
           error: embeddingResult.error.cause,
           message: embeddingResult.error.message,
         });
-        checks.hasEmbedding = false;
       } else {
         this.deps.logger.error("Aurora error during embedding existence check.", {
           code: "healthcheck.embedding_check_error",
@@ -169,7 +223,6 @@ export class HealthcheckValidator {
           error: embeddingResult.error.cause,
           message: embeddingResult.error.message,
         });
-        checks.hasEmbedding = false;
       }
     } catch (e) {
       this.deps.logger.error("Aurora connectivity/timeout error during embedding existence check.", {
@@ -178,47 +231,44 @@ export class HealthcheckValidator {
         threadId: thread.id,
         error: e,
       });
-      checks.hasEmbedding = false;
     }
 
-    const allPassed = infraChecks.length > 0 && checks.workflowIsHealthcheck && checks.hasEmbedding && infraChecks.every((c) => c.status === "pass");
+    const allPassed = checks.workflowIsHealthcheck && checks.hasEmbedding;
+
     if (allPassed) {
-      this.deps.logger.info(`Healthcheck validation passed — ${date}'s email fully processed.`, {
+      this.deps.logger.info(`Healthcheck validation passed — ${date}.`, {
         code: "healthcheck.validation_passed",
         date,
         threadId: thread.id,
         checks,
       });
     } else {
-      this.deps.logger.error(`Healthcheck validation failed for ${date} — one or more checks did not pass.`, {
+      this.deps.logger.error(`Healthcheck validation failed for ${date}.`, {
         code: "healthcheck.validation_failed",
         date,
         threadId: thread.id,
         checks,
-        infraChecks,
         threadState: { id: thread.id, workflow: thread.workflow, createdAt: thread.createdAt },
       });
     }
 
     return {
-      ...base,
       status: allPassed ? "pass" : "fail",
       rawChecks: checks,
       checks: [
-        ...infraChecks,
-        { id: "thread-created", label: CHECK_LABELS.threadCreated, status: "pass", section: "pipeline" as const },
+        { id: "thread-created", label: CHECK_LABELS.threadCreated, status: "pass", detail: `[${date}]`, section: "pipeline" as const },
         {
           id: "workflow-classified",
           label: CHECK_LABELS.workflowClassified,
           status: checks.workflowIsHealthcheck ? "pass" : "fail",
-          ...(checks.workflowIsHealthcheck ? {} : { detail: `Classified as "${thread.workflow}" instead of "healthcheck".` }),
+          detail: checks.workflowIsHealthcheck ? `[${date}]` : `[${date}] Classified as "${thread.workflow}" instead of "healthcheck".`,
           section: "pipeline" as const,
         },
         {
           id: "embedding-indexed",
           label: CHECK_LABELS.embeddingIndexed,
           status: checks.hasEmbedding ? "pass" : "fail",
-          ...(checks.hasEmbedding ? {} : { detail: embeddingDetail }),
+          detail: checks.hasEmbedding ? `[${date}]` : embeddingDetail,
           section: "pipeline" as const,
         },
       ],

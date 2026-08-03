@@ -345,13 +345,20 @@ export class ExternalExchangesApi {
           return err(c, 422, reason);
         }
 
-        // Connection test passed — persist updated fields
-        const updateFields: Record<string, unknown> = {};
-        if (jmapBody.data.jmapConfig.sessionUrl !== undefined) updateFields.sessionUrl = jmapBody.data.jmapConfig.sessionUrl;
-        if (jmapBody.data.jmapConfig.username !== undefined) updateFields.username = jmapBody.data.jmapConfig.username;
-        if (jmapBody.data.jmapConfig.password !== undefined) updateFields.encryptedPassword = encryptionManager.encrypt(jmapBody.data.jmapConfig.password);
+        // Connection test passed — persist the full merged config (activate() updates apiUrl, downloadUrl, jmapAccountId, inboxId in-place)
+        const encryptedPassword = jmapBody.data.jmapConfig.password !== undefined
+          ? encryptionManager.encrypt(jmapBody.data.jmapConfig.password)
+          : emx.jmapConfig.encryptedPassword;
 
-        const updateResult = await accountDb.updateExternalExchangeJmapConfig(accountId, emxId, updateFields);
+        const updateResult = await accountDb.updateExternalExchangeJmapConfig(accountId, emxId, {
+          sessionUrl: tempEmx.jmapConfig!.sessionUrl,
+          username: tempEmx.jmapConfig!.username,
+          encryptedPassword,
+          apiUrl: tempEmx.jmapConfig!.apiUrl,
+          downloadUrl: tempEmx.jmapConfig!.downloadUrl,
+          jmapAccountId: tempEmx.jmapConfig!.jmapAccountId,
+          inboxId: tempEmx.jmapConfig!.inboxId,
+        });
         if (updateResult.isErr()) { logger.error("Failed to update JMAP exchange", { code: "api.emx.patch.jmap_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
 
         // Re-activate if previously failed — connection test just proved creds work
@@ -401,14 +408,14 @@ export class ExternalExchangesApi {
         return err(c, 422, reason);
       }
 
-      // Connection test passed — persist updated fields
-      const updateFields: Record<string, unknown> = {};
-      if (body.imapConfig.host !== undefined) updateFields.host = body.imapConfig.host;
-      if (body.imapConfig.tlsConfig !== undefined) updateFields.tlsConfig = body.imapConfig.tlsConfig;
-      if (body.imapConfig.username !== undefined) updateFields.username = body.imapConfig.username;
-      if (body.imapConfig.password !== undefined) updateFields.encryptedPassword = encryptionManager.encrypt(body.imapConfig.password);
+      // Connection test passed — persist the full merged config
+      const encryptedPassword = body.imapConfig.password !== undefined
+        ? encryptionManager.encrypt(body.imapConfig.password)
+        : emx.imapConfig.encryptedPassword;
 
-      const updateResult = await accountDb.updateExternalExchangeImapConfig(accountId, emxId, updateFields);
+      const updateResult = await accountDb.updateExternalExchangeImapConfig(accountId, emxId, {
+        host: mergedHost, tlsConfig: mergedTlsConfig, username: mergedUsername, encryptedPassword,
+      });
       if (updateResult.isErr()) { logger.error("Failed to update exchange", { code: "api.emx.patch_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
 
       // Re-activate if previously failed — connection test just proved creds work

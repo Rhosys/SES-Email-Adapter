@@ -1649,30 +1649,15 @@ export class AccountDatabase {
     }
   }
 
-  async updateExternalExchangeImapConfig(accountId: string, emxId: string, fields: Record<string, unknown>): Promise<Result<ExternalMailExchange, DbError>> {
+  async updateExternalExchangeImapConfig(accountId: string, emxId: string, config: { host: string; tlsConfig: "TLS" | "DISABLED"; username: string; encryptedPassword: string }): Promise<Result<ExternalMailExchange, DbError>> {
     const now = DateTime.utc().toISO()!;
-    const names: Record<string, string> = { "#updatedAt": "updatedAt", "#imapConfig": "imapConfig" };
-    const values: Record<string, unknown> = { ":updatedAt": now };
-    const setParts = ["#updatedAt = :updatedAt"];
-
-    for (const [key, value] of Object.entries(fields)) {
-      if (value === undefined) continue;
-      const alias = `#imap_${key}`;
-      const valAlias = `:imap_${key}`;
-      names[alias] = key;
-      values[valAlias] = value;
-      setParts.push(`#imapConfig.${alias} = ${valAlias}`);
-    }
-
-    const expression = `SET ${setParts.join(", ")}`;
-
     try {
       const res = await dynamo.send(new UpdateCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `EMX#${emxId}` },
-        UpdateExpression: expression,
-        ExpressionAttributeNames: names,
-        ExpressionAttributeValues: values,
+        UpdateExpression: "SET #updatedAt = :updatedAt, #imapConfig = :config",
+        ExpressionAttributeNames: { "#updatedAt": "updatedAt", "#imapConfig": "imapConfig" },
+        ExpressionAttributeValues: { ":updatedAt": now, ":config": config },
         ReturnValues: "ALL_NEW",
       }));
       return ok(res.Attributes as ExternalMailExchange);
@@ -1681,30 +1666,15 @@ export class AccountDatabase {
     }
   }
 
-  async updateExternalExchangeJmapConfig(accountId: string, emxId: string, fields: Record<string, unknown>): Promise<Result<ExternalMailExchange, DbError>> {
+  async updateExternalExchangeJmapConfig(accountId: string, emxId: string, config: { sessionUrl: string; username: string; encryptedPassword: string; apiUrl: string; downloadUrl: string; jmapAccountId: string; inboxId: string }): Promise<Result<ExternalMailExchange, DbError>> {
     const now = DateTime.utc().toISO()!;
-    const names: Record<string, string> = { "#updatedAt": "updatedAt", "#jmapConfig": "jmapConfig" };
-    const values: Record<string, unknown> = { ":updatedAt": now };
-    const setParts = ["#updatedAt = :updatedAt"];
-
-    for (const [key, value] of Object.entries(fields)) {
-      if (value === undefined) continue;
-      const alias = `#jmap_${key}`;
-      const valAlias = `:jmap_${key}`;
-      names[alias] = key;
-      values[valAlias] = value;
-      setParts.push(`#jmapConfig.${alias} = ${valAlias}`);
-    }
-
-    const expression = `SET ${setParts.join(", ")}`;
-
     try {
       const res = await dynamo.send(new UpdateCommand({
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: `EMX#${emxId}` },
-        UpdateExpression: expression,
-        ExpressionAttributeNames: names,
-        ExpressionAttributeValues: values,
+        UpdateExpression: "SET #updatedAt = :updatedAt, #jmapConfig = :config",
+        ExpressionAttributeNames: { "#updatedAt": "updatedAt", "#jmapConfig": "jmapConfig" },
+        ExpressionAttributeValues: { ":updatedAt": now, ":config": config },
         ReturnValues: "ALL_NEW",
       }));
       return ok(res.Attributes as ExternalMailExchange);

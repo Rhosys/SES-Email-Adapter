@@ -530,7 +530,24 @@ export class ThreadDatabase {
     }
   }
 
-
+  /** List active threads created on or after `sinceDate` (ISO date string, e.g. "2026-07-28"), newest first. */
+  async listActiveThreadsSince(accountId: string, sinceDate: string): Promise<Result<Thread[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
+        TableName: SIGNALS_TABLE,
+        IndexName: "gsi1",
+        KeyConditionExpression: "gsi1pk = :pk AND gsi1sk >= :start",
+        ExpressionAttributeValues: {
+          ":pk": `ACCT#${accountId}`,
+          ":start": `LASTACT#active#${sinceDate}`,
+        },
+        ScanIndexForward: false,
+      }));
+      return ok((res.Items ?? []).map(i => hydrateThreadObject(i as Thread)));
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
 
   // ---------------------------------------------------------------------------
   // Embedding Cache (DynamoDB partial update for backfill/reindex)
