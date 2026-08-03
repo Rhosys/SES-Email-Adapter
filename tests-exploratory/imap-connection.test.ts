@@ -78,4 +78,22 @@ describe("IMAP connection (exploratory)", () => {
       await conn.logout();
     }
   });
+
+  it("fetches first 10 emails from UID 1 with subject and sender", async () => {
+    const conn = createConnection();
+
+    try {
+      await conn.connect();
+      const envelopes = await conn.fetchEnvelopes(1, 10);
+
+      console.log("--- First 10 Emails ---");
+      for (const msg of envelopes) {
+        console.log(`  UID ${msg.uid}: [${msg.from}] ${msg.subject}`);
+      }
+      expect(envelopes.length).toBeGreaterThan(0);
+      expect(envelopes.length).toBeLessThanOrEqual(10);
+    } finally {
+      await conn.logout();
+    }
+  });
 });

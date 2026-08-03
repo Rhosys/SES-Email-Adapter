@@ -1465,7 +1465,7 @@ export class AccountDatabase {
   // External Mail Exchanges (EMX)
   // ---------------------------------------------------------------------------
 
-  async createExternalExchange(accountId: string, data: { platform: ExternalMailExchange["platform"]; emailAddress: string; status: ExternalMailExchange["status"]; syncCursor?: string; expiresAt?: string; providerSubscriptionId?: string; errorReason?: string }): Promise<Result<ExternalMailExchange, DbError>> {
+  async createExternalExchange(accountId: string, data: { platform: ExternalMailExchange["platform"]; emailAddress: string; status: ExternalMailExchange["status"]; syncCursor: string; lastSyncAt: string; expiresAt?: string; providerSubscriptionId?: string; errorReason?: string }): Promise<Result<ExternalMailExchange, DbError>> {
     const now = DateTime.utc().toISO()!;
     const id = generateId("emx-");
     const item: ExternalMailExchange = {
@@ -1474,7 +1474,8 @@ export class AccountDatabase {
       platform: data.platform,
       emailAddress: data.emailAddress,
       status: data.status,
-      ...(data.syncCursor !== undefined ? { syncCursor: data.syncCursor } : {}),
+      syncCursor: data.syncCursor,
+      lastSyncAt: data.lastSyncAt,
       ...(data.expiresAt !== undefined ? { expiresAt: data.expiresAt } : {}),
       ...(data.providerSubscriptionId !== undefined ? { providerSubscriptionId: data.providerSubscriptionId } : {}),
       ...(data.errorReason !== undefined ? { errorReason: data.errorReason } : {}),
@@ -1496,7 +1497,8 @@ export class AccountDatabase {
     emailAddress: string;
     status: ExternalMailExchange["status"];
     imapConfig: { host: string; tlsConfig: "TLS" | "DISABLED"; username: string; encryptedPassword: string };
-    syncCursor?: string;
+    syncCursor: string;
+    lastSyncAt: string;
     nextSyncTime?: string;
     errorReason?: string;
   }): Promise<Result<ExternalMailExchange, DbError>> {
@@ -1509,7 +1511,8 @@ export class AccountDatabase {
       emailAddress: data.emailAddress,
       status: data.status,
       imapConfig: data.imapConfig,
-      ...(data.syncCursor !== undefined ? { syncCursor: data.syncCursor } : {}),
+      syncCursor: data.syncCursor,
+      lastSyncAt: data.lastSyncAt,
       ...(data.nextSyncTime !== undefined ? { nextSyncTime: data.nextSyncTime } : {}),
       ...(data.errorReason !== undefined ? { errorReason: data.errorReason } : {}),
       createdAt: now,
@@ -1532,7 +1535,8 @@ export class AccountDatabase {
     emailAddress: string;
     status: "active" | "activation_failed";
     jmapConfig: { sessionUrl: string; username: string; encryptedPassword: string; apiUrl: string; downloadUrl: string; jmapAccountId: string; inboxId: string };
-    syncCursor?: string;
+    syncCursor: string;
+    lastSyncAt: string;
     nextSyncTime?: string;
     errorReason?: string;
   }): Promise<Result<ExternalMailExchange, DbError>> {
@@ -1545,7 +1549,8 @@ export class AccountDatabase {
       emailAddress: data.emailAddress,
       status: data.status,
       jmapConfig: data.jmapConfig,
-      ...(data.syncCursor !== undefined ? { syncCursor: data.syncCursor } : {}),
+      syncCursor: data.syncCursor,
+      lastSyncAt: data.lastSyncAt,
       ...(data.nextSyncTime !== undefined ? { nextSyncTime: data.nextSyncTime } : {}),
       ...(data.errorReason !== undefined ? { errorReason: data.errorReason } : {}),
       createdAt: now,
@@ -1590,7 +1595,7 @@ export class AccountDatabase {
     }
   }
 
-  async updateExternalExchange(accountId: string, emxId: string, fields: Partial<Pick<ExternalMailExchange, "status" | "syncCursor" | "expiresAt" | "lastSyncAt" | "providerSubscriptionId" | "encryptionCertificateId" | "consecutiveFailures">> & { errorReason?: string | undefined }): Promise<Result<ExternalMailExchange, DbError>> {
+  async updateExternalExchange(accountId: string, emxId: string, fields: Partial<Pick<ExternalMailExchange, "status" | "syncCursor" | "expiresAt" | "lastSyncAt" | "nextSyncTime" | "providerSubscriptionId" | "encryptionCertificateId" | "consecutiveFailures">> & { errorReason?: string | undefined }): Promise<Result<ExternalMailExchange, DbError>> {
     const now = DateTime.utc().toISO()!;
     const names: Record<string, string> = { "#updatedAt": "updatedAt" };
     const values: Record<string, unknown> = { ":updatedAt": now };
@@ -1612,20 +1617,22 @@ export class AccountDatabase {
     }
 
     // GSI1 management: populate when active, remove otherwise
-    if (fields.status === "active" && fields.expiresAt) {
+    if (fields.status === "active" && (fields.expiresAt || fields.nextSyncTime)) {
+      const sortValue = fields.nextSyncTime ?? fields.expiresAt!;
       names["#gsi1pk"] = "gsi1pk";
       names["#gsi1sk"] = "gsi1sk";
       values[":gsi1pk"] = "EMX#active";
-      values[":gsi1sk"] = `${fields.expiresAt}#${emxId}`;
+      values[":gsi1sk"] = `${sortValue}#${emxId}`;
       setParts.push("#gsi1pk = :gsi1pk", "#gsi1sk = :gsi1sk");
     } else if (fields.status && fields.status !== "active") {
       names["#gsi1pk"] = "gsi1pk";
       names["#gsi1sk"] = "gsi1sk";
       removeParts.push("#gsi1pk", "#gsi1sk");
-    } else if (fields.expiresAt && !fields.status) {
-      // Renewal: update gsi1sk with new expiresAt (keep gsi1pk)
+    } else if ((fields.expiresAt || fields.nextSyncTime) && !fields.status) {
+      // Renewal: update gsi1sk with new time (keep gsi1pk)
+      const sortValue = fields.nextSyncTime ?? fields.expiresAt!;
       names["#gsi1sk"] = "gsi1sk";
-      values[":gsi1sk"] = `${fields.expiresAt}#${emxId}`;
+      values[":gsi1sk"] = `${sortValue}#${emxId}`;
       setParts.push("#gsi1sk = :gsi1sk");
     }
 

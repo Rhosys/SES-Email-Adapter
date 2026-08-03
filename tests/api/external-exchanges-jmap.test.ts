@@ -69,6 +69,7 @@ function makeAccountDb() {
     getExternalExchange: vi.fn().mockResolvedValue(ok(makeJmapEmx())),
     listExternalExchanges: vi.fn().mockResolvedValue(ok([makeJmapEmx()])),
     updateExternalExchangeJmapConfig: vi.fn().mockResolvedValue(ok(makeJmapEmx())),
+    updateExternalExchange: vi.fn().mockResolvedValue(ok(makeJmapEmx())),
     deleteExternalExchange: vi.fn().mockResolvedValue(ok(undefined)),
     createExternalExchange: vi.fn().mockResolvedValue(ok(makeJmapEmx())),
     getAliasByGlobalAddress: vi.fn().mockResolvedValue(ok(null)),

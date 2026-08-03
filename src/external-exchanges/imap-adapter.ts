@@ -105,6 +105,27 @@ export class ImapConnection {
     }
   }
 
+  async fetchEnvelopes(startUid: number, limit: number): Promise<Array<{ uid: number; subject: string; from: string }>> {
+    const lock = await this.client.getMailboxLock("INBOX");
+    try {
+      const results: Array<{ uid: number; subject: string; from: string }> = [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for await (const msg of this.client.fetch(`${startUid}:*`, { envelope: true, uid: true }) as AsyncIterable<any>) {
+        const envelope = msg.envelope;
+        const from = envelope?.from?.[0];
+        results.push({
+          uid: msg.uid as number,
+          subject: (envelope?.subject as string) || "(no subject)",
+          from: from ? `${from.name || ""} <${from.address || ""}>`.trim() : "(unknown)",
+        });
+        if (results.length >= limit) break;
+      }
+      return results;
+    } finally {
+      lock.release();
+    }
+  }
+
   async fetchRawMessage(uid: number): Promise<{ rawMime: Uint8Array; receivedAt: string } | undefined> {
     const lock = await this.client.getMailboxLock("INBOX");
     try {
