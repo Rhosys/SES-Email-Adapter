@@ -32,10 +32,6 @@
         <mj-text font-size="13px" color="{{theme.subtext}}" padding-top="24px">
           <strong>Account ID</strong>: {{accountId}}
         </mj-text>
-        <mj-divider border-color="{{theme.divider}}" border-width="1px" padding="16px 0" />
-        <mj-text font-size="12px" color="{{theme.overlay}}">
-          If you didn't request this, you can safely ignore this email. The verification link will expire.
-        </mj-text>
       </mj-column>
     </mj-section>
 

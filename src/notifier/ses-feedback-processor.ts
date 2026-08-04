@@ -8,7 +8,7 @@ import type { AccountDatabase } from "../database/account-database.js";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
-import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_THREAD_ID, TAG_HEALTHCHECK_ID } from "../email/ses-tags.js";
+import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_THREAD_ID, TAG_HEALTHCHECK_ID, TAG_PURPOSE } from "../email/ses-tags.js";
 
 // 7 days in seconds — soft bounces expire and can retry
 const SOFT_BOUNCE_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -84,12 +84,13 @@ export class SesFeedbackProcessor {
   private describeOrigin(feedback: SesFeedback): { process: string; isSystemError: boolean; healthcheckId?: string } {
     const tags = feedback.mail.tags ?? {};
     const healthcheckId = tags[TAG_HEALTHCHECK_ID];
-    if (healthcheckId || tags["purpose"] === "healthcheck") {
+    // Check TAG_PURPOSE for backward compat with in-flight messages
+    if (healthcheckId || tags[TAG_PURPOSE] === "healthcheck") {
       return { process: "healthcheck", isSystemError: true, ...(healthcheckId ? { healthcheckId } : {}) };
     }
     const type = tags[TAG_TYPE];
     if (type) return { process: type, isSystemError: false };
-    const purpose = tags["purpose"];
+    const purpose = tags[TAG_PURPOSE];
     if (purpose) return { process: purpose, isSystemError: false };
     return { process: "unknown", isSystemError: false };
   }

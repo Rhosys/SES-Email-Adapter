@@ -45,6 +45,19 @@ export interface HealthCheckValidation {
    * missing or the lookup errored.
    */
   rawChecks: ValidationChecks | null;
+  /**
+   * Diagnostic context when the healthcheck thread is not found. Contains the
+   * top 10 SYSTEM threads (by createdAt, newest first) and the DDB query used
+   * to find them. Present only on pipeline failure when thread is missing.
+   */
+  diagnostics?: HealthCheckDiagnostics;
+}
+
+export interface HealthCheckDiagnostics {
+  /** Top 10 SYSTEM threads returned by the query, sorted by createdAt descending. */
+  recentThreads: Array<{ id: string; createdAt: string; workflow: string }>;
+  /** The exact DynamoDB query (as JSON) used to look for healthcheck threads. */
+  ddbQuery: Record<string, unknown>;
 }
 
 export interface ValidationChecks {
@@ -54,7 +67,7 @@ export interface ValidationChecks {
 }
 
 export interface HealthcheckValidatorDeps {
-  threadDb: { listActiveThreadsSince(accountId: string, sinceDate: string): Promise<Result<Array<{ id: string; createdAt: string; workflow: string }>, DbError>> };
+  threadDb: { listActiveThreadsSince(accountId: string, sinceDate: string): Promise<Result<Array<{ id: string; createdAt: string; workflow: string; lastSignalAt?: string }>, DbError>> };
   searchDatabase: { hasEmbedding(threadId: string): Promise<Result<boolean, DbError>> };
   sesChecker: { canSendFrom(domain: string): Promise<{ verified: boolean; dkimEnabled: boolean; accountSendingEnabled: boolean; detail?: string }> };
   dnsChecker: { checkDomain(domain: Domain): Promise<DnsRecord[]> };
@@ -88,7 +101,7 @@ export class HealthcheckValidator {
 
     // Fetch active SYSTEM threads from the last 7 days (bounded query, single DDB call)
     const sinceDate = now.minus({ days: MAX_LOOKBACK_DAYS }).toFormat("yyyy-MM-dd");
-    let threads: Array<{ id: string; createdAt: string; workflow: string }>;
+    let threads: Array<{ id: string; createdAt: string; workflow: string; lastSignalAt?: string }>;
     try {
       const result = await this.deps.threadDb.listActiveThreadsSince(SYSTEM_ACCOUNT_ID, sinceDate);
       if (result.isErr()) {
@@ -111,16 +124,18 @@ export class HealthcheckValidator {
     // Collect pipeline checks for each failed day (with date in detail). Stop on first success.
     const pipelineChecks: HealthCheckItem[] = [];
     let rawChecks: ValidationChecks | null = null;
+    let diagnostics: HealthCheckDiagnostics | undefined;
     let yesterdayPassed = false;
 
     for (let daysBack = 1; daysBack <= MAX_LOOKBACK_DAYS; daysBack++) {
       const date = now.minus({ days: daysBack }).toFormat("yyyy-MM-dd");
-      const dayResult = await this.validateDay(date, threads);
+      const dayResult = await this.validateDay(date, threads, { sinceDate });
 
       for (const check of dayResult.checks) {
         pipelineChecks.push(check);
       }
       rawChecks = dayResult.rawChecks;
+      if (dayResult.diagnostics) diagnostics = dayResult.diagnostics;
 
       if (dayResult.status === "pass") {
         if (daysBack === 1) yesterdayPassed = true;
@@ -131,7 +146,7 @@ export class HealthcheckValidator {
     const allInfraPassed = infraChecks.every(c => c.status === "pass");
     const overallStatus: HealthCheckStatus = yesterdayPassed && allInfraPassed ? "pass" : "fail";
 
-    return { checkedDate: yesterday, checkedAt, status: overallStatus, rawChecks, checks: [...infraChecks, ...pipelineChecks] };
+    return { checkedDate: yesterday, checkedAt, status: overallStatus, rawChecks, checks: [...infraChecks, ...pipelineChecks], ...(diagnostics ? { diagnostics } : {}) };
   }
 
   async validate(date: string): Promise<HealthCheckValidation> {
@@ -146,7 +161,7 @@ export class HealthcheckValidator {
 
     // Fetch threads for just this single day (use a 2-day window to cover edge cases)
     const sinceDate = DateTime.fromISO(date).minus({ days: 1 }).toFormat("yyyy-MM-dd");
-    let threads: Array<{ id: string; createdAt: string; workflow: string }>;
+    let threads: Array<{ id: string; createdAt: string; workflow: string; lastSignalAt?: string }>;
     try {
       const result = await this.deps.threadDb.listActiveThreadsSince(SYSTEM_ACCOUNT_ID, sinceDate);
       if (result.isErr()) {
@@ -167,25 +182,61 @@ export class HealthcheckValidator {
       return { ...base, status: "unknown", rawChecks: null, checks: [...infraChecks, ...this.errorChecks("Validation threw an unexpected error.")] };
     }
 
-    const dayResult = await this.validateDay(date, threads);
+    const dayResult = await this.validateDay(date, threads, { sinceDate });
     const allInfraPassed = infraChecks.every(c => c.status === "pass");
     const status: HealthCheckStatus = dayResult.status === "pass" && allInfraPassed ? "pass" : dayResult.status === "unknown" ? "unknown" : "fail";
 
-    return { ...base, status, rawChecks: dayResult.rawChecks, checks: [...infraChecks, ...dayResult.checks] };
+    return { ...base, status, rawChecks: dayResult.rawChecks, checks: [...infraChecks, ...dayResult.checks], ...(dayResult.diagnostics ? { diagnostics: dayResult.diagnostics } : {}) };
   }
 
-  private async validateDay(date: string, threads: Array<{ id: string; createdAt: string; workflow: string }>): Promise<{ status: HealthCheckStatus; rawChecks: ValidationChecks | null; checks: HealthCheckItem[] }> {
+  private async validateDay(date: string, threads: Array<{ id: string; createdAt: string; workflow: string; lastSignalAt?: string }>, queryContext?: { sinceDate: string }): Promise<{ status: HealthCheckStatus; rawChecks: ValidationChecks | null; checks: HealthCheckItem[]; diagnostics?: HealthCheckDiagnostics }> {
+    // Primary: find a healthcheck thread whose lastSignalAt falls on the target date (covers
+    // the case where the same thread is reused across days via vector similarity matching).
+    // Fallback: find by createdAt for newly-created threads.
+    const activeOnDay = threads.filter((t) => (t.lastSignalAt ?? t.createdAt).slice(0, 10) === date);
     const createdOnDay = threads.filter((t) => t.createdAt.slice(0, 10) === date);
-    const thread = createdOnDay.find((t) => t.workflow === "healthcheck") ?? createdOnDay[0];
+    const candidatePool = activeOnDay.length > 0 ? activeOnDay : createdOnDay;
+    const thread = candidatePool.find((t) => t.workflow === "healthcheck") ?? candidatePool[0];
 
     if (!thread) {
       this.deps.logger.error(`Healthcheck thread not found for ${date}.`, {
         code: "healthcheck.thread_not_found",
         date,
+        recentThreads: threads.slice(0, 10).map(t => ({ id: t.id, createdAt: t.createdAt, workflow: t.workflow })),
       });
+      // TODO: also fallback to running a realtime log insights query against the log insights
+      // for the cloudwatch group (/aws/lambda/ses-email-adapter) for the time period in the last
+      // 30 hours to see if we received any deliverability feedback that way, a successful delivery
+      // of the message. We should be able to search for the healthcheck header tag we stuck in
+      // the email (X-Numaeel-Healthcheck-Id).
+      this.deps.logger.info("Diagnostic hint: run a CloudWatch Log Insights query against /aws/lambda/ses-email-adapter for the last 30h filtering on X-Numaeel-Healthcheck-Id to check for SES delivery feedback.", {
+        code: "healthcheck.thread_not_found_hint",
+        date,
+      });
+
+      const sinceDate = queryContext?.sinceDate ?? date;
+      const diagnostics: HealthCheckDiagnostics = {
+        recentThreads: threads
+          .slice()
+          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .slice(0, 10)
+          .map(t => ({ id: t.id, createdAt: t.createdAt, workflow: t.workflow })),
+        ddbQuery: {
+          TableName: "signals",
+          IndexName: "gsi1",
+          KeyConditionExpression: "gsi1pk = :pk AND gsi1sk >= :start",
+          ExpressionAttributeValues: {
+            ":pk": `ACCT#${SYSTEM_ACCOUNT_ID}`,
+            ":start": `LASTACT#active#${sinceDate}`,
+          },
+          ScanIndexForward: false,
+        },
+      };
+
       return {
         status: "fail",
         rawChecks: null,
+        diagnostics,
         checks: [
           { id: "thread-created", label: CHECK_LABELS.threadCreated, status: "fail", detail: `[${date}] No healthcheck thread was created.`, section: "pipeline" as const },
           { id: "workflow-classified", label: CHECK_LABELS.workflowClassified, status: "unknown", detail: `[${date}]`, section: "pipeline" as const },

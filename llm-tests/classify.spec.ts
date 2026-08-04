@@ -74,7 +74,7 @@ describe("Signal Classifier — LLM integration tests", () => {
       const input = makeInput({
         from: "noreply@github.com",
         subject: "Your GitHub verification code",
-        body: "Your verification code is 847291. This code expires in 10 minutes. If you didn't request this code, you can safely ignore this email.",
+        body: "Your verification code is 847291. This code expires in 10 minutes.",
         headers: { "authentication-results": "spf=pass dkim=pass dmarc=pass" },
       });
       const result = await classifier.classify(input);

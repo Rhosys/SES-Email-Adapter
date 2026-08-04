@@ -42,6 +42,14 @@ const HealthCheckValidationResponse = z.object({
   checkedDate: z.string(),
   checkedAt: z.string(),
   checks: z.array(HealthCheckItemSchema),
+  diagnostics: z.object({
+    recentThreads: z.array(z.object({
+      id: z.string(),
+      createdAt: z.string(),
+      workflow: z.string(),
+    })),
+    ddbQuery: z.record(z.string(), z.unknown()),
+  }).optional(),
 });
 
 export class AdminApi {
@@ -95,6 +103,7 @@ export class AdminApi {
         checkedDate: validation.checkedDate,
         checkedAt: validation.checkedAt,
         checks: validation.checks,
+        ...(validation.diagnostics ? { diagnostics: validation.diagnostics } : {}),
       }, 200);
     });
   }
