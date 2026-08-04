@@ -118,7 +118,10 @@ export class EmailService {
       }
     }
 
-    const emailTags = this.sanitizeTags(opts.tags);
+    // Merge tags: all custom headers are auto-promoted to SES tags (for feedback correlation).
+    // Explicit tags are added after; headers win on name conflict (deduped).
+    const mergedTags = this.mergeHeadersIntoTags(opts.headers, opts.tags);
+    const emailTags = this.sanitizeTags(mergedTags);
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
         FromEmailAddress: fromAddress,
@@ -164,6 +167,38 @@ export class EmailService {
     } catch (e) {
       return this.classifyError(e, opts);
     }
+  }
+
+  /**
+   * Merge custom headers into tags. All custom MIME headers (X-Numaeel-*) are
+   * auto-promoted to SES tags so they appear in feedback notifications. Explicit
+   * tags that are SES-only (never MIME headers) are appended after. Deduped by
+   * Name — headers win on conflict.
+   */
+  private mergeHeadersIntoTags(
+    headers: Array<{ Name: string; Value: string }> | undefined,
+    tags: Array<{ Name: string; Value: string }> | undefined,
+  ): Array<{ Name: string; Value: string }> | undefined {
+    if (!headers?.length && !tags?.length) return undefined;
+    const seen = new Set<string>();
+    const merged: Array<{ Name: string; Value: string }> = [];
+    // Headers first — they take priority on name conflict
+    for (const h of headers ?? []) {
+      const key = h.Name.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(h);
+      }
+    }
+    // Then explicit tags (SES-only, not MIME headers)
+    for (const t of tags ?? []) {
+      const key = t.Name.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(t);
+      }
+    }
+    return merged.length > 0 ? merged : undefined;
   }
 
   private classifyError(e: unknown, opts: EmailSendOptions | EmailRawOptions): Result<{ messageId: string }, EmailServiceError> {

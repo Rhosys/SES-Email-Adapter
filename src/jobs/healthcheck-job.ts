@@ -52,11 +52,11 @@ export class HealthcheckJob {
         subject,
         textBody: text,
         htmlBody: html,
-        // TAG_PURPOSE groups healthcheck sends; the healthcheck-id tag lets us
-        // correlate a bounce/complaint back to a specific day's send (SES echoes
-        // message tags in feedback notifications). Tag values must be
-        // [A-Za-z0-9_-], so we use the id without the `@domain` suffix.
-        tags: [
+        // TAG_PURPOSE and TAG_HEALTHCHECK_ID are custom MIME headers — they appear in the
+        // delivered email AND are auto-promoted to SES tags by EmailService for feedback
+        // correlation. Tag values must be [A-Za-z0-9_-], so we use the id without the
+        // `@domain` suffix.
+        headers: [
           { Name: TAG_PURPOSE, Value: "healthcheck" },
           { Name: TAG_HEALTHCHECK_ID, Value: `healthcheck-${today}` },
         ],

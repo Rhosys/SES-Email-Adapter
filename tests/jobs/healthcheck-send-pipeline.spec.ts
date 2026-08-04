@@ -218,6 +218,10 @@ describe("Healthcheck send pipeline — SES interface contract", () => {
             Text: { Data: expect.stringContaining("Pipeline Healthcheck"), Charset: "UTF-8" },
             Html: { Data: expect.any(String), Charset: "UTF-8" },
           },
+          Headers: [
+            { Name: "X-Numaeel-Purpose", Value: "healthcheck" },
+            { Name: "X-Numaeel-Healthcheck-Id", Value: `healthcheck-${TODAY}` },
+          ],
         },
       },
       ConfigurationSetName: CONFIG_SET,
