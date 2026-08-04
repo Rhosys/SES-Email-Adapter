@@ -21,7 +21,7 @@ export class EncryptionManager {
     const encoded = Buffer.concat([iv, authTag, encrypted]).toString("base64");
     // Round-trip verify — decrypt inline (independent decipher instance) to catch encoding bugs at write time
     const buf = Buffer.from(encoded, "base64");
-    const decipher = createDecipheriv("aes-256-gcm", this.key!, buf.subarray(0, 12));
+    const decipher = createDecipheriv("aes-256-gcm", this.key!, buf.subarray(0, 12), { authTagLength: 16 });
     decipher.setAuthTag(buf.subarray(12, 28));
     const verified = Buffer.concat([decipher.update(buf.subarray(28)), decipher.final()]).toString("utf-8");
     if (verified !== plaintext) {
@@ -35,7 +35,7 @@ export class EncryptionManager {
     const iv = buf.subarray(0, 12);
     const authTag = buf.subarray(12, 28);
     const ciphertext = buf.subarray(28);
-    const decipher = createDecipheriv("aes-256-gcm", this.key!, iv);
+    const decipher = createDecipheriv("aes-256-gcm", this.key!, iv, { authTagLength: 16 });
     decipher.setAuthTag(authTag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf-8");
   }
