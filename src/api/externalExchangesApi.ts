@@ -244,7 +244,9 @@ export class ExternalExchangesApi {
       }
 
       // --- OAuth branch (Gmail/Outlook) ---
-      const body = CreateExternalExchangeRequest.parse(rawBody);
+      const oauthBody = CreateExternalExchangeRequest.safeParse(rawBody);
+      if (!oauthBody.success) return err(c, 400, "Invalid request body");
+      const body = oauthBody.data;
 
       const adapter = adapters[body.platform];
       if (!adapter) return err(c, 422, "Unsupported platform");
