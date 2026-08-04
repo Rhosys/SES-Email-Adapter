@@ -33,7 +33,6 @@ export interface IOnboardingThreadDb {
 // ---------------------------------------------------------------------------
 
 const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? ""
-const APP_BASE_URL = process.env["APP_BASE_URL"] ?? ""
 
 // ---------------------------------------------------------------------------
 // OnboardingTaskHandler
@@ -231,9 +230,9 @@ export class OnboardingTaskHandler {
       domainIcon: progress.domainAdded ? "✅" : "❌",
       senderIcon: progress.senderSetupComplete ? "✅" : "❌",
       emailsIcon: progress.emailsReceived ? "✅" : "❌",
-      domain: APP_BASE_URL.replace(/^https?:\/\//, ""),
+      domain: this.emailService.appDomain,
       emailType: "onboarding",
-      appBaseUrl: APP_BASE_URL,
+      appBaseUrl: this.emailService.appBaseUrl,
     });
 
     // 11. Build tags
@@ -245,7 +244,7 @@ export class OnboardingTaskHandler {
     });
 
     // 12. Send via EmailService — terminal operation, no DB writes after send
-    const textBody = `${emailContent.textBody}\n\nView your account: ${APP_BASE_URL}/a/`;
+    const textBody = `${emailContent.textBody}\n\nView your account: ${this.emailService.appBaseUrl}/a/`;
     const sendResult = await this.emailService.send({
       to: email,
       subject: "The Next Step",

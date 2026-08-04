@@ -84,7 +84,6 @@ export async function createHarness(): Promise<IntegrationHarness> {
     jobDispatcher: { dispatchReindex: async () => {}, dispatchSegment: async () => {} } as never,
     draftSendDispatcher: { dispatch: async () => ok(undefined) } as never,
     accountCreationStarter: { start: async () => {} },
-    appBaseUrl: 'http://localhost',
     contentCdnBaseUrl: 'https://cdn.test',
     astValidator: { validateAstBatch: async () => ({ success: true, purpose: 'validate_ast_batch', results: [] }) } as never,
     billingHandler: new BillingHandler(),

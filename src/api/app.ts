@@ -92,7 +92,6 @@ export interface AppDeps {
   signalReprocessor: SignalReprocessor;
   draftSendDispatcher: DraftSendDispatcher;
   accountCreationStarter: { start(accountId: string, email: string): Promise<void> };
-  appBaseUrl: string;
   contentCdnBaseUrl: string;
   astValidator: UserCodeExecutorClient;
   billingHandler: BillingHandler;
@@ -114,7 +113,7 @@ export interface AppDeps {
   signalQueue: SignalQueue;
 }
 
-export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, appBaseUrl, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, emailContentStore, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator, gmailProvider, outlookProvider, adapters, encryptionManager, getProviderToken, signalQueue }: AppDeps) {
+export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, emailContentStore, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator, gmailProvider, outlookProvider, adapters, encryptionManager, getProviderToken, signalQueue }: AppDeps) {
   type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
   const app = new OpenAPIHono<AppEnv>();
 
@@ -279,7 +278,7 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
   // -------------------------------------------------------------------------
   // Route registrations
   // -------------------------------------------------------------------------
-  new AccountsApi(accountDb, access, logger, accountCreationStarter, emailService, appBaseUrl, triggerDigest).register(app, helpers);
+  new AccountsApi(accountDb, access, logger, accountCreationStarter, emailService, triggerDigest).register(app, helpers);
   new ThreadsApi(threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, emailContentStore, contentCdnBaseUrl, embeddingGenerator, threadMatcher, signalQueue).register(app, helpers);
   new ResourcesApi(resourceDb, logger, contentCdnBaseUrl).register(app, helpers);
   new SignalsApi(threadDb, accountDb, logger, postApprovalCalendarDeps, contentCdnBaseUrl).register(app, helpers);

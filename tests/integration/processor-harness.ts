@@ -170,7 +170,6 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     jobDispatcher: { dispatchReindex: async () => {}, dispatchSegment: async () => {} } as never,
     draftSendDispatcher: { dispatch: async () => ok(undefined) } as never,
     accountCreationStarter: { start: async () => {} },
-    appBaseUrl: 'http://localhost:3000',
     contentCdnBaseUrl: CONTENT_CDN_BASE_URL,
     astValidator: { validateAstBatch: async () => ({ success: true, purpose: 'validate_ast_batch', results: [] }) } as never,
     billingHandler: new BillingHandler(),

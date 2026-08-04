@@ -49,7 +49,6 @@ export interface IDigestWorkerDeps {
 // ---------------------------------------------------------------------------
 
 const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? ""
-const APP_BASE_URL = process.env["APP_BASE_URL"] ?? ""
 const API_DOMAIN = process.env["API_DOMAIN"] ?? ""
 
 export class DigestWorker {
@@ -125,9 +124,9 @@ export class DigestWorker {
       quarantineCount,
       hasQuarantine: quarantineCount > 0,
       unsubscribeCode,
-      domain: APP_BASE_URL.replace(/^https?:\/\//, ""),
+      domain: emailService.appDomain,
       emailType: "digest",
-      appBaseUrl: APP_BASE_URL,
+      appBaseUrl: emailService.appBaseUrl,
     })
 
     // 9. Build tags and headers
@@ -141,7 +140,7 @@ export class DigestWorker {
     const headers = buildUnsubscribeHeaders(accountId, API_DOMAIN, unsubscribeCode)
 
     // 10. Send via EmailService — terminal operation, no post-send writes
-    const textBody = `Your ${frequency} Numaeel digest is ready. ${threads.length} active conversations.${quarantineCount > 0 ? ` ${quarantineCount} emails awaiting review in quarantine.` : ""} View your dashboard: ${APP_BASE_URL}/a/`
+    const textBody = `Your ${frequency} Numaeel digest is ready. ${threads.length} active conversations.${quarantineCount > 0 ? ` ${quarantineCount} emails awaiting review in quarantine.` : ""} View your dashboard: ${emailService.appBaseUrl}/a/`
     const sendResult = await emailService.send({
       to: target.target,
       subject,

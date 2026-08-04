@@ -163,8 +163,6 @@ export class CompositeRoot {
 
     const externalEmailHandler = new ReplySenderService(emailService, logger);
 
-    const APP_BASE_URL = process.env["APP_BASE_URL"] ?? "";
-
     const API_DOMAIN = process.env["API_DOMAIN"] ?? "";
     const AUTHRESS_KMS_KEY_ARN = process.env["AUTHRESS_KMS_KEY_ARN"] ?? "";
     const AUTHRESS_KEY_ID = process.env["AUTHRESS_KEY_ID"] ?? "";
@@ -173,7 +171,7 @@ export class CompositeRoot {
     const hmacSecretGenerator = new HmacSecretGenerator(kms);
 
     const emailSignalStore = new EmailSignalStore(s3, S3_BUCKET);
-    const forwardingService = new ForwardingService(emailService, accountDb, emailSignalStore, APP_BASE_URL, MAIL_DOMAIN, logger);
+    const forwardingService = new ForwardingService(emailService, accountDb, emailSignalStore, MAIL_DOMAIN, logger);
 
     const draftSendDispatcher = new DraftSendDispatcher(signalQueue, logger);
 
@@ -419,7 +417,6 @@ export class CompositeRoot {
       signalReprocessor: processor,
       draftSendDispatcher,
       accountCreationStarter,
-      appBaseUrl: APP_BASE_URL,
       contentCdnBaseUrl: CONTENT_CDN_BASE_URL,
       astValidator: new LambdaUserCodeExecutor(lambda, USER_CODE_EXECUTOR_ARN, logger),
       billingHandler: new BillingHandler(),

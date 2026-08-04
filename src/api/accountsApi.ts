@@ -61,12 +61,11 @@ export class AccountsApi {
     private readonly logger: Logger,
     private readonly accountCreationStarter: { start(accountId: string, email: string): Promise<void> },
     private readonly emailService: EmailService,
-    private readonly appBaseUrl: string,
     private readonly triggerDigest: (accountId: string) => Promise<void>,
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { accountDb, access, logger, accountCreationStarter, emailService, appBaseUrl } = this;
+    const { accountDb, access, logger, accountCreationStarter, emailService } = this;
 
     app.openapi(route({
       method: "get",
@@ -280,16 +279,16 @@ export class AccountsApi {
         return err(c, 422, "Failed to create invite", "INVITE_CREATION_FAILED");
       }
       const { inviteId } = inviteResult.value;
-      const inviteUrl = `${appBaseUrl}/a/registration?inviteId=${inviteId}`;
+      const inviteUrl = `${emailService.appBaseUrl}/a/registration?inviteId=${inviteId}`;
       const accountResult = await accountDb.getAccount(accountId);
       if (accountResult.isErr()) { logger.error("Failed to get account for invite.", { code: "api.users.invite.get_account_failed", accountId, error: accountResult.error }); return err(c, 500, "Internal Server Error"); }
       const account = accountResult.value;
       const accountName = account?.name ?? accountId;
       const fullDate = DateTime.utc().toISODate()!;
       const triggerId = `invite-${inviteId}`;
-      const htmlBody = await renderTemplate("team-invite", { accountName, inviteUrl, domain: appBaseUrl.replace(/^https?:\/\//, ""), emailType: "team-invite" });
+      const htmlBody = await renderTemplate("team-invite", { accountName, inviteUrl, domain: emailService.appDomain, emailType: "team-invite" });
       const tags = buildEmailTags({ accountId, fullDate, invocationId: logger.getInvocationId(), triggerId });
-      const textBody = `You've been invited to join ${accountName} on Numaeel.\n\nAccept your invite: ${inviteUrl}\n\nView your account: ${appBaseUrl}/a/`;
+      const textBody = `You've been invited to join ${accountName} on Numaeel.\n\nAccept your invite: ${inviteUrl}\n\nView your account: ${emailService.appBaseUrl}/a/`;
       const sendResult = await emailService.send({ to: body.email, subject: `You've been invited to join ${accountName} on Numaeel`, textBody, htmlBody, tags, fromOverride: `"Numaeel" <noreply@${MAIL_DOMAIN}>`, accountId: emailService.platformTenant });
       if (sendResult.isErr()) {
         if (sendResult.error.kind === "permanent_ses_error") {

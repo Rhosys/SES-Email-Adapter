@@ -123,7 +123,6 @@ function makeApp(threadDb: ReturnType<typeof makeThreadDb>, accountDb?: ReturnTy
     jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never,
     draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never,
     accountCreationStarter: { start: vi.fn() },
-    appBaseUrl: "http://localhost",
     contentCdnBaseUrl: "https://cdn.test",
     astValidator: { validateAstBatch: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast_batch", results: [] }) } as never,
     billingHandler: new BillingHandler(),

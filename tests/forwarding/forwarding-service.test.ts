@@ -47,7 +47,6 @@ describe("ForwardingService.sendVerification — permanent SES error", () => {
       emailService,
       {} as IForwardingTargetStore,
       {} as IEmailSignalStore,
-      "https://app.test",
       "mail.test.com",
       logger,
     );

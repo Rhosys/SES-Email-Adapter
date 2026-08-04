@@ -57,6 +57,12 @@ export class EmailService {
   /** The SES tenant name for platform-originated sends (verification, onboarding, invites). */
   get platformTenant(): string { return this.platformTenantName; }
 
+  /** Full app URL including protocol — e.g. `https://email.rhosys.cloud`. Used for email CTAs. */
+  get appBaseUrl(): string { return process.env["APP_BASE_URL"] ?? ""; }
+
+  /** App domain without protocol — e.g. `email.rhosys.cloud`. Used for logo URLs and footer links. */
+  get appDomain(): string { return this.appBaseUrl.replace(/^https?:\/\//, ""); }
+
   /**
    * Sanitize SES message tags at the boundary: names and values may only contain
    * [A-Za-z0-9_-] and must be ≤ 256 chars, or SES rejects the whole send. We strip

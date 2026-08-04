@@ -44,7 +44,7 @@ export class HealthcheckJob {
       timestamp: DateTime.utc().toISO()!,
       validation,
     };
-    const { html, text } = await renderHealthcheckEmail(templateData, this.deps.mailDomain);
+    const { html, text } = await renderHealthcheckEmail(templateData, this.deps.emailService.appDomain, this.deps.mailDomain);
 
     try {
       const result = await this.deps.emailService.send({
@@ -120,7 +120,7 @@ function iconFor(status: HealthCheckItem["status"]): string {
   return status === "pass" ? "✓" : status === "fail" ? "✗" : "?";
 }
 
-export async function renderHealthcheckEmail(data: HealthcheckTemplateData, mailDomain: string): Promise<{ html: string; text: string }> {
+export async function renderHealthcheckEmail(data: HealthcheckTemplateData, appDomain: string, mailDomain: string): Promise<{ html: string; text: string }> {
   const checks = data.validation.checks;
 
   const templateChecks = checks.map((c) => ({
@@ -138,7 +138,7 @@ export async function renderHealthcheckEmail(data: HealthcheckTemplateData, mail
     invocationId: data.invocationId,
     containerId: data.containerId,
     timestamp: data.timestamp,
-    domain: mailDomain,
+    domain: appDomain,
     checks: templateChecks,
     hasChecks: templateChecks.length > 0,
     overallStatus: data.validation.status,

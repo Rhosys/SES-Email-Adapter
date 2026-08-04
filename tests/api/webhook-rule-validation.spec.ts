@@ -192,7 +192,6 @@ describe("API — webhook action type rejected from rule creation", () => {
       jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never,
       draftSendDispatcher: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as never,
       accountCreationStarter: { start: vi.fn() },
-      appBaseUrl: "http://localhost",
       contentCdnBaseUrl: "https://cdn.test",
       billingHandler: new BillingHandler(),
       astValidator,
