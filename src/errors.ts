@@ -22,7 +22,10 @@ export type ReindexSegmentProcessingError = { kind: "reindex_segment_processing_
 function toError(cause: unknown): Error {
   if (cause instanceof Error) return cause;
   if (typeof cause === "string") return new Error(cause);
-  return new Error("");
+  if (cause && typeof cause === "object" && "message" in cause && typeof (cause as { message: unknown }).message === "string") {
+    return new Error((cause as { message: string }).message);
+  }
+  return new Error(JSON.stringify(cause));
 }
 
 // A schema mismatch is a Postgres "missing object" error — the code expects a

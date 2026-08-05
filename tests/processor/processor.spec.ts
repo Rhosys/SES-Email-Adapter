@@ -1504,10 +1504,14 @@ describe("SignalProcessor", () => {
       expect(threadDb.updateThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, OLD_THREAD, "active", "1970-01-01T00:00:00.000Z", {});
     });
 
-    it("does not touch the old thread when the signal stays on it", async () => {
+    it("does not update thread recency when the signal stays on it and lastSignalAt is unchanged", async () => {
       const sameThreadSignal = { ...reassignedSignal, threadId: OLD_THREAD };
       (threadDb as unknown as { getSignalByMessageId: ReturnType<typeof vi.fn> }).getSignalByMessageId =
         vi.fn().mockReturnValue(Promise.resolve(ok(sameThreadSignal)));
+      // repairThreadRecency will list signals and find the max matches thread.lastSignalAt — no update
+      vi.mocked(threadDb.listSignals).mockReturnValue(Promise.resolve(ok({ items: [
+        { data: { receivedAt: "2024-05-01T00:00:00Z" } },
+      ] } as never)));
 
       const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "sgn-reprocess", OLD_THREAD);
 

@@ -112,7 +112,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
       // INSERT
       const upsertInput = calls[2]!.args[0].input as { sql?: string; transactionId?: string; parameters?: unknown[] };
       expect(upsertInput.sql).toContain("thread_embeddings");
-      expect(upsertInput.sql).not.toContain("on conflict");
+      expect(upsertInput.sql).toContain("on conflict");
       expect(upsertInput.transactionId).toBe("txn-1");
 
       // COMMIT
@@ -562,7 +562,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
 
         // Verify the SQL uses INSERT with the correct table
         expect(firstUpsert.sql).toContain("thread_embeddings");
-        expect(firstUpsert.sql).not.toContain("on conflict");
+        expect(firstUpsert.sql).toContain("on conflict");
 
         // Verify each upsert was committed (not rolled back)
         const commitCalls = rdsMock.commandCalls(CommitTransactionCommand);
@@ -634,7 +634,7 @@ describe("MultiClusterAuroraWriterImpl", () => {
         expect(calls[2]!.args[0]).toBeInstanceOf(ExecuteStatementCommand);
         expect(upsertInput.transactionId).toBe(txnId);
         expect(upsertInput.sql).toContain("thread_embeddings");
-        expect(upsertInput.sql).not.toContain("on conflict");
+        expect(upsertInput.sql).toContain("on conflict");
 
         // Call 3: CommitTransaction with the same transactionId
         const commitInput = calls[3]!.args[0].input as {

@@ -39,8 +39,9 @@ export async function handler(
   try {
   return await handlerInner(event, _context);
   } catch (e) {
-    logger.critical("Unhandled top-level exception in Lambda handler. This should never happen — all code paths must handle their own errors.", { code: "handler.unhandled_exception", error: e, event });
-    return { statusCode: 500, headers: { "x-request-id": compositeId }, body: JSON.stringify({ title: "Internal Server Error", errorId: compositeId }) };
+    const stack = e instanceof Error ? e.stack ?? e.message : String(e);
+    logger.error(`Unhandled top-level exception: ${stack}`, { code: "handler.unhandled_exception", error: e, event });
+    return { statusCode: 500, headers: { "x-request-id": compositeId }, body: JSON.stringify({ title: `Internal Server Error: ${stack}`, errorId: compositeId }) };
   }
 }
 

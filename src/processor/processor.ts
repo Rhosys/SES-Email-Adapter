@@ -1737,7 +1737,12 @@ export class SignalProcessor {
     };
 
     const result = await this.processInbound(msg, 1, { force: true, unsafeSkipDmarc: true, forceSignalId: existing.id });
-    if (result.isErr()) return err(processorError(result.error));
+    if (result.isErr()) {
+      // Best-effort recency repair even on failure — a previous 504 may have saved the thread
+      // with updated lastSignalAt while the signal save never completed.
+      await this.repairThreadRecency(accountId, threadId);
+      return err(processorError(result.error));
+    }
 
     // Re-fetch by primary key — reprocessing may reassign the signal to a different
     // thread, so the GSI1-based getSignalById (scoped to the original threadId) would miss it.
@@ -1745,14 +1750,9 @@ export class SignalProcessor {
     if (freshResult.isErr()) return err(processorError(freshResult.error));
     if (!freshResult.value) return err(processorError("Signal not found after reprocess"));
 
-    // If reprocessing moved the signal off its original thread (to a new thread, or to the
-    // quarantine/block partition where it no longer carries a threadId), the original thread's
-    // lastSignalAt may now point at a signal it no longer holds. Recompute it from the remaining
-    // signals; if none remain, fall back to the Unix epoch (lastSignalAt is part of the GSI1 sort
-    // key and cannot be null). Best-effort — never fail the reprocess on a recency-repair error.
-    if (freshResult.value.threadId !== threadId) {
-      await this.repairThreadRecency(accountId, threadId);
-    }
+    // Always repair the source thread's recency — even if the signal stayed on the same thread,
+    // a partial prior invocation (504) may have left lastSignalAt pointing at stale data.
+    await this.repairThreadRecency(accountId, threadId);
 
     return ok(freshResult.value);
   }

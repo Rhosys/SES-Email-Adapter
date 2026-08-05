@@ -416,6 +416,14 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
               embedding: toVector(opts.embedding),
               updatedAt: sql`now()`,
               expiresAt: opts.ttl != null ? sql`to_timestamp(${opts.ttl})` : sql`now() + interval '2 years'`,
+            })
+            .onConflictDoUpdate({
+              target: [threadEmbeddings.signalId, threadEmbeddings.threadId, threadEmbeddings.accountId, threadEmbeddings.recipientAddress],
+              set: {
+                embedding: toVector(opts.embedding),
+                updatedAt: sql`now()`,
+                expiresAt: opts.ttl != null ? sql`to_timestamp(${opts.ttl})` : sql`now() + interval '2 years'`,
+              },
             });
         });
       }, this.logger, "upsertEmbedding");
