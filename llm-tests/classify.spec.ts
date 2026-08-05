@@ -86,6 +86,23 @@ describe("Signal Classifier — LLM integration tests", () => {
       assertCommonOutput(output);
     });
 
+    it("auth — confirmation code labelled as 'verify' must be otp with code extracted", async () => {
+      const input = makeInput({
+        from: "no-reply@infomaniak.com",
+        subject: "Infomaniak confirmation code: JJ4-TY8",
+        body: "Confirm your email address\n\nHere is your confirmation code. Copy it into the open window of your browser.\n\nJJ4-TY8\n\nIf you did not request to receive this email, contact our support.",
+        headers: { "authentication-results": "spf=pass dkim=pass dmarc=pass" },
+      });
+      const result = await classifier.classify(input);
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("auth");
+      expect((output.workflowData as { authType: string }).authType).toBe("otp");
+      expect((output.workflowData as { code?: string }).code).toBe("JJ4-TY8");
+      expect((output.workflowData as { service: string }).service.toLowerCase()).toContain("infomaniak");
+      assertCommonOutput(output);
+    });
+
     it("conversation — personal email", async () => {
       const input = makeInput({
         from: "alice.chen@gmail.com",

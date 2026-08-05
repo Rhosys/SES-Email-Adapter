@@ -45,10 +45,10 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
     description: "OTPs, password resets, magic links, email verification, 2FA codes",
     fields: [
       { name: "authType", type: "enum", required: true, enumValues: [
-        e("otp", "short-lived numeric or alphanumeric code in the email body that the user copies — includes confirmation codes and one-time passwords"),
+        e("otp", "short-lived numeric or alphanumeric code in the email body that the user copies — includes confirmation codes and one-time passwords. If a code is present in the email, ALWAYS use otp even if the email says 'confirm' or 'verify'"),
         e("password_reset", "link or instructions to reset a forgotten password"),
         e("magic_link", "passwordless login via a clickable link — no code to copy"),
-        e("verification", "email address confirmation via a URL click — must contain a confirmation link, never a code to copy"),
+        e("verification", "email address confirmation via a URL click ONLY — no code present anywhere in the email body or subject"),
         e("two_factor", "second-factor authentication setup or backup codes"),
         e("security_alert", "notification about a security event on the account"),
         e("other", "authentication-related email that does not fit the above categories"),
