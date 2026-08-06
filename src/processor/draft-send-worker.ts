@@ -1,12 +1,38 @@
 import { DateTime } from "luxon";
 import type { Signal } from "../types/index.js";
 import type { DbError, Result } from "../errors.js";
-import type { EmailServiceError } from "../email/email-service.js";
 import { ok, err } from "../errors.js";
 import type { Logger } from "../logger.js";
-import type { ReplySender } from "./processor.js";
+import type { ReplySender, ReplySendError } from "./processor.js";
 import type { DraftSendPayload } from "./draft-send-dispatcher.js";
-import { buildOutboundMsgId, buildSignalGsi3pk } from "./message-id.js";
+import { buildSignalGsi3pk } from "./message-id.js";
+
+/**
+ * Send failures that no amount of retrying will clear: SES refused the message outright, the
+ * provider refused it, or the connection lacks the scope needed to send at all. Everything
+ * else (transient SES faults, 5xx from a provider, an expired token that will be refreshed on
+ * the next attempt) goes back to SQS.
+ */
+const PERMANENT_SEND_ERRORS = new Set<ReplySendError["kind"]>([
+  "permanent_ses_error",
+  "provider_send_rejected",
+  "provider_send_scope_missing",
+  "invalid_argument",
+]);
+
+/** A short, user-facing reason to show against the parked draft. */
+function describeSendFailure(error: ReplySendError): string {
+  switch (error.kind) {
+    case "provider_send_scope_missing":
+      return "Your connected mailbox has not granted permission to send email. Reconnect the mailbox to allow sending.";
+    case "provider_send_rejected":
+      return `The mail provider rejected this message: ${String(error.cause).slice(0, 256)}`;
+    case "permanent_ses_error":
+      return `Rejected by the mail service: ${error.errorName}`;
+    default:
+      return "The message could not be sent.";
+  }
+}
 
 export interface IDraftSendThreadDb {
   getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>>;
@@ -32,7 +58,7 @@ export class DraftSendWorker {
     this.logger = logger;
   }
 
-  async process(payload: DraftSendPayload): Promise<Result<void, DbError | EmailServiceError>> {
+  async process(payload: DraftSendPayload): Promise<Result<void, DbError | ReplySendError>> {
     const { signalId, accountId, threadId, sendInitiatedAt } = payload;
 
     // Re-read signal — verify still pending_send
@@ -73,20 +99,28 @@ export class DraftSendWorker {
     });
 
     if (sendResult.isErr()) {
-      if (sendResult.error.kind === "permanent_ses_error") {
-        this.logger.warn("Draft send permanently rejected by SES — will not retry.", { code: "draft_send.send_permanent", signalId, accountId, error: sendResult.error });
+      if (PERMANENT_SEND_ERRORS.has(sendResult.error.kind)) {
+        // The message itself is the problem — a retry sends the same bytes to the same
+        // rejection. Park the draft with the reason so the user can fix and resend.
+        this.logger.warn("Draft send permanently rejected — will not retry.", { code: "draft_send.send_permanent", signalId, accountId, error: sendResult.error });
+        const failureResult = await this.threadDb.updateSignalSendStatus(accountId, signal.signalLookupId, {
+          status: "draft",
+          sendInitiatedAt: null,
+          sendFailureReason: describeSendFailure(sendResult.error),
+          ...(signal.threadId ? { threadId: signal.threadId } : {}),
+        });
+        if (failureResult.isErr()) return err(failureResult.error);
         return ok(undefined);
       }
       // Transient — let SQS retry
       return err(sendResult.error);
     }
 
-    const { messageId } = sendResult.value;
+    const { messageId, outboundMsgId } = sendResult.value;
 
-    // Compute outbound message ID for thread lookup
-    const SES_REGION = process.env.SES_REGION ?? 'eu-central-1';
-    const outboundMsgId = buildOutboundMsgId(messageId, SES_REGION);
-    const gsi3pk = buildSignalGsi3pk(accountId, outboundMsgId);
+    // Key the reply-threading lookup on the Message-ID the send route reported. Provider
+    // sends report the one the provider assigned; SES sends derive it from the SES id.
+    const gsi3pk = outboundMsgId ? buildSignalGsi3pk(accountId, outboundMsgId) : undefined;
 
     // Transition to sent
     const now = DateTime.utc().toISO()!;
@@ -94,7 +128,7 @@ export class DraftSendWorker {
       status: "sent",
       sentAt: now,
       sesMessageId: messageId,
-      gsi3pk,
+      ...(gsi3pk ? { gsi3pk } : {}),
       ...(signal.threadId ? { threadId: signal.threadId } : {}),
     });
     if (updateResult.isErr()) return err(updateResult.error);

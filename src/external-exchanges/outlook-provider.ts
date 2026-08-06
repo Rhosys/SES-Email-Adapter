@@ -12,12 +12,15 @@ import type {
   ProviderAdapter,
   ActivationResult,
   RawMimeResult,
+  SendResult,
   ProviderActivationError,
   ProviderRenewalError,
   ProviderDeactivationError,
   ProviderFetchError,
+  ProviderSendError,
 } from "./provider-adapter.js";
 import { createVerifier } from "./jwks-verifier.js";
+import { extractMsgId } from "../processor/message-id.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { SignalQueue } from "../messaging/signal-queue.js";
 import type { Logger } from "../logger.js";
@@ -52,7 +55,7 @@ interface OutlookProviderDeps {
   db: AccountDatabase;
   signalQueue: SignalQueue;
   logger: Logger;
-  getProviderToken: (accountId: string, connectionId: string) => Promise<string>;
+  getProviderToken: (connectionUserId: string, connectionId: string) => Promise<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +222,69 @@ export class OutlookProvider implements ProviderAdapter {
       return ok({ rawMime, receivedAt: meta.receivedDateTime });
     } catch (e) {
       return err({ kind: "provider_fetch_failed", cause: e });
+    }
+  }
+
+  /**
+   * Sends through the user's own mailbox, which is the only way mail from their Outlook
+   * address passes DMARC at the recipient. Graph files the sent copy in Sent Items.
+   *
+   * Two calls rather than the single-shot `/me/sendMail`: creating the draft first returns
+   * `internetMessageId`, the RFC 5322 Message-ID that inbound replies will quote in
+   * In-Reply-To. `/me/sendMail` returns an empty 202 and would leave us unable to thread
+   * replies to what we just sent.
+   *
+   * Requires the `Mail.Send` scope on the linked connection.
+   */
+  async sendMessage(token: string, rawMime: Uint8Array, emx: ExternalMailExchange): Promise<Result<SendResult, ProviderSendError>> {
+    try {
+      // Graph accepts a full MIME message as the request body when the content type says so.
+      const createResp = await fetch(`${GRAPH_API}/me/messages`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "text/plain" },
+        body: Buffer.from(rawMime).toString("base64"),
+      });
+
+      if (createResp.status === 401) return err({ kind: "provider_token_expired" });
+      if (!createResp.ok) {
+        const cause = await createResp.text();
+        if (createResp.status === 403) {
+          this.logger.error("Outlook send rejected — connection is missing the Mail.Send scope. The user must re-link their Microsoft identity to grant it.", { code: "emx.outlook.send_scope_missing", emxId: emx.id, cause });
+          return err({ kind: "provider_send_scope_missing", cause });
+        }
+        if (createResp.status < 500) {
+          this.logger.warn("Outlook draft creation rejected", { code: "emx.outlook.send_rejected", emxId: emx.id, status: createResp.status, cause });
+          return err({ kind: "provider_send_rejected", cause });
+        }
+        return err({ kind: "provider_send_failed", cause });
+      }
+
+      const draft = await createResp.json() as { id: string; internetMessageId?: string };
+
+      const sendResp = await fetch(`${GRAPH_API}/me/messages/${draft.id}/send`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+
+      if (!sendResp.ok && sendResp.status !== 202 && sendResp.status !== 204) {
+        const cause = await sendResp.text();
+        if (sendResp.status === 401) return err({ kind: "provider_token_expired" });
+        if (sendResp.status === 403) {
+          this.logger.error("Outlook send rejected — connection is missing the Mail.Send scope. The user must re-link their Microsoft identity to grant it.", { code: "emx.outlook.send_scope_missing", emxId: emx.id, cause });
+          return err({ kind: "provider_send_scope_missing", cause });
+        }
+        if (sendResp.status < 500) {
+          this.logger.warn("Outlook send rejected", { code: "emx.outlook.send_rejected", emxId: emx.id, status: sendResp.status, cause });
+          return err({ kind: "provider_send_rejected", cause });
+        }
+        return err({ kind: "provider_send_failed", cause });
+      }
+
+      const messageId = draft.internetMessageId ? extractMsgId(draft.internetMessageId) : null;
+      this.logger.info("Outlook send succeeded", { code: "emx.outlook.send_success", emxId: emx.id, providerMessageId: draft.id });
+      return ok({ providerMessageId: draft.id, ...(messageId ? { messageId } : {}) });
+    } catch (e) {
+      return err({ kind: "provider_send_failed", cause: e });
     }
   }
 

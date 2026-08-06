@@ -24,7 +24,7 @@ interface EmxInboundWorkerDeps {
   adapters: Record<string, ProviderAdapter>;
   accountDb: AccountDatabase;
   processor: EmxProcessor;
-  getProviderToken: (accountId: string, connectionId: string) => Promise<string>;
+  getProviderToken: (connectionUserId: string, connectionId: string) => Promise<string>;
 }
 
 export class EmxInboundWorker {
@@ -58,18 +58,8 @@ export class EmxInboundWorker {
       return ok(undefined);
     }
 
-    let token: string;
-    if (source === "imap" || source === "jmap") {
-      token = "";
-    } else {
-      try {
-        token = await this.getProviderToken(accountId, source === "gmail" ? "google" : "microsoft");
-      } catch (e) {
-        this.logger.error("emx_inbound: failed to get provider token", { code: "emx.inbound.token_failed", source, emxId, error: e });
-        return err({ kind: "provider_fetch_failed", cause: e });
-      }
-    }
-
+    // The EMX record is loaded before the token because it carries the connection user the
+    // provider credentials are keyed on.
     const emxResult = await this.accountDb.getExternalExchange(accountId, emxId);
     if (emxResult.isErr()) {
       this.logger.error("emx_inbound: failed to load EMX record", { code: "emx.inbound.emx_load_failed", source, emxId, error: emxResult.error });
@@ -79,6 +69,22 @@ export class EmxInboundWorker {
     if (!emx) {
       this.logger.error("emx_inbound: EMX not found", { code: "emx.inbound.emx_not_found", source, emxId });
       return err({ kind: "provider_fetch_failed", cause: "EMX not found" });
+    }
+
+    let token: string;
+    if (source === "imap" || source === "jmap") {
+      token = "";
+    } else {
+      if (!emx.connectionUserId) {
+        this.logger.error("emx_inbound: exchange has no linked connection user, so its provider credentials cannot be fetched. It predates connection-user tracking and must be reconnected by the user.", { code: "emx.inbound.no_connection_user", source, emxId });
+        return err({ kind: "provider_fetch_failed", cause: "Exchange has no linked connection user" });
+      }
+      try {
+        token = await this.getProviderToken(emx.connectionUserId, source === "gmail" ? "google" : "microsoft");
+      } catch (e) {
+        this.logger.error("emx_inbound: failed to get provider token", { code: "emx.inbound.token_failed", source, emxId, error: e });
+        return err({ kind: "provider_fetch_failed", cause: e });
+      }
     }
 
     const fetchResult = await adapter.fetchMessage(token, providerMessageId, emx);

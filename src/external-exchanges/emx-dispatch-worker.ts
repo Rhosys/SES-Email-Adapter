@@ -9,7 +9,7 @@ interface EmxDispatchWorkerDeps {
   logger: Logger;
   db: AccountDatabase;
   adapters: Record<string, ProviderAdapter>;
-  getProviderToken: (accountId: string, connectionId: string) => Promise<string>;
+  getProviderToken: (connectionUserId: string, connectionId: string) => Promise<string>;
 }
 
 export interface EmxDispatchPayload {
@@ -77,8 +77,12 @@ export class EmxDispatchWorker {
     if (emx.platform === "imap" || emx.platform === "jmap") {
       token = "";
     } else {
+      if (!emx.connectionUserId) {
+        this.logger.error("emx_dispatch: exchange has no linked connection user, so its provider credentials cannot be fetched. It predates connection-user tracking and must be reconnected by the user.", { code: "emx.dispatch.no_connection_user", emxId: emx.id, platform: emx.platform });
+        return;
+      }
       try {
-        token = await this.getProviderToken(emx.accountId, emx.platform === "gmail" ? "google" : "microsoft");
+        token = await this.getProviderToken(emx.connectionUserId, emx.platform === "gmail" ? "google" : "microsoft");
       } catch (e) {
         this.logger.error("emx_dispatch: failed to get provider token", { code: "emx.dispatch.token_failed", emxId: emx.id, platform: emx.platform, error: e });
         return;

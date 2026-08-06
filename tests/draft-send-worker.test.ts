@@ -49,7 +49,7 @@ function makeThreadDb(): IDraftSendThreadDb {
 
 function makeReplySender(): ReplySender {
   return {
-    sendReply: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-001" })),
+    sendReply: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-001", outboundMsgId: "ses-msg-001@eu-central-1.amazonses.com" })),
   };
 }
 
@@ -193,6 +193,36 @@ describe("DraftSendWorker", () => {
 
     expect(result.isOk()).toBe(true);
     expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "draft_send.send_permanent")).toBe(true);
+    // Parked back as a draft with the reason, rather than left stuck in pending_send —
+    // the send will never succeed on retry, so the user has to be able to see and fix it.
+    expect(threadDb.updateSignalSendStatus).toHaveBeenCalledWith("acct-001", "USR#signal-001", expect.objectContaining({
+      status: "draft",
+      sendInitiatedAt: null,
+      sendFailureReason: expect.stringContaining("MessageRejected"),
+    }));
+  });
+
+  it("parks the draft with a reconnect prompt when the mailbox lacks the send scope", async () => {
+    const logger = createMockLogger();
+    const localWorker = new DraftSendWorker(threadDb, replySender, logger);
+    vi.mocked(replySender.sendReply).mockResolvedValueOnce(err({ kind: "provider_send_scope_missing", cause: "insufficient permissions" }));
+
+    const result = await localWorker.process(PAYLOAD);
+
+    expect(result.isOk()).toBe(true);
+    expect(threadDb.updateSignalSendStatus).toHaveBeenCalledWith("acct-001", "USR#signal-001", expect.objectContaining({
+      status: "draft",
+      sendFailureReason: expect.stringContaining("Reconnect the mailbox"),
+    }));
+  });
+
+  it("retries a transient provider failure rather than parking the draft", async () => {
+    const localWorker = new DraftSendWorker(threadDb, replySender, createMockLogger());
+    vi.mocked(replySender.sendReply).mockResolvedValueOnce(err({ kind: "provider_send_failed", cause: "503" }));
+
+    const result = await localWorker.process(PAYLOAD);
+
+    expect(result.isErr()).toBe(true);
     expect(threadDb.updateSignalSendStatus).not.toHaveBeenCalled();
   });
 });

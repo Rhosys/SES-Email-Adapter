@@ -214,6 +214,36 @@ export class AccountDatabase {
     return ok({ alias: saveResult.value, created: true });
   }
 
+  /**
+   * Links (or unlinks, when emxId is undefined) an alias to the external mailbox that backs it.
+   * The link is what tells the send path to route outbound mail through the provider instead of
+   * SES, so it must be kept in step with the EMX lifecycle: set on activation, cleared on delete.
+   *
+   * Conditioned on the alias already existing — callers ensureAlias first. A missing alias
+   * returns ok(null) rather than resurrecting a partial item through the update expression.
+   */
+  async setAliasExchange(accountId: string, aliasAddress: string, emxId: string | undefined): Promise<Result<Alias | null, DbError>> {
+    const { domain } = parseAddress(aliasAddress);
+    const now = DateTime.utc().toISO()!;
+    try {
+      const res = await dynamo.send(new UpdateCommand({
+        TableName: ACCOUNTS_TABLE,
+        Key: { pk: pk(accountId), sk: `ALIAS#${domain}#${aliasAddress}` },
+        UpdateExpression: emxId === undefined
+          ? "SET #updatedAt = :updatedAt REMOVE #emxId"
+          : "SET #emxId = :emxId, #updatedAt = :updatedAt",
+        ExpressionAttributeNames: { "#emxId": "emxId", "#updatedAt": "updatedAt" },
+        ExpressionAttributeValues: emxId === undefined ? { ":updatedAt": now } : { ":emxId": emxId, ":updatedAt": now },
+        ConditionExpression: "attribute_exists(pk)",
+        ReturnValues: "ALL_NEW",
+      }));
+      return ok(res.Attributes ? (res.Attributes as Alias) : null);
+    } catch (e) {
+      if ((e as { name?: string }).name === "ConditionalCheckFailedException") return ok(null);
+      return err(dbError(e));
+    }
+  }
+
   async listAliases(accountId: string): Promise<Result<Alias[], DbError>> {
     try {
       const aliases: Alias[] = [];
@@ -1465,7 +1495,7 @@ export class AccountDatabase {
   // External Mail Exchanges (EMX)
   // ---------------------------------------------------------------------------
 
-  async createExternalExchange(accountId: string, data: { platform: ExternalMailExchange["platform"]; emailAddress: string; status: ExternalMailExchange["status"]; syncCursor: string; lastSyncAt: string; expiresAt?: string; providerSubscriptionId?: string; errorReason?: string }): Promise<Result<ExternalMailExchange, DbError>> {
+  async createExternalExchange(accountId: string, data: { platform: ExternalMailExchange["platform"]; emailAddress: string; status: ExternalMailExchange["status"]; syncCursor: string; lastSyncAt: string; expiresAt?: string; providerSubscriptionId?: string; connectionUserId?: string; errorReason?: string }): Promise<Result<ExternalMailExchange, DbError>> {
     const now = DateTime.utc().toISO()!;
     const id = generateId("emx-");
     const item: ExternalMailExchange = {
@@ -1478,6 +1508,7 @@ export class AccountDatabase {
       lastSyncAt: data.lastSyncAt,
       ...(data.expiresAt !== undefined ? { expiresAt: data.expiresAt } : {}),
       ...(data.providerSubscriptionId !== undefined ? { providerSubscriptionId: data.providerSubscriptionId } : {}),
+      ...(data.connectionUserId !== undefined ? { connectionUserId: data.connectionUserId } : {}),
       ...(data.errorReason !== undefined ? { errorReason: data.errorReason } : {}),
       createdAt: now,
       updatedAt: now,
@@ -1595,7 +1626,7 @@ export class AccountDatabase {
     }
   }
 
-  async updateExternalExchange(accountId: string, emxId: string, fields: Partial<Pick<ExternalMailExchange, "status" | "syncCursor" | "expiresAt" | "lastSyncAt" | "nextSyncTime" | "providerSubscriptionId" | "encryptionCertificateId" | "consecutiveFailures">> & { errorReason?: string | undefined }): Promise<Result<ExternalMailExchange, DbError>> {
+  async updateExternalExchange(accountId: string, emxId: string, fields: Partial<Pick<ExternalMailExchange, "status" | "syncCursor" | "expiresAt" | "lastSyncAt" | "nextSyncTime" | "providerSubscriptionId" | "connectionUserId" | "encryptionCertificateId" | "consecutiveFailures">> & { errorReason?: string | undefined }): Promise<Result<ExternalMailExchange, DbError>> {
     const now = DateTime.utc().toISO()!;
     const names: Record<string, string> = { "#updatedAt": "updatedAt" };
     const values: Record<string, unknown> = { ":updatedAt": now };

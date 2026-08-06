@@ -101,6 +101,7 @@ describe("IMAP skips getProviderToken", () => {
       emailAddress: "user@gmail.com",
       status: "active",
       syncCursor: "12345",
+      connectionUserId: "authress-user-9",
       createdAt: "2025-01-01T00:00:00Z",
       updatedAt: "2025-01-01T00:00:00Z",
     };
@@ -112,7 +113,9 @@ describe("IMAP skips getProviderToken", () => {
     const result = await worker.dispatch();
 
     expect(result.isOk()).toBe(true);
-    expect(mockGetProviderToken).toHaveBeenCalledWith("acct-1", "google");
+    // Keyed on the Authress user who linked the mailbox — Authress returns no
+    // credentials for an accountId, which is not a user at all.
+    expect(mockGetProviderToken).toHaveBeenCalledWith("authress-user-9", "google");
   });
 });
 
@@ -161,6 +164,7 @@ describe("dispatch worker logs adapter errors", () => {
       emailAddress: "user@gmail.com",
       status: "active",
       syncCursor: "12345",
+      connectionUserId: "authress-user-9",
       createdAt: "2025-01-01T00:00:00Z",
       updatedAt: "2025-01-01T00:00:00Z",
     };

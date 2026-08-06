@@ -7,12 +7,15 @@ import type {
   ProviderAdapter,
   ActivationResult,
   RawMimeResult,
+  SendResult,
   ProviderActivationError,
   ProviderRenewalError,
   ProviderDeactivationError,
   ProviderFetchError,
+  ProviderSendError,
 } from "./provider-adapter.js";
 import { createVerifier } from "./jwks-verifier.js";
+import { extractMsgId } from "../processor/message-id.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { SignalQueue } from "../messaging/signal-queue.js";
 import type { Logger } from "../logger.js";
@@ -24,7 +27,7 @@ interface GmailProviderDeps {
   db: AccountDatabase;
   signalQueue: SignalQueue;
   logger: Logger;
-  getProviderToken: (accountId: string, connectionId: string) => Promise<string>;
+  getProviderToken: (connectionUserId: string, connectionId: string) => Promise<string>;
 }
 
 export class GmailProvider implements ProviderAdapter {
@@ -133,6 +136,68 @@ export class GmailProvider implements ProviderAdapter {
     }
   }
 
+  /**
+   * Sends through the user's own Gmail account, which is the only way mail from a
+   * @gmail.com address passes SPF/DKIM/DMARC at the recipient. Gmail files the sent copy
+   * in the user's Sent folder for us.
+   *
+   * Requires the `gmail.send` scope on the linked connection; a connection linked before
+   * sending existed only carries read scopes and comes back 403.
+   */
+  async sendMessage(token: string, rawMime: Uint8Array, emx: ExternalMailExchange): Promise<Result<SendResult, ProviderSendError>> {
+    try {
+      const response = await fetch(`${GMAIL_API}/messages/send`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ raw: Buffer.from(rawMime).toString("base64url") }),
+      });
+
+      if (response.status === 401) return err({ kind: "provider_token_expired" });
+      if (!response.ok) {
+        const cause = await response.text();
+        if (response.status === 403) {
+          this.logger.error("Gmail send rejected — connection is missing the gmail.send scope. The user must re-link their Google identity to grant it.", { code: "emx.gmail.send_scope_missing", emxId: emx.id, cause });
+          return err({ kind: "provider_send_scope_missing", cause });
+        }
+        // 4xx other than auth is the message itself being refused; 5xx is worth another attempt.
+        if (response.status < 500) {
+          this.logger.warn("Gmail send rejected", { code: "emx.gmail.send_rejected", emxId: emx.id, status: response.status, cause });
+          return err({ kind: "provider_send_rejected", cause });
+        }
+        return err({ kind: "provider_send_failed", cause });
+      }
+
+      const data = await response.json() as { id: string };
+      const messageId = await this.fetchRfcMessageId(token, data.id);
+
+      this.logger.info("Gmail send succeeded", { code: "emx.gmail.send_success", emxId: emx.id, providerMessageId: data.id });
+      return ok({ providerMessageId: data.id, ...(messageId ? { messageId } : {}) });
+    } catch (e) {
+      return err({ kind: "provider_send_failed", cause: e });
+    }
+  }
+
+  /**
+   * Reads back the RFC 5322 Message-ID Gmail assigned. Gmail overwrites any Message-ID we
+   * supply, and the send response only carries Gmail's own internal id — but replies quote
+   * the RFC one in In-Reply-To, so it is what the GSI3 thread lookup has to be keyed on.
+   * Best-effort: a failure here costs reply threading, not the send.
+   */
+  private async fetchRfcMessageId(token: string, providerMessageId: string): Promise<string | null> {
+    try {
+      const response = await fetch(`${GMAIL_API}/messages/${providerMessageId}?format=metadata&metadataHeaders=Message-ID`, {
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+      if (!response.ok) return null;
+      const data = await response.json() as { payload?: { headers?: Array<{ name: string; value: string }> } };
+      const header = data.payload?.headers?.find(h => h.name.toLowerCase() === "message-id");
+      return header ? extractMsgId(header.value) : null;
+    } catch (e) {
+      this.logger.info("Gmail: could not read back sent Message-ID — reply threading for this message will fall back to subject matching", { code: "emx.gmail.send_msgid_lookup_failed", providerMessageId, error: e });
+      return null;
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Webhook handler
   // ---------------------------------------------------------------------------
@@ -184,9 +249,14 @@ export class GmailProvider implements ProviderAdapter {
       return c.json({}, 200);
     }
 
+    if (!emx.connectionUserId) {
+      this.logger.error("Gmail webhook: exchange has no linked connection user, so its provider credentials cannot be fetched. It predates connection-user tracking and must be reconnected by the user.", { code: "emx.gmail.no_connection_user", emxId: emx.id });
+      return c.json({}, 200);
+    }
+
     let token: string;
     try {
-      token = await this.getProviderToken(emx.accountId, "google");
+      token = await this.getProviderToken(emx.connectionUserId, "google");
     } catch (e) {
       this.logger.error("Gmail webhook: failed to get provider token", { code: "emx.gmail.token_failed", emxId: emx.id, error: e });
       return c.json({}, 200);

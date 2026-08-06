@@ -303,6 +303,10 @@ export interface Alias {
   unknownSenderPolicy: UnknownSenderPolicy;
   // eTLD+1 of the site this alias was created for (set by the extension on alias generation)
   createdForOrigin?: string;
+  // Set when this alias is backed by an external mailbox (Gmail/Outlook/IMAP/JMAP). Outbound
+  // mail from this address must be sent through that provider, not SES — SES is not an
+  // authorized sender for e.g. gmail.com, so a SES send would fail DMARC at the recipient.
+  emxId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -744,6 +748,11 @@ export interface ExternalMailExchange {
   expiresAt?: string;              // ISO datetime — when watch/subscription lapses
   lastSyncAt?: string;             // ISO datetime — last successful sync completion
   providerSubscriptionId?: string; // Graph subscription UUID or "watch" for Gmail
+  // Authress userId of the user who linked this mailbox — the `userId` path parameter of
+  // GET /v1/connections/{connectionId}/users/{userId}/credentials. This is NOT the
+  // provider-side identity id: Authress returns no credentials for a third-party user id.
+  // Accounts are multi-user, so the accountId cannot stand in for it (gmail/outlook only).
+  connectionUserId?: string;
   encryptionCertificateId?: string; // which RSA key was used (for Outlook subscriptions)
   errorReason?: string;            // human-readable failure reason (only when activation_failed)
   imapConfig?: {
