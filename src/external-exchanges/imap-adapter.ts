@@ -88,10 +88,10 @@ export class ImapConnection {
     };
   }
 
-  async searchNewUids(afterUid: number): Promise<number[]> {
+  async searchNewUids(lastKnownUid: number): Promise<number[]> {
     await this.client.mailboxOpen("INBOX", { readOnly: true });
-    const searchResults = await this.client.search({ uid: `${afterUid + 1}:*` }, { uid: true }) as number[];
-    return searchResults.filter(uid => uid > afterUid).sort((a, b) => a - b);
+    const searchResults = await this.client.search({ uid: `${lastKnownUid + 1}:*` }, { uid: true }) as number[];
+    return searchResults.filter(uid => uid > lastKnownUid).sort((a, b) => a - b);
   }
 
   async fetchEnvelopes(startUid: number, limit: number): Promise<Array<{ uid: number; subject: string; from: string }>> {
@@ -248,6 +248,7 @@ export class ImapAdapter implements ProviderAdapter {
         const batchResult = await this.signalQueue.sendBatch("emx_inbound", entries);
         if (batchResult.isErr()) {
           this.logger.error("IMAP: failed to enqueue emx_inbound batch", { code: "imap.renew.batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
+          return err({ kind: "provider_renewal_failed", cause: "SQS batch send failed" });
         }
 
         // Update syncCursor to highest UID in batch

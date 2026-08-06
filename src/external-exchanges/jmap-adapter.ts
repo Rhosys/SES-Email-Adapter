@@ -301,15 +301,15 @@ export class JmapAdapter implements ProviderAdapter {
       return err({ kind: "provider_renewal_failed", cause: "Missing newQueryState" });
     }
 
-    if (added.length > 0) {
-      const entries = added.map((entry, i) => ({
-        id: `jmap-${i}`,
-        payload: { source: "jmap", providerMessageId: entry.id, emxId: emx.id, accountId: emx.accountId },
-      }));
-      const batchResult = await this.signalQueue.sendBatch("emx_inbound", entries);
-      if (batchResult.isErr()) {
-        this.logger.error("JMAP: failed to enqueue emx_inbound batch", { code: "jmap.renew.batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
-      }
+    // Enqueue emx_inbound via batch (capped at 500 by maxChanges)
+    const entries = added.map((entry, i) => ({
+      id: `jmap-${i}`,
+      payload: { source: "jmap", providerMessageId: entry.id, emxId: emx.id, accountId: emx.accountId },
+    }));
+    const batchResult = await this.signalQueue.sendBatch("emx_inbound", entries);
+    if (batchResult.isErr()) {
+      this.logger.error("JMAP: failed to enqueue emx_inbound batch", { code: "jmap.renew.batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
+      return err({ kind: "provider_renewal_failed", cause: "SQS batch send failed" });
     }
 
     await this.db.updateExternalExchange(emx.accountId, emx.id, {
@@ -426,15 +426,15 @@ export class JmapAdapter implements ProviderAdapter {
       return err({ kind: "provider_renewal_failed", cause: "Missing queryState in fallback" });
     }
 
-    if (ids.length > 0) {
-      const entries = ids.map((emailId, i) => ({
-        id: `jmap-fb-${i}`,
-        payload: { source: "jmap", providerMessageId: emailId, emxId: emx.id, accountId: emx.accountId },
-      }));
-      const batchResult = await this.signalQueue.sendBatch("emx_inbound", entries);
-      if (batchResult.isErr()) {
-        this.logger.error("JMAP fallback: failed to enqueue emx_inbound batch", { code: "jmap.renew.fallback_batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
-      }
+    // Enqueue all IDs via batch — pipeline deduplicates
+    const entries = ids.map((emailId, i) => ({
+      id: `jmap-fb-${i}`,
+      payload: { source: "jmap", providerMessageId: emailId, emxId: emx.id, accountId: emx.accountId },
+    }));
+    const batchResult = await this.signalQueue.sendBatch("emx_inbound", entries);
+    if (batchResult.isErr()) {
+      this.logger.error("JMAP fallback: failed to enqueue emx_inbound batch", { code: "jmap.renew.fallback_batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
+      return err({ kind: "provider_renewal_failed", cause: "SQS batch send failed" });
     }
 
     await this.db.updateExternalExchange(emx.accountId, emx.id, {

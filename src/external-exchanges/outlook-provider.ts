@@ -280,11 +280,9 @@ export class OutlookProvider implements ProviderAdapter {
       });
     }
 
-    if (messageEntries.length > 0) {
-      const batchResult = await this.signalQueue.sendBatch("emx_inbound", messageEntries);
-      if (batchResult.isErr()) {
-        this.logger.error("Outlook webhook: failed to enqueue emx_inbound batch", { code: "emx.outlook.batch_failed", count: messageEntries.length, error: batchResult.error });
-      }
+    const batchResult = await this.signalQueue.sendBatch("emx_inbound", messageEntries);
+    if (batchResult.isErr()) {
+      this.logger.error("Outlook webhook: failed to enqueue emx_inbound batch", { code: "emx.outlook.batch_failed", count: messageEntries.length, error: batchResult.error });
     }
 
     // 5. Return 202 — Graph expects fast response

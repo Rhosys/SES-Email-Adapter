@@ -213,15 +213,13 @@ export class GmailProvider implements ProviderAdapter {
       }
     }
 
-    if (messageIds.length > 0) {
-      const entries = messageIds.map((msgId, i) => ({
-        id: `gmail-${i}`,
-        payload: { source: "gmail", providerMessageId: msgId, emxId: emx.id, accountId: emx.accountId },
-      }));
-      const batchResult = await this.signalQueue.sendBatch("emx_inbound", entries);
-      if (batchResult.isErr()) {
-        this.logger.error("Gmail webhook: failed to enqueue emx_inbound batch", { code: "emx.gmail.batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
-      }
+    const entries = messageIds.map((msgId, i) => ({
+      id: `gmail-${i}`,
+      payload: { source: "gmail", providerMessageId: msgId, emxId: emx.id, accountId: emx.accountId },
+    }));
+    const batchResult = await this.signalQueue.sendBatch("emx_inbound", entries);
+    if (batchResult.isErr()) {
+      this.logger.error("Gmail webhook: failed to enqueue emx_inbound batch", { code: "emx.gmail.batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
     }
 
     const newCursor = historyData.historyId ?? historyId;

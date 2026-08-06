@@ -57,7 +57,7 @@ export class SignalQueue {
         const failed = result.Failed ?? []
         if (failed.length > 0) {
           this.logger.warn("SignalQueue: partial batch failure", { code: "signal_queue.batch_partial_failure", messageType, failedCount: failed.length, failed })
-          return err(dbError(new Error(`SQS batch: ${failed.length} messages failed`)))
+          return err(dbError({ message: `SQS batch: ${failed.length} messages failed`, failed }))
         }
       } catch (e) {
         this.logger.warn("SignalQueue: sendBatch failed", { code: "signal_queue.batch_failed", messageType, chunkSize: chunk.length, error: e })
