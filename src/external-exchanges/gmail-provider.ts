@@ -136,6 +136,19 @@ export class GmailProvider implements ProviderAdapter {
     }
   }
 
+  async fetchMailboxAddress(token: string): Promise<Result<string, ProviderFetchError>> {
+    try {
+      const response = await fetch(`${GMAIL_API}/profile`, { headers: { "Authorization": `Bearer ${token}` } });
+      if (response.status === 401) return err({ kind: "provider_token_expired" });
+      if (!response.ok) return err({ kind: "provider_fetch_failed", cause: await response.text() });
+      const data = await response.json() as { emailAddress?: string };
+      if (!data.emailAddress) return err({ kind: "provider_fetch_failed", cause: "Gmail profile carried no emailAddress" });
+      return ok(data.emailAddress);
+    } catch (e) {
+      return err({ kind: "provider_fetch_failed", cause: e });
+    }
+  }
+
   /**
    * Sends through the user's own Gmail account, which is the only way mail from a
    * @gmail.com address passes SPF/DKIM/DMARC at the recipient. Gmail files the sent copy

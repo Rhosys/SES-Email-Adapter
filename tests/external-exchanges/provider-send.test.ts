@@ -99,6 +99,33 @@ describe("GmailProvider.sendMessage", () => {
   });
 });
 
+describe("mailbox address resolution", () => {
+  it("Gmail reports the address from the profile endpoint", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { emailAddress: "user@gmail.com" }));
+    const result = await new GmailProvider(deps()).fetchMailboxAddress("token");
+    expect(result._unsafeUnwrap()).toBe("user@gmail.com");
+    expect(fetchMock.mock.calls[0]![0]).toContain("/profile");
+  });
+
+  it("Gmail fails rather than inventing an address when the profile has none", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+    const result = await new GmailProvider(deps()).fetchMailboxAddress("token");
+    expect(result.isErr()).toBe(true);
+  });
+
+  it("Outlook prefers the routable mail address over the sign-in name", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { mail: "user@contoso.com", userPrincipalName: "user@contoso.onmicrosoft.com" }));
+    const result = await new OutlookProvider(deps()).fetchMailboxAddress("token");
+    expect(result._unsafeUnwrap()).toBe("user@contoso.com");
+  });
+
+  it("Outlook falls back to the sign-in name when no mail address is set", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { mail: null, userPrincipalName: "user@contoso.onmicrosoft.com" }));
+    const result = await new OutlookProvider(deps()).fetchMailboxAddress("token");
+    expect(result._unsafeUnwrap()).toBe("user@contoso.onmicrosoft.com");
+  });
+});
+
 describe("OutlookProvider.sendMessage", () => {
   const outlookEmx = { ...EMX, platform: "outlook" as const };
 

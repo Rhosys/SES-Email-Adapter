@@ -64,4 +64,17 @@ export interface ProviderAdapter {
    * which would emit unaligned mail from a domain we are not authorized for.
    */
   sendMessage?(token: string, rawMime: Uint8Array, emx: ExternalMailExchange): Promise<Result<SendResult, ProviderSendError>>
+  /**
+   * Asks the provider which mailbox this token belongs to.
+   *
+   * The address has to come from the provider, not from the client: the only mailbox
+   * identifier an OAuth login exposes to the browser is the linked identity's provider-side
+   * user id, which for Google is a numeric subject, not an email address. Everything
+   * downstream is keyed on the real address — the alias, the alias→exchange link that routes
+   * outbound mail, and the Gmail webhook's mailbox match — so a guess that happens to look
+   * like an id silently breaks all three.
+   *
+   * Optional: IMAP and JMAP already know their own address from the configured username.
+   */
+  fetchMailboxAddress?(token: string): Promise<Result<string, ProviderFetchError>>
 }

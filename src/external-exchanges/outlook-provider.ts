@@ -225,6 +225,22 @@ export class OutlookProvider implements ProviderAdapter {
     }
   }
 
+  async fetchMailboxAddress(token: string): Promise<Result<string, ProviderFetchError>> {
+    try {
+      const response = await fetch(`${GRAPH_API}/me?$select=mail,userPrincipalName`, { headers: { "Authorization": `Bearer ${token}` } });
+      if (response.status === 401) return err({ kind: "provider_token_expired" });
+      if (!response.ok) return err({ kind: "provider_fetch_failed", cause: await response.text() });
+      const data = await response.json() as { mail?: string | null; userPrincipalName?: string };
+      // `mail` is the routable SMTP address; userPrincipalName is the sign-in name, which is
+      // usually the same but is the only value present on some account types.
+      const address = data.mail ?? data.userPrincipalName;
+      if (!address) return err({ kind: "provider_fetch_failed", cause: "Graph user carried neither mail nor userPrincipalName" });
+      return ok(address);
+    } catch (e) {
+      return err({ kind: "provider_fetch_failed", cause: e });
+    }
+  }
+
   /**
    * Sends through the user's own mailbox, which is the only way mail from their Outlook
    * address passes DMARC at the recipient. Graph files the sent copy in Sent Items.
