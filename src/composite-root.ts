@@ -222,6 +222,7 @@ export class CompositeRoot {
       logger,
       emailContentStore: new EmailContentStore(s3),
       contentStore: new ContentStore(s3),
+      platformTenantName: PLATFORM_TENANT,
     });
 
     const sesFeedbackProcessor = new SesFeedbackProcessor(processingDb, accountDb, logger, threadDb);

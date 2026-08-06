@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { WORKFLOW_REGISTRY, EnumValue } from "../../src/classifier/workflow-registry.js";
+import { CLASSIFIER_WORKFLOW_REGISTRY, EnumValue } from "../../src/types/workflow-registry.js";
 import { WORKFLOWS } from "../../src/types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -117,7 +117,7 @@ function parseInterfaceFields(body: string): ParsedField[] {
 // ---------------------------------------------------------------------------
 
 describe("EnumValue description coverage", () => {
-  for (const workflow of WORKFLOW_REGISTRY) {
+  for (const workflow of CLASSIFIER_WORKFLOW_REGISTRY) {
     for (const field of workflow.fields) {
       if (!field.enumValues) continue;
 
@@ -143,7 +143,7 @@ describe("EnumValue description coverage", () => {
 
 describe("workflow registry ↔ TypeScript type alignment", () => {
   it("registry covers every workflow in WORKFLOWS (except system-only workflows)", () => {
-    const registryNames = WORKFLOW_REGISTRY.map((w) => w.name);
+    const registryNames = CLASSIFIER_WORKFLOW_REGISTRY.map((w) => w.name);
     const systemOnlyWorkflows = new Set(["unspecified"]);
     for (const workflow of WORKFLOWS) {
       if (systemOnlyWorkflows.has(workflow)) continue;
@@ -153,13 +153,13 @@ describe("workflow registry ↔ TypeScript type alignment", () => {
 
   it("registry contains no workflows absent from WORKFLOWS", () => {
     const workflowSet = new Set<string>(WORKFLOWS);
-    for (const entry of WORKFLOW_REGISTRY) {
+    for (const entry of CLASSIFIER_WORKFLOW_REGISTRY) {
       expect(workflowSet.has(entry.name)).toBe(true);
     }
   });
 
   // Per-workflow field alignment
-  for (const entry of WORKFLOW_REGISTRY) {
+  for (const entry of CLASSIFIER_WORKFLOW_REGISTRY) {
     describe(`${entry.name} (${workflowToInterfaceName(entry.name)})`, () => {
       const interfaceName = workflowToInterfaceName(entry.name);
       const body = extractInterfaceBody(interfaceName);

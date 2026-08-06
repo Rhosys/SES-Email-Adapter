@@ -1,5 +1,3 @@
-import type { Workflow } from "../types/index.js";
-
 /**
  * A labelled enum value for LLM-facing workflow fields.
  *
@@ -32,14 +30,16 @@ export interface WorkflowFieldDefinition {
 }
 
 export interface WorkflowDefinition {
-  name: Workflow;
+  name: string;
   description: string;
   fields: WorkflowFieldDefinition[];
+  /** When false, the classifier is forbidden from assigning this workflow — it is system-assigned only. Default: true. */
+  classifierAssignable?: boolean;
 }
 
 const e = (value: string, description: string) => new EnumValue(value, description);
 
-export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
+export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
   {
     name: "auth",
     description: "OTPs, password resets, magic links, email verification, 2FA codes",
@@ -347,6 +347,7 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
     name: "healthcheck",
     description: "System-generated pipeline validation emails — daily automated checks",
     fields: [],
+    classifierAssignable: false,
   },
   {
     name: "test",
@@ -357,5 +358,12 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
         e("system", "generated automatically by the platform"),
       ] },
     ],
+    classifierAssignable: false,
+  },
+  {
+    name: "unspecified",
+    description: "Classification failed or was skipped — email is unclassified",
+    fields: [],
+    classifierAssignable: false,
   },
 ];
