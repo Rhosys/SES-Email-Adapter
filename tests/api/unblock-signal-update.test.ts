@@ -221,7 +221,7 @@ describe("POST /signals/:id/quarantineResponse — updateThread usage", () => {
       data: {
         receivedAt: "2024-01-20T12:00:00Z",
         workflow: "auth",
-        workflowData: { workflow: "auth", authType: "otp", service: "example.com" },
+        workflowData: { workflow: "auth", authType: "verification", service: "example.com" },
       },
     });
 
@@ -243,7 +243,7 @@ describe("POST /signals/:id/quarantineResponse — updateThread usage", () => {
       data: {
         receivedAt: "2024-01-20T12:00:00Z",
         workflow: "auth",
-        workflowData: { workflow: "auth", authType: "otp", service: "example.com" },
+        workflowData: { workflow: "auth", authType: "verification", service: "example.com" },
       },
     });
 

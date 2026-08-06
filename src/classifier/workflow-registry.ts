@@ -4,8 +4,8 @@ import type { Workflow } from "../types/index.js";
  * A labelled enum value for LLM-facing workflow fields.
  *
  * Every enum value sent to the classifier carries a human-readable description
- * so the model can disambiguate semantically similar options (e.g. "otp" vs
- * "verification") regardless of the email's language.
+ * so the model can disambiguate semantically similar options regardless of the
+ * email's language.
  */
 export class EnumValue {
   readonly value: string;
@@ -45,15 +45,14 @@ export const WORKFLOW_REGISTRY: WorkflowDefinition[] = [
     description: "OTPs, password resets, magic links, email verification, 2FA codes",
     fields: [
       { name: "authType", type: "enum", required: true, enumValues: [
-        e("otp", "short-lived numeric or alphanumeric code in the email body that the user copies — includes confirmation codes and one-time passwords. If a code is present in the email, ALWAYS use otp even if the email says 'confirm' or 'verify'"),
+        e("verification", "email/account verification via a code to copy, a link to click, or both — includes OTPs, confirmation codes, magic links, and email address confirmations"),
         e("password_reset", "link or instructions to reset a forgotten password"),
-        e("magic_link", "passwordless login via a clickable link — no code to copy"),
-        e("verification", "email address confirmation via a URL click ONLY — no code present anywhere in the email body or subject"),
         e("two_factor", "second-factor authentication setup or backup codes"),
         e("security_alert", "notification about a security event on the account"),
         e("other", "authentication-related email that does not fit the above categories"),
       ] },
-      { name: "code", type: "string", required: false },
+      { name: "code", type: "string", required: false, notes: "The code the user should copy — extract if present in subject or body" },
+      { name: "actionUrl", type: "string", required: false, notes: "The verification/login URL the user should click — extract if present" },
       { name: "expiresInMinutes", type: "number", required: false },
       { name: "service", type: "string", required: true },
     ],

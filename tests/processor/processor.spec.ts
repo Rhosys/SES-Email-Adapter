@@ -987,7 +987,7 @@ describe("SignalProcessor", () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         workflow: "auth",
-        workflowData: { workflow: "auth", authType: "otp", code: "123456", service: "GitHub" },
+        workflowData: { workflow: "auth", authType: "verification", code: "123456", service: "GitHub" },
       }));
 
       await processor.processInbound(makeMessage(), 1);
@@ -1004,7 +1004,7 @@ describe("SignalProcessor", () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         workflow: "auth",
-        workflowData: { workflow: "auth", authType: "otp", code: "123456", service: "GitHub" },
+        workflowData: { workflow: "auth", authType: "verification", code: "123456", service: "GitHub" },
       }));
 
       await processor.processInbound(makeMessage(), 1);
@@ -1019,7 +1019,7 @@ describe("SignalProcessor", () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
         ...validClassification,
         workflow: "auth",
-        workflowData: { workflow: "auth", authType: "otp", code: "999999", service: "GitHub" },
+        workflowData: { workflow: "auth", authType: "verification", code: "999999", service: "GitHub" },
       }));
 
       await processor.processInbound(makeMessage(), 1);
@@ -1074,7 +1074,7 @@ describe("SignalProcessor", () => {
 
   describe("deriveGroupingKey", () => {
     it("returns recipientAddress:workflow:senderETLD1 for auth", () => {
-      expect(deriveGroupingKey("auth", { workflow: "auth", authType: "otp", service: "GitHub" }, "me@example.com", "github.com"))
+      expect(deriveGroupingKey("auth", { workflow: "auth", authType: "verification", service: "GitHub" }, "me@example.com", "github.com"))
         .toBe("me@example.com:auth:github.com");
     });
 
@@ -1136,7 +1136,7 @@ describe("SignalProcessor", () => {
 
   describe("baseUrgency", () => {
     it("auth is always critical", () => {
-      expect(baseUrgency("auth", { workflow: "auth", authType: "otp", service: "GitHub" })).toBe("critical");
+      expect(baseUrgency("auth", { workflow: "auth", authType: "verification", service: "GitHub" })).toBe("critical");
     });
 
     it("alert is critical when requiresAction=true", () => {

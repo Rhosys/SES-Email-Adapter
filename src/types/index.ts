@@ -59,8 +59,9 @@ export type WorkflowData =
 
 export interface AuthData {
   workflow: "auth";
-  authType: "otp" | "password_reset" | "magic_link" | "verification" | "two_factor" | "security_alert" | "other";
+  authType: "verification" | "password_reset" | "two_factor" | "security_alert" | "other";
   code?: string;
+  actionUrl?: string;
   expiresInMinutes?: number;
   service: string;
 }

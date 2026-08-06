@@ -37,7 +37,7 @@ describe("Classifier multilingual integration", () => {
     classifier = new SignalClassifier(client, createConsoleLogger());
   });
 
-  it("German OTP email → workflow:auth, authType:otp", async () => {
+  it("German OTP email → workflow:auth, authType:verification", async () => {
     const result = await classifier.classify(makeInput({
       from: "noreply@postbank.de",
       subject: "Ihr Bestätigungscode",
@@ -46,7 +46,7 @@ describe("Classifier multilingual integration", () => {
     expect(result.isOk()).toBe(true);
     const output = result._unsafeUnwrap();
     expect(output.workflow).toBe("auth");
-    expect(output.workflowData).toMatchObject({ authType: "otp", code: "847291" });
+    expect(output.workflowData).toMatchObject({ authType: "verification", code: "847291" });
   }, 30_000);
 
   it("Japanese shipping notification → workflow:package, packageType:shipping", async () => {

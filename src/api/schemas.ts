@@ -150,8 +150,9 @@ export const SignalAction = z.object({
 
 export const AuthData = z.object({
   workflow: z.literal("auth"),
-  authType: z.enum(["otp", "password_reset", "magic_link", "verification", "two_factor", "security_alert", "other"]),
+  authType: z.enum(["verification", "password_reset", "two_factor", "security_alert", "other"]),
   code: z.string().optional(),
+  actionUrl: z.string().optional(),
   expiresInMinutes: z.number().optional(),
   service: z.string(),
 }).openapi("AuthData");

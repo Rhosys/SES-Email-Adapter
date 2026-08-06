@@ -28,7 +28,7 @@ const stubSignal: Signal = {
     headers: {},
     recipientAddress: "me@mydomain.com",
     workflow: "auth",
-    workflowData: { workflow: "auth", authType: "otp", code: "123456", service: "Example" },
+    workflowData: { workflow: "auth", authType: "verification", code: "123456", service: "Example" },
     tags: [],
     summary: "Test",
     s3Key: "signals/test.eml",

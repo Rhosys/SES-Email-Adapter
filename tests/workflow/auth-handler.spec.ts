@@ -103,10 +103,10 @@ describe("AuthWorkflowHandler", () => {
 
   describe("OTP payload construction + fan-out", () => {
     it.each([
-      { label: "single device, otp type", devices: 1, authType: "otp" as const, code: "123456", domain: "noreply@github.com", expectedOrigin: "github.com" },
-      { label: "multiple devices, magic_link type", devices: 3, authType: "magic_link" as const, code: "ABC-DEF", domain: "security@accounts.google.com", expectedOrigin: "google.com" },
+      { label: "single device, otp type", devices: 1, authType: "verification" as const, code: "123456", domain: "noreply@github.com", expectedOrigin: "github.com" },
+      { label: "multiple devices, magic_link type", devices: 3, authType: "verification" as const, code: "ABC-DEF", domain: "security@accounts.google.com", expectedOrigin: "google.com" },
       { label: "subdomain sender", devices: 1, authType: "two_factor" as const, code: "9999", domain: "no-reply@auth.stripe.com", expectedOrigin: "stripe.com" },
-      { label: "with expiresInMinutes", devices: 2, authType: "otp" as const, code: "000000", domain: "noreply@example.co.uk", expectedOrigin: "example.co.uk", expiresInMinutes: 5 },
+      { label: "with expiresInMinutes", devices: 2, authType: "verification" as const, code: "000000", domain: "noreply@example.co.uk", expectedOrigin: "example.co.uk", expiresInMinutes: 5 },
     ])("delivers correct OTP payload — $label", async ({ devices, authType, code, domain, expectedOrigin, expiresInMinutes }) => {
       const deviceList = Array.from({ length: devices }, (_, i) => makeDevice(`token-${i}`));
       vi.mocked(mocks.deviceStore.listDevices).mockResolvedValue(ok(deviceList));
@@ -146,7 +146,7 @@ describe("AuthWorkflowHandler", () => {
       { label: "mixed outcomes", results: ["delivered", "stale", "failed"] as const },
       { label: "listDevices fails", listDevicesFails: true, results: [] as const },
     ])("returns ok() regardless of delivery outcome — $label", async ({ results, listDevicesFails }) => {
-      const workflowData: AuthData = { workflow: "auth", authType: "otp", code: "111111", service: "Svc" };
+      const workflowData: AuthData = { workflow: "auth", authType: "verification", code: "111111", service: "Svc" };
       const signal = makeSignal({ data: { from: { address: "noreply@example.com" }, workflowData } });
 
       if (listDevicesFails) {
@@ -171,7 +171,7 @@ describe("AuthWorkflowHandler", () => {
   // ─── Skips push when code is undefined ───────────────────────────────────
 
   it("skips push when workflowData.code is undefined", async () => {
-    const workflowData: AuthData = { workflow: "auth", authType: "otp", service: "Svc" };
+    const workflowData: AuthData = { workflow: "auth", authType: "verification", service: "Svc" };
     const signal = makeSignal({ data: { from: { address: "noreply@example.com" }, workflowData } });
 
     const result = await handler.execute(signal, stubArc, "acc-1");
@@ -189,7 +189,7 @@ describe("AuthWorkflowHandler", () => {
     vi.mocked(mocks.deliverer.deliver).mockResolvedValue({ status: "stale" });
     vi.mocked(mocks.deviceStore.deleteDevice).mockResolvedValue(ok(undefined));
 
-    const workflowData: AuthData = { workflow: "auth", authType: "otp", code: "999999", service: "Svc" };
+    const workflowData: AuthData = { workflow: "auth", authType: "verification", code: "999999", service: "Svc" };
     const signal = makeSignal({ data: { from: { address: "noreply@example.com" }, workflowData } });
 
     await handler.execute(signal, stubArc, "acc-1");
@@ -203,7 +203,7 @@ describe("AuthWorkflowHandler", () => {
     vi.mocked(mocks.deviceStore.listDevices).mockResolvedValue(ok([makeDevice("t1")]));
     vi.mocked(mocks.deliverer.deliver).mockResolvedValue({ status: "delivered" });
 
-    const workflowData: AuthData = { workflow: "auth", authType: "otp", code: "123456", service: "Svc" };
+    const workflowData: AuthData = { workflow: "auth", authType: "verification", code: "123456", service: "Svc" };
     const signal = makeSignal({ data: { from: { address: "noreply@example.com" }, workflowData } });
 
     await handler.execute(signal, stubArc, "acc-1");
@@ -219,7 +219,7 @@ describe("AuthWorkflowHandler", () => {
     const dbErr: DbError = { kind: "db_error", message: "connection lost", cause: new Error("connection lost") };
     vi.mocked(mocks.threadDatabase.updateThread).mockResolvedValue(err(dbErr));
 
-    const workflowData: AuthData = { workflow: "auth", authType: "otp", code: "123456", service: "Svc" };
+    const workflowData: AuthData = { workflow: "auth", authType: "verification", code: "123456", service: "Svc" };
     const signal = makeSignal({ data: { from: { address: "noreply@example.com" }, workflowData } });
 
     const result = await handler.execute(signal, stubArc, "acc-1");

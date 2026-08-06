@@ -86,7 +86,7 @@ describe("Signal Classifier — LLM integration tests", () => {
       assertCommonOutput(output);
     });
 
-    it("auth — confirmation code labelled as 'verify' must be otp with code extracted", async () => {
+    it("auth — confirmation code labelled as 'verify' must be verification with code extracted", async () => {
       const input = makeInput({
         from: "no-reply@infomaniak.com",
         subject: "Infomaniak confirmation code: JJ4-TY8",
@@ -97,7 +97,7 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(result.isOk()).toBe(true);
       const output = result._unsafeUnwrap();
       expect(output.workflow).toBe("auth");
-      expect((output.workflowData as { authType: string }).authType).toBe("otp");
+      expect((output.workflowData as { authType: string }).authType).toBe("verification");
       expect((output.workflowData as { code?: string }).code).toBe("JJ4-TY8");
       expect((output.workflowData as { service: string }).service.toLowerCase()).toContain("infomaniak");
       assertCommonOutput(output);

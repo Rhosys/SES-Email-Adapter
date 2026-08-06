@@ -303,9 +303,9 @@ describe("buildEmbedText (classification output)", () => {
     it("first line is the senderDomain argument", () => {
       const classification: ClassificationOutput = {
         workflow: "auth",
-        workflowData: { workflow: "auth", authType: "otp", service: "GitHub" },
+        workflowData: { workflow: "auth", authType: "verification", service: "GitHub" },
         tags: [],
-        summary: "GitHub OTP code",
+        summary: "GitHub verification code",
         labels: [],
         actions: [],
       };
@@ -318,9 +318,9 @@ describe("buildEmbedText (classification output)", () => {
     it("comma-joins labels with no spaces when populated", () => {
       const classification: ClassificationOutput = {
         workflow: "auth",
-        workflowData: { workflow: "auth", authType: "otp", service: "Slack" },
+        workflowData: { workflow: "auth", authType: "verification", service: "Slack" },
         tags: [],
-        summary: "Slack OTP",
+        summary: "Slack verification code",
         labels: ["action-needed", "system:workflow:auth"],
       actions: [],
       };
@@ -364,9 +364,9 @@ describe("buildEmbedText (classification output)", () => {
     it("includes numeric fields as string values", () => {
       const classification: ClassificationOutput = {
         workflow: "auth",
-        workflowData: { workflow: "auth", authType: "otp", service: "Slack", expiresInMinutes: 10 },
+        workflowData: { workflow: "auth", authType: "verification", service: "Slack", expiresInMinutes: 10 },
         tags: [],
-        summary: "Slack OTP expiring in 10 minutes",
+        summary: "Slack verification code expiring in 10 minutes",
         labels: [],
         actions: [],
       };
@@ -391,16 +391,16 @@ describe("buildEmbedText (classification output)", () => {
     it("omits fields with null values", () => {
       const classification: ClassificationOutput = {
         workflow: "auth",
-        workflowData: { workflow: "auth", authType: "otp", code: null as unknown as string, service: "GitHub" },
+        workflowData: { workflow: "auth", authType: "verification", code: null as unknown as string, service: "GitHub" },
         tags: [],
-        summary: "GitHub OTP",
+        summary: "GitHub verification code",
         labels: [],
         actions: [],
       };
       const result = buildEmbedText("github.com", classification);
       const lines = result.split("\n");
       expect(lines.filter((l) => l.startsWith("workflowData.code="))).toHaveLength(0);
-      expect(lines).toContain("workflowData.authType=otp");
+      expect(lines).toContain("workflowData.authType=verification");
       expect(lines).toContain("workflowData.service=GitHub");
     });
   });

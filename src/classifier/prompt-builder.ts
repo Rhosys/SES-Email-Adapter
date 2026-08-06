@@ -98,7 +98,7 @@ Classification rules apply regardless of email language. An OTP email in German 
 
 Output constraints:
 - "workflow" must be one of the English workflow names defined above.
-- "workflowData" enum values must match the English enum values defined above (e.g. "otp", "shipping", "welcome") — never translated equivalents.
+- "workflowData" enum values must match the English enum values defined above (e.g. "verification", "shipping", "welcome") — never translated equivalents.
 - "workflowData" free-text fields (service, retailer, company names, etc.) should preserve the original language from the email.
 - "tags" must be from the English tag vocabulary above.
 - "labels" must match the provided allowedLabels list exactly as given — these may be in any language.

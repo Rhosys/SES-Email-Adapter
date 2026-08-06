@@ -154,8 +154,6 @@ describe("assignSystemLabels — security_alert", () => {
   });
 
   it.each([
-    { authType: "otp" as const, label: "otp" },
-    { authType: "magic_link" as const, label: "magic_link" },
     { authType: "password_reset" as const, label: "password_reset" },
     { authType: "verification" as const, label: "verification" },
     { authType: "two_factor" as const, label: "two_factor" },

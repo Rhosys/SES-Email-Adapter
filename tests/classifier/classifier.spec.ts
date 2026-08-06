@@ -103,7 +103,7 @@ describe("SignalClassifier", () => {
         workflow: "auth",
         workflowData: {
           workflow: "auth",
-          authType: "otp",
+          authType: "verification",
           code: "483921",
           expiresInMinutes: 15,
           service: "GitHub",
@@ -120,7 +120,7 @@ describe("SignalClassifier", () => {
       expect(output.workflow).toBe("auth");
       expect(output.workflowData).toMatchObject({
         workflow: "auth",
-        authType: "otp",
+        authType: "verification",
         code: "483921",
         service: "GitHub",
       });
