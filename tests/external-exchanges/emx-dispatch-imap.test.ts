@@ -101,7 +101,9 @@ describe("IMAP skips getProviderToken", () => {
       emailAddress: "user@gmail.com",
       status: "active",
       syncCursor: "12345",
-      connectionUserId: "authress-user-9",
+      userId: "authress-user-9",
+      connectionUserId: "google-sub-12345",
+      connectionId: "google",
       createdAt: "2025-01-01T00:00:00Z",
       updatedAt: "2025-01-01T00:00:00Z",
     };
@@ -164,7 +166,9 @@ describe("dispatch worker logs adapter errors", () => {
       emailAddress: "user@gmail.com",
       status: "active",
       syncCursor: "12345",
-      connectionUserId: "authress-user-9",
+      userId: "authress-user-9",
+      connectionUserId: "google-sub-12345",
+      connectionId: "google",
       createdAt: "2025-01-01T00:00:00Z",
       updatedAt: "2025-01-01T00:00:00Z",
     };

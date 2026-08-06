@@ -177,9 +177,9 @@ export class CompositeRoot {
      * user at all (accounts are multi-user), so the value must come from the EMX record's
      * connectionUserId, captured when the mailbox was connected.
      */
-    const getProviderToken = async (connectionUserId: string, connectionId: string): Promise<string> => {
+    const getProviderToken = async (userId: string, connectionId: string): Promise<string> => {
       const client = getAuthressClient();
-      const response = await client.connections.getConnectionCredentials(connectionId, connectionUserId);
+      const response = await client.connections.getConnectionCredentials(connectionId, userId);
       return response.data.accessToken;
     };
 

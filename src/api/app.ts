@@ -109,7 +109,7 @@ export interface AppDeps {
   outlookProvider?: OutlookProvider;
   adapters: Record<string, ProviderAdapter>;
   encryptionManager: EncryptionManager;
-  getProviderToken: (connectionUserId: string, connectionId: string) => Promise<string>;
+  getProviderToken: (userId: string, connectionId: string) => Promise<string>;
   signalQueue: SignalQueue;
 }
 

@@ -2,6 +2,7 @@ import { ok, err } from "../errors.js";
 import type { Result } from "../errors.js";
 import type { ProcessorError } from "../errors.js";
 import type { ProviderAdapter, ProviderFetchError } from "./provider-adapter.js";
+import { exchangeCredentials } from "./provider-adapter.js";
 import type { InboundSignalMessage } from "../processor/processor.js";
 import type { Logger } from "../logger.js";
 import type { EmailContentStore } from "../content-store.js";
@@ -24,7 +25,7 @@ interface EmxInboundWorkerDeps {
   adapters: Record<string, ProviderAdapter>;
   accountDb: AccountDatabase;
   processor: EmxProcessor;
-  getProviderToken: (connectionUserId: string, connectionId: string) => Promise<string>;
+  getProviderToken: (userId: string, connectionId: string) => Promise<string>;
 }
 
 export class EmxInboundWorker {
@@ -75,12 +76,13 @@ export class EmxInboundWorker {
     if (source === "imap" || source === "jmap") {
       token = "";
     } else {
-      if (!emx.connectionUserId) {
-        this.logger.error("emx_inbound: exchange has no linked connection user, so its provider credentials cannot be fetched. It predates connection-user tracking and must be reconnected by the user.", { code: "emx.inbound.no_connection_user", source, emxId });
-        return err({ kind: "provider_fetch_failed", cause: "Exchange has no linked connection user" });
+      const credentials = exchangeCredentials(emx);
+      if (!credentials) {
+        this.logger.error("emx_inbound: exchange has no linked identity recorded, so its provider credentials cannot be fetched. It predates connection tracking and must be reconnected by the user.", { code: "emx.inbound.no_connection", source, emxId });
+        return err({ kind: "provider_fetch_failed", cause: "Exchange has no linked identity recorded" });
       }
       try {
-        token = await this.getProviderToken(emx.connectionUserId, source === "gmail" ? "google" : "microsoft");
+        token = await this.getProviderToken(credentials.userId, credentials.connectionId);
       } catch (e) {
         this.logger.error("emx_inbound: failed to get provider token", { code: "emx.inbound.token_failed", source, emxId, error: e });
         return err({ kind: "provider_fetch_failed", cause: e });

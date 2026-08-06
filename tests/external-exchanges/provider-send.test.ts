@@ -14,7 +14,9 @@ const EMX: ExternalMailExchange = {
   platform: "gmail",
   emailAddress: "user@example.com",
   status: "active",
-  connectionUserId: "authress-user-9",
+  userId: "authress-user-9",
+  connectionUserId: "google-sub-12345",
+  connectionId: "google",
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
 };

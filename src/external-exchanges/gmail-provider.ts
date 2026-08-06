@@ -15,6 +15,7 @@ import type {
   ProviderSendError,
 } from "./provider-adapter.js";
 import { createVerifier } from "./jwks-verifier.js";
+import { exchangeCredentials } from "./provider-adapter.js";
 import { extractMsgId } from "../processor/message-id.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { SignalQueue } from "../messaging/signal-queue.js";
@@ -27,7 +28,7 @@ interface GmailProviderDeps {
   db: AccountDatabase;
   signalQueue: SignalQueue;
   logger: Logger;
-  getProviderToken: (connectionUserId: string, connectionId: string) => Promise<string>;
+  getProviderToken: (userId: string, connectionId: string) => Promise<string>;
 }
 
 export class GmailProvider implements ProviderAdapter {
@@ -262,14 +263,15 @@ export class GmailProvider implements ProviderAdapter {
       return c.json({}, 200);
     }
 
-    if (!emx.connectionUserId) {
-      this.logger.error("Gmail webhook: exchange has no linked connection user, so its provider credentials cannot be fetched. It predates connection-user tracking and must be reconnected by the user.", { code: "emx.gmail.no_connection_user", emxId: emx.id });
+    const credentials = exchangeCredentials(emx);
+    if (!credentials) {
+      this.logger.error("Gmail webhook: exchange has no linked identity recorded, so its provider credentials cannot be fetched. It predates connection tracking and must be reconnected by the user.", { code: "emx.gmail.no_connection", emxId: emx.id });
       return c.json({}, 200);
     }
 
     let token: string;
     try {
-      token = await this.getProviderToken(emx.connectionUserId, "google");
+      token = await this.getProviderToken(credentials.userId, credentials.connectionId);
     } catch (e) {
       this.logger.error("Gmail webhook: failed to get provider token", { code: "emx.gmail.token_failed", emxId: emx.id, error: e });
       return c.json({}, 200);

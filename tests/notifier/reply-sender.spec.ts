@@ -76,7 +76,9 @@ const ACTIVE_GMAIL_EXCHANGE: ExternalMailExchange = {
   platform: "gmail",
   emailAddress: "user@gmail.com",
   status: "active",
-  connectionUserId: "authress-user-9",
+  userId: "authress-user-9",
+  connectionUserId: "google-sub-12345",
+  connectionId: "google",
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
 };
@@ -246,6 +248,42 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     expect(result._unsafeUnwrap()).toEqual({ messageId: "gmail-msg-1", outboundMsgId: "abc@mail.gmail.com" });
     expect(emailService.send).not.toHaveBeenCalled();
     expect(adapter.sendMessage).toHaveBeenCalledOnce();
+  });
+
+  it("uses the connection recorded on the exchange rather than one derived from the platform", async () => {
+    // A connection renamed in the Authress portal — a platform-derived "google" would miss it.
+    const getProviderToken = vi.fn().mockResolvedValue("token-xyz");
+    const adapter = makeGmailAdapter(ok({ providerMessageId: "gmail-msg-1" }));
+    const handler = makeSender({
+      emailService: makeEmailService(),
+      accountDb: makeAccountDb({
+        alias: ALIAS_WITH_EXCHANGE,
+        exchange: { ...ACTIVE_GMAIL_EXCHANGE, connectionId: "google-prod" },
+      }),
+      adapters: { gmail: adapter },
+      getProviderToken,
+    });
+
+    await handler.sendReply(REPLY);
+
+    expect(getProviderToken).toHaveBeenCalledWith("authress-user-9", "google-prod");
+  });
+
+  it("refuses to send when the exchange predates connection tracking", async () => {
+    const emailService = makeEmailService();
+    const legacy = { ...ACTIVE_GMAIL_EXCHANGE };
+    delete legacy.userId;
+    delete legacy.connectionId;
+    const handler = makeSender({
+      emailService,
+      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, exchange: legacy }),
+      adapters: { gmail: makeGmailAdapter(ok({ providerMessageId: "unused" })) },
+    });
+
+    const result = await handler.sendReply(REPLY);
+
+    expect(result.isErr()).toBe(true);
+    expect(emailService.send).not.toHaveBeenCalled();
   });
 
   it("fetches the provider token with the exchange's connection user, not the accountId", async () => {

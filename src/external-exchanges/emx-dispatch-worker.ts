@@ -2,6 +2,7 @@ import { DateTime } from "luxon";
 import { ok } from "../errors.js";
 import type { Result } from "../errors.js";
 import type { ProviderAdapter } from "./provider-adapter.js";
+import { exchangeCredentials } from "./provider-adapter.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 
@@ -9,7 +10,7 @@ interface EmxDispatchWorkerDeps {
   logger: Logger;
   db: AccountDatabase;
   adapters: Record<string, ProviderAdapter>;
-  getProviderToken: (connectionUserId: string, connectionId: string) => Promise<string>;
+  getProviderToken: (userId: string, connectionId: string) => Promise<string>;
 }
 
 export interface EmxDispatchPayload {
@@ -77,12 +78,13 @@ export class EmxDispatchWorker {
     if (emx.platform === "imap" || emx.platform === "jmap") {
       token = "";
     } else {
-      if (!emx.connectionUserId) {
-        this.logger.error("emx_dispatch: exchange has no linked connection user, so its provider credentials cannot be fetched. It predates connection-user tracking and must be reconnected by the user.", { code: "emx.dispatch.no_connection_user", emxId: emx.id, platform: emx.platform });
+      const credentials = exchangeCredentials(emx);
+      if (!credentials) {
+        this.logger.error("emx_dispatch: exchange has no linked identity recorded, so its provider credentials cannot be fetched. It predates connection tracking and must be reconnected by the user.", { code: "emx.dispatch.no_connection", emxId: emx.id, platform: emx.platform });
         return;
       }
       try {
-        token = await this.getProviderToken(emx.connectionUserId, emx.platform === "gmail" ? "google" : "microsoft");
+        token = await this.getProviderToken(credentials.userId, credentials.connectionId);
       } catch (e) {
         this.logger.error("emx_dispatch: failed to get provider token", { code: "emx.dispatch.token_failed", emxId: emx.id, platform: emx.platform, error: e });
         return;

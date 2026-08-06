@@ -55,7 +55,7 @@ interface OutlookProviderDeps {
   db: AccountDatabase;
   signalQueue: SignalQueue;
   logger: Logger;
-  getProviderToken: (connectionUserId: string, connectionId: string) => Promise<string>;
+  getProviderToken: (userId: string, connectionId: string) => Promise<string>;
 }
 
 // ---------------------------------------------------------------------------

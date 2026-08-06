@@ -3,6 +3,7 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { DateTime } from "luxon";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js";
+import { exchangeCredentials } from "../external-exchanges/provider-adapter.js";
 import type { EncryptionManager } from "../secrets/encryption-manager.js";
 import type { Logger } from "../logger.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
@@ -15,7 +16,21 @@ const CreateExternalExchangeRequest = z.object({
   // mailbox address on its own — the linked identity only exposes the provider-side user id,
   // which for Google is a numeric subject — so the provider is the authority here.
   emailAddress: z.string().email().optional(),
+  // The Authress identity-connection the caller just linked, and their id at that provider.
+  // The client knows both (it chose the connection and can read the linked identity back off
+  // the profile); the server cannot infer either. Persisted so no later code has to guess.
+  connectionId: z.string().max(256).optional(),
+  connectionUserId: z.string().max(256).optional(),
 });
+
+/**
+ * Connection id to use when a client did not send one.
+ *
+ * This is the one place a connection id is inferred, and only at connect time, where the
+ * inference matches what the client would have sent anyway. Every later use reads the value
+ * persisted on the exchange — see `exchangeCredentials`.
+ */
+const DEFAULT_CONNECTION_IDS: Record<string, string> = { gmail: "google", outlook: "microsoft" };
 
 const CreateImapExchangeRequest = z.object({
   platform: z.literal("imap"),
@@ -103,7 +118,7 @@ export class ExternalExchangesApi {
   constructor(
     private readonly accountDb: AccountDatabase,
     private readonly adapters: Record<string, ProviderAdapter>,
-    private readonly getProviderToken: (connectionUserId: string, connectionId: string) => Promise<string>,
+    private readonly getProviderToken: (userId: string, connectionId: string) => Promise<string>,
     private readonly encryptionManager: EncryptionManager,
     private readonly signalQueue: SignalQueue,
     private readonly logger: Logger,
@@ -270,19 +285,20 @@ export class ExternalExchangesApi {
       const adapter = adapters[body.platform];
       if (!adapter) return err(c, 422, "Unsupported platform");
 
-      const connectionId = body.platform === "gmail" ? "google" : "microsoft";
+      const connectionId = body.connectionId ?? DEFAULT_CONNECTION_IDS[body.platform];
+      if (!connectionId) return err(c, 422, "Unsupported platform");
 
       // The provider credentials Authress holds are keyed on the Authress userId of whoever
       // linked the identity — which is the caller, right now, mid-OAuth-return. Accounts are
       // multi-user and an accountId is not a user, so this is the only point at which the
       // right value is known; every later token fetch (webhook, dispatcher, send) reads it
       // back off the EMX record.
-      const connectionUserId = c.get("auth")?.userId;
-      if (!connectionUserId) return err(c, 401, "Unauthorized");
+      const userId = c.get("auth")?.userId;
+      if (!userId) return err(c, 401, "Unauthorized");
 
       let token: string;
       try {
-        token = await getProviderToken(connectionUserId, connectionId);
+        token = await getProviderToken(userId, connectionId);
       } catch (e) {
         logger.error("Failed to get provider token for activation", { code: "api.emx.create.token_failed", error: e });
         // Without a token the mailbox address cannot be resolved either, so there is nothing
@@ -347,7 +363,7 @@ export class ExternalExchangesApi {
 
       const { syncCursor, expiresAt, providerSubscriptionId } = activateResult.value;
       if (existing) {
-        const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "active", syncCursor, expiresAt, providerSubscriptionId, connectionUserId, errorReason: undefined, consecutiveFailures: 0 });
+        const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "active", syncCursor, expiresAt, providerSubscriptionId, userId, ...(body.connectionUserId ? { connectionUserId: body.connectionUserId } : {}), connectionId, errorReason: undefined, consecutiveFailures: 0 });
         if (updateResult.isErr()) { logger.error("Failed to update exchange record", { code: "api.emx.create_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
         await accountDb.ensureAlias(accountId, emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined);
         await linkAliasToExchange(accountId, emailAddress, existing.id);
@@ -355,7 +371,7 @@ export class ExternalExchangesApi {
         logger.info("OAuth exchange reactivated", { code: "api.emx.oauth.reactivated", accountId, emxId: existing.id, platform: body.platform });
         return c.json(serializeEmx(updateResult.value), 200);
       }
-      const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress, status: "active", syncCursor, lastSyncAt: DateTime.utc().toISO()!, expiresAt, providerSubscriptionId, connectionUserId });
+      const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress, status: "active", syncCursor, lastSyncAt: DateTime.utc().toISO()!, expiresAt, providerSubscriptionId, userId, ...(body.connectionUserId ? { connectionUserId: body.connectionUserId } : {}), connectionId });
       if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
       await accountDb.ensureAlias(accountId, emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined);
       await linkAliasToExchange(accountId, emailAddress, result.value.id);
@@ -565,10 +581,10 @@ export class ExternalExchangesApi {
       if (emx.status === "active") {
         const adapter = adapters[emx.platform];
         if (adapter) {
-          const connectionId = emx.platform === "gmail" ? "google" : "microsoft";
+          const credentials = exchangeCredentials(emx);
           let token: string;
           try {
-            token = emx.connectionUserId ? await getProviderToken(emx.connectionUserId, connectionId) : "";
+            token = credentials ? await getProviderToken(credentials.userId, credentials.connectionId) : "";
           } catch (e) {
             logger.warn("Failed to get provider token for deactivation — proceeding with local deletion", { code: "api.emx.deactivate.token_failed", emxId, error: e });
             token = "";

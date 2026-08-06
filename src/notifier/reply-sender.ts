@@ -17,6 +17,7 @@ import type { ReplySender, ReplySendError } from "../processor/processor.js";
 import type { EmailService } from "../email/email-service.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { ProviderAdapter, ProviderSendError } from "../external-exchanges/provider-adapter.js";
+import { exchangeCredentials } from "../external-exchanges/provider-adapter.js";
 import type { ExternalMailExchange } from "../types/index.js";
 import type { Result } from "../errors.js";
 import { ok, err } from "../errors.js";
@@ -29,7 +30,7 @@ interface ReplySenderDeps {
   emailService: EmailService;
   accountDb: AccountDatabase;
   adapters: Record<string, ProviderAdapter>;
-  getProviderToken: (connectionUserId: string, connectionId: string) => Promise<string>;
+  getProviderToken: (userId: string, connectionId: string) => Promise<string>;
   logger: Logger;
 }
 
@@ -116,8 +117,8 @@ export class ReplySenderService implements ReplySender {
     if (!this.adapters[emx.platform]?.sendMessage) {
       return this.fallbackOrRefuse(accountId, fromAddress, `${emx.platform} exchanges cannot send`);
     }
-    if (!emx.connectionUserId) {
-      return this.fallbackOrRefuse(accountId, fromAddress, "exchange has no linked connection user — it predates send support and must be reconnected");
+    if (!exchangeCredentials(emx)) {
+      return this.fallbackOrRefuse(accountId, fromAddress, "exchange has no linked identity recorded — it predates connection tracking and must be reconnected");
     }
     return ok(emx);
   }
@@ -145,12 +146,14 @@ export class ReplySenderService implements ReplySender {
     opts: { to: string; from: string; subject: string; body: string; accountId: string; signalId?: string; headers: Array<{ Name: string; Value: string }> },
   ): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
     const adapter = this.adapters[emx.platform];
-    // resolveExchangeRoute already established both of these; narrowing for the type checker.
+    // resolveExchangeRoute already established all of these; narrowing for the type checker.
     if (!adapter?.sendMessage) return err({ kind: "provider_send_rejected", cause: `${emx.platform} exchanges cannot send` });
+    const credentials = exchangeCredentials(emx);
+    if (!credentials) return err({ kind: "provider_send_rejected", cause: "Exchange has no linked identity recorded" });
 
     let token: string;
     try {
-      token = await this.getProviderToken(emx.connectionUserId!, emx.platform === "gmail" ? "google" : "microsoft");
+      token = await this.getProviderToken(credentials.userId, credentials.connectionId);
     } catch (e) {
       this.logger.error("Failed to get provider token for send", { code: "reply_sender.provider_token_failed", emxId: emx.id, platform: emx.platform, error: e });
       return err({ kind: "provider_send_failed", cause: e });

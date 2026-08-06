@@ -38,6 +38,19 @@ export interface RawMimeResult {
   receivedAt: string
 }
 
+/**
+ * The linked-identity coordinates a provider token lookup needs, read off an exchange record.
+ *
+ * Returns null when the exchange predates connection tracking (or is IMAP/JMAP, which has no
+ * linked identity at all). Callers treat null as "this exchange cannot be used until the user
+ * reconnects it" — there is deliberately no fallback to deriving the connection from the
+ * platform, because a derived value is a guess about someone else's configuration.
+ */
+export function exchangeCredentials(emx: ExternalMailExchange): { userId: string; connectionId: string } | null {
+  if (!emx.userId || !emx.connectionId) return null
+  return { userId: emx.userId, connectionId: emx.connectionId }
+}
+
 export interface SendResult {
   /** Provider-assigned id for the sent message (Gmail message id, Graph request id). */
   providerMessageId: string
