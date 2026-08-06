@@ -443,16 +443,17 @@ export class SignalProcessor {
         const recipientDomain = signal.data.recipientAddress.split("@")[1] ?? "";
         const domainResult = await this.accountDb.getDomainByName(accountId, recipientDomain);
         const domain = domainResult.isOk() ? domainResult.value : null;
-        const from = domain?.senderSetupComplete
-          ? signal.data.recipientAddress
-          : `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`;
+        const usePlatformDomain = !domain?.senderSetupComplete;
+        const from = usePlatformDomain
+          ? `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`
+          : signal.data.recipientAddress;
         const pongResult = await this.replySender.sendReply({
           to: signal.data.from.address,
           from,
           subject: signal.data.subject ?? "",
           body: "textBody" in signal.data ? (signal.data.textBody ?? "") : "",
           inReplyTo: signal.id,
-          accountId,
+          ...(!usePlatformDomain ? { accountId } : {}),
           signalId: signal.id,
           threadId: thread.id,
         });

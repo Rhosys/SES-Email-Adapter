@@ -25,12 +25,13 @@ export class ReplySenderService implements ReplySender {
     subject: string;
     body: string;
     inReplyTo: string;
-    accountId: string;
+    accountId?: string;
     signalId?: string;
     threadId?: string;
   }): Promise<Result<{ messageId: string }, EmailServiceError>> {
+    const resolvedAccountId = opts.accountId ?? this.emailService.platformTenant;
     const tags = buildOutboundTags("reply", {
-      accountId: opts.accountId,
+      accountId: resolvedAccountId,
       signalId: opts.signalId,
       threadId: opts.threadId,
     });
@@ -40,7 +41,7 @@ export class ReplySenderService implements ReplySender {
       fromOverride: opts.from,
       subject: `Re: ${opts.subject}`,
       textBody: opts.body,
-      accountId: opts.accountId,
+      accountId: resolvedAccountId,
       headers: [
         { Name: "In-Reply-To", Value: opts.inReplyTo },
         { Name: "References", Value: opts.inReplyTo },
@@ -49,16 +50,16 @@ export class ReplySenderService implements ReplySender {
     });
 
     if (result.isErr() && result.error.kind === "permanent_ses_error") {
-      this.logger.warn("Reply send permanently rejected by SES — will not retry.", { code: "reply_sender.send_permanent", accountId: opts.accountId, error: result.error });
+      this.logger.warn("Reply send permanently rejected by SES — will not retry.", { code: "reply_sender.send_permanent", accountId: resolvedAccountId, error: result.error });
       return ok({ messageId: "" });
     }
 
     if (result.isErr()) {
-      this.logger.info("Reply send failed (transient)", { code: "reply_sender.transient_failure", to: opts.to, accountId: opts.accountId, error: result.error });
+      this.logger.info("Reply send failed (transient)", { code: "reply_sender.transient_failure", to: opts.to, accountId: resolvedAccountId, error: result.error });
       return result;
     }
 
-    this.logger.info("Reply sent", { code: "reply_sender.sent", to: opts.to, from: opts.from, accountId: opts.accountId });
+    this.logger.info("Reply sent", { code: "reply_sender.sent", to: opts.to, from: opts.from, accountId: resolvedAccountId });
     return result;
   }
 }
