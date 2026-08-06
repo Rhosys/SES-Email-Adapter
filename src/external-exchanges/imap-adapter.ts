@@ -234,7 +234,10 @@ export class ImapAdapter implements ProviderAdapter {
         return err({ kind: "provider_renewal_failed", cause: "Mailbox was rebuilt on the server (UIDVALIDITY changed)" });
       }
 
-      const newUids = await conn.searchNewUids(lastUid);
+      // Back up cursor by 10 to catch any messages that landed between cursor-write and this poll.
+      // Pipeline deduplicates, so re-enqueuing already-processed UIDs is safe.
+      const searchFrom = Math.max(0, lastUid - 10);
+      const newUids = await conn.searchNewUids(searchFrom);
 
       if (newUids.length > 0) {
         // Cap at 500 (take the lowest 500)
