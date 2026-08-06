@@ -129,7 +129,7 @@ export class CompositeRoot {
 
     const logger = new RequestLogger();
 
-    const signalQueue = new SignalQueue();
+    const signalQueue = new SignalQueue(logger);
 
     const classifier = new SignalClassifier(bedrock, logger);
 
@@ -361,7 +361,6 @@ export class CompositeRoot {
     const emxDispatchWorker = new EmxDispatchWorker({
       logger,
       db: accountDb,
-      signalQueue,
       adapters: emxAdapters,
       getProviderToken,
     });
@@ -427,7 +426,10 @@ export class CompositeRoot {
       schedulerClient,
       emailContentStore: new EmailContentStore(s3),
       triggerDigest: async (accountId: string) => {
-        await signalQueue.send("digest_send", { accountId });
+        const result = await signalQueue.send("digest_send", { accountId });
+        if (result.isErr()) {
+          logger.error("Failed to enqueue digest_send", { code: "composite_root.digest_trigger_failed", accountId, error: result.error });
+        }
       },
       embeddingGenerator,
       threadMatcher: searchDatabase,

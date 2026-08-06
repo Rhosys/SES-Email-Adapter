@@ -11,7 +11,6 @@ import type { ExternalMailExchange } from "../types/index.js";
 import type {
   ProviderAdapter,
   ActivationResult,
-  RenewalResult,
   RawMimeResult,
   ProviderActivationError,
   ProviderRenewalError,
@@ -156,7 +155,7 @@ export class OutlookProvider implements ProviderAdapter {
     }
   }
 
-  async renew(token: string, emx: ExternalMailExchange): Promise<Result<RenewalResult, ProviderRenewalError>> {
+  async renew(token: string, emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>> {
     try {
       const expirationDateTime = DateTime.utc().plus({ hours: 23 }).toISO()!;
       const response = await fetch(`${GRAPH_API}/subscriptions/${emx.providerSubscriptionId}`, {
@@ -166,15 +165,19 @@ export class OutlookProvider implements ProviderAdapter {
       });
       if (!response.ok) {
         const cause = await response.text();
-        this.logger.info("Outlook renewal failed", { code: "emx.outlook.renewal_failed", cause });
+        this.logger.error("Outlook renewal failed", { code: "emx.outlook.renewal_failed", emxId: emx.id, cause });
         return err({ kind: "provider_renewal_failed", cause });
       }
       const data = await response.json() as { expirationDateTime: string };
       const expiresAt = data.expirationDateTime;
+
+      // Update subscription expiry and next sync time (same value for Outlook)
+      await this.db.updateExternalExchange(emx.accountId, emx.id, { expiresAt, nextSyncTime: expiresAt });
+
       this.logger.info("Outlook subscription renewed", { code: "emx.outlook.renewed", emxId: emx.id, expiresAt });
-      return ok({ expiresAt });
+      return ok(undefined);
     } catch (e) {
-      this.logger.info("Outlook renewal failed", { code: "emx.outlook.renewal_failed", cause: e });
+      this.logger.error("Outlook renewal failed", { code: "emx.outlook.renewal_failed", emxId: emx.id, error: e });
       return err({ kind: "provider_renewal_failed", cause: e });
     }
   }
@@ -246,6 +249,8 @@ export class OutlookProvider implements ProviderAdapter {
 
     // 4. Process each notification in value[] where changeType === "created"
     const notifications = body.value ?? [];
+    const messageEntries: Array<{ id: string; payload: unknown }> = [];
+
     for (const notification of notifications) {
       if (notification.changeType !== "created") continue;
 
@@ -269,14 +274,17 @@ export class OutlookProvider implements ProviderAdapter {
         continue;
       }
 
-      await this.signalQueue.send("emx_inbound", {
-        source: "outlook",
-        providerMessageId,
-        emxId: emx.id,
-        accountId: emx.accountId,
+      messageEntries.push({
+        id: `outlook-${messageEntries.length}`,
+        payload: { source: "outlook", providerMessageId, emxId: emx.id, accountId: emx.accountId },
       });
+    }
 
-      this.logger.info("Outlook webhook: enqueued emx_inbound", { code: "emx.outlook.enqueued", providerMessageId, emxId: emx.id });
+    if (messageEntries.length > 0) {
+      const batchResult = await this.signalQueue.sendBatch("emx_inbound", messageEntries);
+      if (batchResult.isErr()) {
+        this.logger.error("Outlook webhook: failed to enqueue emx_inbound batch", { code: "emx.outlook.batch_failed", count: messageEntries.length, error: batchResult.error });
+      }
     }
 
     // 5. Return 202 — Graph expects fast response

@@ -6,7 +6,6 @@ import type { ExternalMailExchange } from "../types/index.js";
 import type {
   ProviderAdapter,
   ActivationResult,
-  RenewalResult,
   RawMimeResult,
   ProviderActivationError,
   ProviderRenewalError,
@@ -72,7 +71,7 @@ export class GmailProvider implements ProviderAdapter {
     }
   }
 
-  async renew(token: string, _emx: ExternalMailExchange): Promise<Result<RenewalResult, ProviderRenewalError>> {
+  async renew(token: string, emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>> {
     try {
       const response = await fetch(`${GMAIL_API}/watch`, {
         method: "POST",
@@ -80,11 +79,19 @@ export class GmailProvider implements ProviderAdapter {
         body: JSON.stringify({ topicName: PUBSUB_TOPIC, labelIds: ["INBOX"] }),
       });
       if (!response.ok) {
-        return err({ kind: "provider_renewal_failed", cause: await response.text() });
+        const cause = await response.text();
+        this.logger.error("Gmail renewal failed", { code: "emx.gmail.renewal_failed", emxId: emx.id, cause });
+        return err({ kind: "provider_renewal_failed", cause });
       }
       const data = await response.json() as { historyId: string; expiration: string };
-      return ok({ expiresAt: DateTime.fromMillis(Number(data.expiration)).toISO()! });
+      const expiresAt = DateTime.fromMillis(Number(data.expiration)).toISO()!;
+
+      // Update subscription expiry and next sync time (same value for Gmail)
+      await this.db.updateExternalExchange(emx.accountId, emx.id, { expiresAt, nextSyncTime: expiresAt });
+
+      return ok(undefined);
     } catch (e) {
+      this.logger.error("Gmail renewal failed", { code: "emx.gmail.renewal_failed", emxId: emx.id, error: e });
       return err({ kind: "provider_renewal_failed", cause: e });
     }
   }
@@ -198,14 +205,22 @@ export class GmailProvider implements ProviderAdapter {
       historyId?: string;
     };
 
+    // Collect all new message IDs and enqueue as a batch
+    const messageIds: string[] = [];
     for (const entry of historyData.history ?? []) {
       for (const added of entry.messagesAdded ?? []) {
-        await this.signalQueue.send("emx_inbound", {
-          source: "gmail",
-          providerMessageId: added.message.id,
-          emxId: emx.id,
-          accountId: emx.accountId,
-        });
+        messageIds.push(added.message.id);
+      }
+    }
+
+    if (messageIds.length > 0) {
+      const entries = messageIds.map((msgId, i) => ({
+        id: `gmail-${i}`,
+        payload: { source: "gmail", providerMessageId: msgId, emxId: emx.id, accountId: emx.accountId },
+      }));
+      const batchResult = await this.signalQueue.sendBatch("emx_inbound", entries);
+      if (batchResult.isErr()) {
+        this.logger.error("Gmail webhook: failed to enqueue emx_inbound batch", { code: "emx.gmail.batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
       }
     }
 

@@ -6,7 +6,6 @@ import type { ExternalMailExchange } from "../types/index.js";
 import type {
   ProviderAdapter,
   ActivationResult,
-  RenewalResult,
   RawMimeResult,
   ProviderActivationError,
   ProviderRenewalError,
@@ -81,63 +80,45 @@ export class ImapConnection {
   }
 
   async getInboxState(): Promise<{ uidvalidity: number; uidNext: number; exists: number }> {
-    const lock = await this.client.getMailboxLock("INBOX");
-    try {
-      const mailbox = this.client.mailbox;
-      if (!mailbox) throw new Error("INBOX unavailable");
-      return {
-        uidvalidity: Number(mailbox.uidValidity),
-        uidNext: mailbox.uidNext,
-        exists: mailbox.exists,
-      };
-    } finally {
-      lock.release();
-    }
+    const mailbox = await this.client.mailboxOpen("INBOX", { readOnly: true });
+    return {
+      uidvalidity: Number(mailbox.uidValidity),
+      uidNext: mailbox.uidNext,
+      exists: mailbox.exists,
+    };
   }
 
   async searchNewUids(afterUid: number): Promise<number[]> {
-    const lock = await this.client.getMailboxLock("INBOX");
-    try {
-      const searchResults = await this.client.search({ uid: `${afterUid + 1}:*` }, { uid: true }) as number[];
-      return searchResults.filter(uid => uid > afterUid).sort((a, b) => a - b);
-    } finally {
-      lock.release();
-    }
+    await this.client.mailboxOpen("INBOX", { readOnly: true });
+    const searchResults = await this.client.search({ uid: `${afterUid + 1}:*` }, { uid: true }) as number[];
+    return searchResults.filter(uid => uid > afterUid).sort((a, b) => a - b);
   }
 
   async fetchEnvelopes(startUid: number, limit: number): Promise<Array<{ uid: number; subject: string; from: string }>> {
-    const lock = await this.client.getMailboxLock("INBOX");
-    try {
-      const results: Array<{ uid: number; subject: string; from: string }> = [];
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      for await (const msg of this.client.fetch(`${startUid}:*`, { envelope: true, uid: true }) as AsyncIterable<any>) {
-        const envelope = msg.envelope;
-        const from = envelope?.from?.[0];
-        results.push({
-          uid: msg.uid as number,
-          subject: (envelope?.subject as string) || "(no subject)",
-          from: from ? `${from.name || ""} <${from.address || ""}>`.trim() : "(unknown)",
-        });
-        if (results.length >= limit) break;
-      }
-      return results;
-    } finally {
-      lock.release();
+    await this.client.mailboxOpen("INBOX", { readOnly: true });
+    const results: Array<{ uid: number; subject: string; from: string }> = [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for await (const msg of this.client.fetch(`${startUid}:*`, { envelope: true, uid: true }) as AsyncIterable<any>) {
+      const envelope = msg.envelope;
+      const from = envelope?.from?.[0];
+      results.push({
+        uid: msg.uid as number,
+        subject: (envelope?.subject as string) || "(no subject)",
+        from: from ? `${from.name || ""} <${from.address || ""}>`.trim() : "(unknown)",
+      });
+      if (results.length >= limit) break;
     }
+    return results;
   }
 
   async fetchRawMessage(uid: number): Promise<{ rawMime: Uint8Array; receivedAt: string } | undefined> {
-    const lock = await this.client.getMailboxLock("INBOX");
-    try {
-      const msg = await this.client.fetchOne(uid.toString(), { source: true, internalDate: true }, { uid: true });
-      if (!msg) return undefined;
-      return {
-        rawMime: msg.source as Uint8Array,
-        receivedAt: (msg.internalDate as Date).toISOString(),
-      };
-    } finally {
-      lock.release();
-    }
+    await this.client.mailboxOpen("INBOX", { readOnly: true });
+    const msg = await this.client.fetchOne(uid.toString(), { source: true, internalDate: true }, { uid: true });
+    if (!msg) return undefined;
+    return {
+      rawMime: msg.source as Uint8Array,
+      receivedAt: (msg.internalDate as Date).toISOString(),
+    };
   }
 
   async listMailboxes(): Promise<Array<{ path: string; flags: string[] }>> {
@@ -215,7 +196,7 @@ export class ImapAdapter implements ProviderAdapter {
     }
   }
 
-  async renew(_token: string, emx: ExternalMailExchange): Promise<Result<RenewalResult, ProviderRenewalError>> {
+  async renew(_token: string, emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>> {
     const imapConfig = emx.imapConfig;
     if (!imapConfig) {
       return err({ kind: "provider_renewal_failed", cause: "Missing imapConfig" });
@@ -238,6 +219,18 @@ export class ImapAdapter implements ProviderAdapter {
       const { uidvalidity: storedUidvalidity, lastUid } = parseSyncCursor(emx.syncCursor!);
 
       if (currentUidvalidity !== storedUidvalidity) {
+        const failures = (emx.consecutiveFailures ?? 0) + 1;
+        if (failures >= 3) {
+          await this.db.updateExternalExchange(emx.accountId, emx.id, {
+            status: "activation_failed",
+            errorReason: "Mailbox was rebuilt on the server (UIDVALIDITY changed)",
+            consecutiveFailures: failures,
+          });
+          this.logger.error("IMAP deactivated after repeated UIDVALIDITY mismatch", { code: "imap.renew.uidvalidity_deactivated", emxId: emx.id, failures });
+        } else {
+          await this.db.updateExternalExchange(emx.accountId, emx.id, { consecutiveFailures: failures });
+          this.logger.warn("IMAP UIDVALIDITY changed", { code: "imap.renew.uidvalidity_changed", emxId: emx.id, stored: storedUidvalidity, current: currentUidvalidity, failures });
+        }
         return err({ kind: "provider_renewal_failed", cause: "Mailbox was rebuilt on the server (UIDVALIDITY changed)" });
       }
 
@@ -247,17 +240,14 @@ export class ImapAdapter implements ProviderAdapter {
         // Cap at 500 (take the lowest 500)
         const batch = newUids.slice(0, 500);
 
-        // Enqueue emx_inbound per UID
-        for (const uid of batch) {
-          const sendResult = await this.signalQueue.send("emx_inbound", {
-            source: "imap",
-            providerMessageId: String(uid),
-            emxId: emx.id,
-            accountId: emx.accountId,
-          });
-          if (sendResult.isErr()) {
-            this.logger.warn("IMAP: failed to enqueue emx_inbound", { code: "imap.renew.enqueue_failed", emxId: emx.id, uid, error: sendResult.error });
-          }
+        // Enqueue emx_inbound via batch
+        const entries = batch.map(uid => ({
+          id: String(uid),
+          payload: { source: "imap", providerMessageId: String(uid), emxId: emx.id, accountId: emx.accountId },
+        }));
+        const batchResult = await this.signalQueue.sendBatch("emx_inbound", entries);
+        if (batchResult.isErr()) {
+          this.logger.error("IMAP: failed to enqueue emx_inbound batch", { code: "imap.renew.batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
         }
 
         // Update syncCursor to highest UID in batch
@@ -265,17 +255,37 @@ export class ImapAdapter implements ProviderAdapter {
         await this.db.updateExternalExchange(emx.accountId, emx.id, {
           syncCursor: formatSyncCursor(currentUidvalidity, highestUid),
           lastSyncAt: DateTime.utc().toISO()!,
+          nextSyncTime: DateTime.utc().plus({ hours: 1 }).toISO()!,
+          consecutiveFailures: 0,
         });
 
         this.logger.info("IMAP sync complete", { code: "imap.renew.synced", emxId: emx.id, newMessages: batch.length, highestUid });
       } else {
+        // No new messages — just update timing
+        await this.db.updateExternalExchange(emx.accountId, emx.id, {
+          nextSyncTime: DateTime.utc().plus({ hours: 1 }).toISO()!,
+          consecutiveFailures: 0,
+        });
         this.logger.info("IMAP sync complete, no new messages", { code: "imap.renew.synced", emxId: emx.id, newMessages: 0 });
       }
 
-      return ok({ expiresAt: DateTime.utc().plus({ hours: 1 }).toISO()! });
+      return ok(undefined);
     } catch (e: unknown) {
       const cause = e instanceof Error ? e.message : "IMAP renewal failed";
       this.logger.info("IMAP renewal failed", { code: "imap.renew.failed", emxId: emx.id, cause });
+
+      const failures = (emx.consecutiveFailures ?? 0) + 1;
+      if (failures >= 3) {
+        await this.db.updateExternalExchange(emx.accountId, emx.id, {
+          status: "activation_failed",
+          errorReason: cause,
+          consecutiveFailures: failures,
+        });
+        this.logger.error("IMAP deactivated after 3 consecutive failures", { code: "imap.renew.deactivated", emxId: emx.id, failures });
+      } else {
+        await this.db.updateExternalExchange(emx.accountId, emx.id, { consecutiveFailures: failures });
+      }
+
       return err({ kind: "provider_renewal_failed", cause });
     } finally {
       await conn.logout();

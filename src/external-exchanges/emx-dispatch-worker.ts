@@ -4,12 +4,10 @@ import type { Result } from "../errors.js";
 import type { ProviderAdapter } from "./provider-adapter.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
-import type { SignalQueue } from "../messaging/signal-queue.js";
 
 interface EmxDispatchWorkerDeps {
   logger: Logger;
   db: AccountDatabase;
-  signalQueue: SignalQueue;
   adapters: Record<string, ProviderAdapter>;
   getProviderToken: (accountId: string, connectionId: string) => Promise<string>;
 }
@@ -22,14 +20,12 @@ export interface EmxDispatchPayload {
 export class EmxDispatchWorker {
   private readonly logger: Logger;
   private readonly db: AccountDatabase;
-  private readonly signalQueue: SignalQueue;
   private readonly adapters: Record<string, ProviderAdapter>;
   private readonly getProviderToken: EmxDispatchWorkerDeps["getProviderToken"];
 
   constructor(deps: EmxDispatchWorkerDeps) {
     this.logger = deps.logger;
     this.db = deps.db;
-    this.signalQueue = deps.signalQueue;
     this.adapters = deps.adapters;
     this.getProviderToken = deps.getProviderToken;
   }
@@ -84,89 +80,18 @@ export class EmxDispatchWorker {
       try {
         token = await this.getProviderToken(emx.accountId, emx.platform === "gmail" ? "google" : "microsoft");
       } catch (e) {
-        this.logger.error("emx_dispatch: failed to get provider token", { code: "emx.dispatch.token_failed", emxId: emx.id, error: e });
+        this.logger.error("emx_dispatch: failed to get provider token", { code: "emx.dispatch.token_failed", emxId: emx.id, platform: emx.platform, error: e });
         return;
       }
     }
 
+    // Adapters own all DB writes (cursor, timing, failure tracking) internally
     const renewResult = await adapter.renew(token, emx);
     if (renewResult.isErr()) {
-      if (emx.platform === "imap" || emx.platform === "jmap") {
-        const failures = (emx.consecutiveFailures ?? 0) + 1;
-        if (failures >= 3) {
-          await this.db.updateExternalExchange(emx.accountId, emx.id, {
-            status: "activation_failed",
-            errorReason: String(renewResult.error.cause ?? renewResult.error.kind),
-            consecutiveFailures: failures,
-          });
-          this.logger.error(`emx_dispatch: ${emx.platform} deactivated after 3 consecutive failures`, { code: `emx.dispatch.${emx.platform}_deactivated`, emxId: emx.id, failures });
-        } else {
-          await this.db.updateExternalExchange(emx.accountId, emx.id, { consecutiveFailures: failures });
-          this.logger.warn(`emx_dispatch: ${emx.platform} renewal failed, incrementing consecutiveFailures`, { code: `emx.dispatch.${emx.platform}_failure`, emxId: emx.id, failures });
-        }
-      } else {
-        this.logger.error("emx_dispatch: renewal failed", { code: "emx.dispatch.renewal_failed", emxId: emx.id, platform: emx.platform, error: renewResult.error });
-      }
+      this.logger.error("emx_dispatch: renewal failed", { code: "emx.dispatch.renewal_failed", emxId: emx.id, platform: emx.platform, error: renewResult.error });
       return;
     }
 
-    if (emx.platform === "imap" || emx.platform === "jmap") {
-      await this.db.updateExternalExchange(emx.accountId, emx.id, { expiresAt: renewResult.value.expiresAt, consecutiveFailures: 0 });
-    } else {
-      const updateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { expiresAt: renewResult.value.expiresAt });
-      if (updateResult.isErr()) {
-        this.logger.error("emx_dispatch: failed to update expiresAt", { code: "emx.dispatch.update_failed", emxId: emx.id, error: updateResult.error });
-      }
-    }
-
-    if (emx.platform === "gmail") {
-      const historyResp = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=${emx.syncCursor}&historyTypes=messageAdded`, {
-        headers: { "Authorization": `Bearer ${token}` },
-      });
-      if (historyResp.ok) {
-        const historyData = await historyResp.json() as { history?: Array<{ messagesAdded?: Array<{ message: { id: string } }> }>; historyId?: string };
-        let enqueued = 0;
-        for (const entry of historyData.history ?? []) {
-          for (const added of entry.messagesAdded ?? []) {
-            const sendResult = await this.signalQueue.send("emx_inbound", { source: "gmail", providerMessageId: added.message.id, emxId: emx.id, accountId: emx.accountId });
-            if (sendResult.isErr()) {
-              this.logger.warn("emx_dispatch: Gmail enqueue failed", { code: "emx.dispatch.gmail_enqueue_failed", emxId: emx.id, providerMessageId: added.message.id, error: sendResult.error });
-            }
-            enqueued++;
-          }
-        }
-        if (historyData.historyId) {
-          await this.db.updateExternalExchange(emx.accountId, emx.id, { syncCursor: historyData.historyId, lastSyncAt: DateTime.utc().toISO()! });
-        }
-        this.logger.info("emx_dispatch: Gmail history sync complete", { code: "emx.dispatch.gmail_synced", emxId: emx.id, newMessages: enqueued, newHistoryId: historyData.historyId });
-      } else {
-        this.logger.warn("emx_dispatch: Gmail history.list failed", { code: "emx.dispatch.gmail_history_failed", emxId: emx.id, status: historyResp.status });
-      }
-    } else if (emx.platform === "outlook" && emx.syncCursor) {
-      let nextLink: string | null = emx.syncCursor;
-      let latestDeltaLink = emx.syncCursor;
-      let enqueued = 0;
-      while (nextLink) {
-        const deltaResp = await fetch(nextLink, { headers: { "Authorization": `Bearer ${token}` } });
-        if (!deltaResp.ok) {
-          this.logger.warn("emx_dispatch: Outlook delta failed", { code: "emx.dispatch.outlook_delta_failed", emxId: emx.id, status: deltaResp.status });
-          break;
-        }
-        const page = await deltaResp.json() as { value?: Array<{ id: string }>; "@odata.nextLink"?: string; "@odata.deltaLink"?: string };
-        for (const msg of page.value ?? []) {
-          const sendResult = await this.signalQueue.send("emx_inbound", { source: "outlook", providerMessageId: msg.id, emxId: emx.id, accountId: emx.accountId });
-          if (sendResult.isErr()) {
-            this.logger.warn("emx_dispatch: Outlook enqueue failed", { code: "emx.dispatch.outlook_enqueue_failed", emxId: emx.id, providerMessageId: msg.id, error: sendResult.error });
-          }
-          enqueued++;
-        }
-        nextLink = page["@odata.nextLink"] ?? null;
-        if (page["@odata.deltaLink"]) latestDeltaLink = page["@odata.deltaLink"];
-      }
-      await this.db.updateExternalExchange(emx.accountId, emx.id, { syncCursor: latestDeltaLink, lastSyncAt: DateTime.utc().toISO()! });
-      this.logger.info("emx_dispatch: Outlook delta sync complete", { code: "emx.dispatch.outlook_synced", emxId: emx.id, newMessages: enqueued });
-    }
-
-    this.logger.info("emx_dispatch: renewed successfully", { code: "emx.dispatch.renewed", emxId: emx.id, newExpiresAt: renewResult.value.expiresAt });
+    this.logger.info("emx_dispatch: renewed successfully", { code: "emx.dispatch.renewed", emxId: emx.id, platform: emx.platform });
   }
 }

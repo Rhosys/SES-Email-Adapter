@@ -25,8 +25,8 @@ function mockDb(overrides?: Partial<AccountDatabase>): AccountDatabase {
   } as unknown as AccountDatabase;
 }
 
-function mockSignalQueue(): SignalQueue & { send: ReturnType<typeof vi.fn> } {
-  return { send: vi.fn(async () => ({ isOk: () => true, isErr: () => false, value: undefined })) } as unknown as SignalQueue & { send: ReturnType<typeof vi.fn> };
+function mockSignalQueue(): SignalQueue & { send: ReturnType<typeof vi.fn>; sendBatch: ReturnType<typeof vi.fn> } {
+  return { send: vi.fn(async () => ({ isOk: () => true, isErr: () => false, value: undefined })), sendBatch: vi.fn(async () => ({ isOk: () => true, isErr: () => false, value: undefined })) } as unknown as SignalQueue & { send: ReturnType<typeof vi.fn>; sendBatch: ReturnType<typeof vi.fn> };
 }
 
 function mockLogger(): Logger {
@@ -291,14 +291,19 @@ describe("JmapAdapter.renew", () => {
     const result = await adapter.renew("", emx);
 
     expect(result.isOk()).toBe(true);
-    expect(signalQueue.send).toHaveBeenCalledTimes(5);
+    expect(signalQueue.sendBatch).toHaveBeenCalledTimes(1);
 
-    // Verify message shape
-    expect(signalQueue.send).toHaveBeenCalledWith("emx_inbound", {
-      source: "jmap",
-      providerMessageId: "msg-0",
-      emxId: "emx_test123",
-      accountId: "acct-1",
+    // Verify batch contains 5 entries
+    const batchCall = signalQueue.sendBatch.mock.calls[0]!;
+    expect(batchCall[0]).toBe("emx_inbound");
+    expect(batchCall[1]).toHaveLength(5);
+    expect(batchCall[1][0]).toMatchObject({
+      payload: {
+        source: "jmap",
+        providerMessageId: "msg-0",
+        emxId: "emx_test123",
+        accountId: "acct-1",
+      },
     });
   });
 
@@ -333,13 +338,18 @@ describe("JmapAdapter.renew", () => {
     const result = await adapter.renew("", emx);
 
     expect(result.isOk()).toBe(true);
-    // Fallback enqueues all returned IDs
-    expect(signalQueue.send).toHaveBeenCalledTimes(2);
-    expect(signalQueue.send).toHaveBeenCalledWith("emx_inbound", {
-      source: "jmap",
-      providerMessageId: "msg-a",
-      emxId: "emx_test123",
-      accountId: "acct-1",
+    // Fallback enqueues all returned IDs via batch
+    expect(signalQueue.sendBatch).toHaveBeenCalledTimes(1);
+    const batchCall = signalQueue.sendBatch.mock.calls[0]!;
+    expect(batchCall[0]).toBe("emx_inbound");
+    expect(batchCall[1]).toHaveLength(2);
+    expect(batchCall[1][0]).toMatchObject({
+      payload: {
+        source: "jmap",
+        providerMessageId: "msg-a",
+        emxId: "emx_test123",
+        accountId: "acct-1",
+      },
     });
   });
 

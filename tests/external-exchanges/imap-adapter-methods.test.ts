@@ -9,10 +9,9 @@ import type { Logger } from "../../src/logger.js";
 // ---------------------------------------------------------------------------
 
 const mockMailbox = { uidValidity: BigInt(123), uidNext: 43, exists: 42 };
-const mockLock = { release: vi.fn() };
 const mockClient = {
   connect: vi.fn().mockResolvedValue(undefined),
-  getMailboxLock: vi.fn().mockResolvedValue(mockLock),
+  mailboxOpen: vi.fn().mockResolvedValue(mockMailbox),
   logout: vi.fn().mockResolvedValue(undefined),
   search: vi.fn().mockResolvedValue([]),
   fetchOne: vi.fn().mockResolvedValue(null),
@@ -40,6 +39,7 @@ const mockDb = {
 
 const mockSignalQueue = {
   send: vi.fn().mockResolvedValue(ok(undefined)),
+  sendBatch: vi.fn().mockResolvedValue(ok(undefined)),
 };
 
 const mockLogger: Logger = {
@@ -99,7 +99,7 @@ beforeEach(() => {
   mockMailbox.uidNext = 43;
   mockMailbox.exists = 42;
   mockClient.connect.mockResolvedValue(undefined);
-  mockClient.getMailboxLock.mockResolvedValue(mockLock);
+  mockClient.mailboxOpen.mockResolvedValue(mockMailbox);
   mockClient.logout.mockResolvedValue(undefined);
   mockClient.search.mockResolvedValue([]);
   mockClient.fetchOne.mockResolvedValue(null);
@@ -181,8 +181,9 @@ describe("ImapAdapter.renew", () => {
     const result = await adapter.renew("", emx);
 
     expect(result.isOk()).toBe(true);
-    // Only 500 should be enqueued
-    expect(mockSignalQueue.send).toHaveBeenCalledTimes(500);
+    // Only 500 should be enqueued (via single batch call)
+    expect(mockSignalQueue.sendBatch).toHaveBeenCalledTimes(1);
+    expect(mockSignalQueue.sendBatch.mock.calls[0]![1]).toHaveLength(500);
     // Cursor should advance to the 500th UID
     expect(mockDb.updateExternalExchange).toHaveBeenCalledWith(
       "acct-1",
@@ -200,7 +201,8 @@ describe("ImapAdapter.renew", () => {
     const result = await adapter.renew("", emx);
 
     expect(result.isOk()).toBe(true);
-    expect(mockSignalQueue.send).toHaveBeenCalledTimes(3);
+    expect(mockSignalQueue.sendBatch).toHaveBeenCalledTimes(1);
+    expect(mockSignalQueue.sendBatch.mock.calls[0]![1]).toHaveLength(3);
     expect(mockDb.updateExternalExchange).toHaveBeenCalledWith(
       "acct-1",
       "emx_testABC123",
