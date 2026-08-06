@@ -195,7 +195,7 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
     const status = c.res.status;
 
     if (elapsed > 25_000) {
-      logger.warn("Request exceeded 25s — at risk of Lambda timeout.", { code: "api.slow_request", method: c.req.method, path: c.req.path, status, elapsedMs: elapsed });
+      logger.track("Request exceeded 25s — at risk of Lambda timeout.", { code: "api.slow_request", method: c.req.method, path: c.req.path, status, elapsedMs: elapsed });
     }
 
     const logData: Record<string, unknown> = {
