@@ -220,6 +220,7 @@ export class GmailProvider implements ProviderAdapter {
     const batchResult = await this.signalQueue.sendBatch("emx_inbound", entries);
     if (batchResult.isErr()) {
       this.logger.error("Gmail webhook: failed to enqueue emx_inbound batch", { code: "emx.gmail.batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
+      return c.json({ error: "Internal Server Error" }, 500);
     }
 
     const newCursor = historyData.historyId ?? historyId;
