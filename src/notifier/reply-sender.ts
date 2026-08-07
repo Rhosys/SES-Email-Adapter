@@ -16,7 +16,7 @@
 import type { ReplySender, ReplySendError } from "../processor/processor.js";
 import type { EmailService } from "../email/email-service.js";
 import type { AccountDatabase } from "../database/account-database.js";
-import type { ProviderAdapter, ProviderSendError } from "../external-exchanges/provider-adapter.js";
+import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js";
 import { exchangeCredentials } from "../external-exchanges/provider-adapter.js";
 import type { ExternalMailExchange } from "../types/index.js";
 import type { Result } from "../errors.js";
@@ -31,17 +31,6 @@ interface ReplySenderDeps {
   accountDb: AccountDatabase;
   adapters: Record<string, ProviderAdapter>;
   logger: Logger;
-}
-
-/** Provider send errors that will fail identically on every retry. */
-function isPermanentProviderError(error: ProviderSendError): boolean {
-  return error.kind === "provider_send_scope_missing" || error.kind === "provider_send_rejected";
-}
-
-/** Pulls the bare addr-spec out of a From value that may be `"Name" <addr@host>`. */
-function extractAddress(from: string): string {
-  const match = /<([^>]+)>/.exec(from);
-  return (match?.[1] ?? from).trim().toLowerCase();
 }
 
 export class ReplySenderService implements ReplySender {
@@ -102,7 +91,8 @@ export class ReplySenderService implements ReplySender {
    */
   private async resolveExchangeRoute(accountId: string | undefined, from: string): Promise<Result<ExternalMailExchange | null, ReplySendError>> {
     if (!accountId) return ok(null);
-    const fromAddress = extractAddress(from);
+    // Pulls the bare addr-spec out of a From value that may be `"Name" <addr@host>`.
+    const fromAddress = (/<([^>]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
 
     const aliasResult = await this.accountDb.getAlias(accountId, fromAddress);
     if (aliasResult.isErr()) return err(aliasResult.error);
@@ -163,7 +153,8 @@ export class ReplySenderService implements ReplySender {
     // surfaces as a send failure below, same as any other send problem.
     const result = await adapter.sendMessage(rawMime, emx);
     if (result.isErr()) {
-      if (isPermanentProviderError(result.error)) {
+      // These two kinds fail identically on every retry.
+      if (result.error.kind === "provider_send_scope_missing" || result.error.kind === "provider_send_rejected") {
         this.logger.warn("Provider send permanently rejected — will not retry.", { code: "reply_sender.provider_send_permanent", emxId: emx.id, platform: emx.platform, error: result.error });
       }
       return err(result.error);
