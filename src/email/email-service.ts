@@ -109,7 +109,20 @@ export class EmailService {
 
     const fromAddress = opts.fromOverride ?? this.from;
     const tenantMismatch = this.validateTenantDomainAlignment(opts.accountId, fromAddress);
-    if (tenantMismatch.isErr()) return err(tenantMismatch.error);
+    if (tenantMismatch.isErr()) {
+      this.logger.error("Tenant/domain alignment mismatch — from address does not match tenant type.", {
+        code: "email_service.tenant_domain_mismatch",
+        accountId: opts.accountId,
+        fromAddress,
+        error: tenantMismatch.error,
+      });
+      // Treat as permanent (non-retriable) until 2026-08-12 to stop poisoning the retry queue,
+      // then revert to returning the validation error so it surfaces as transient for investigation.
+      if (Date.now() < Date.UTC(2026, 7, 12)) {
+        return err(permanentSesError("TenantDomainMismatch", 400, tenantMismatch.error.message, tenantMismatch.error));
+      }
+      return err(tenantMismatch.error);
+    }
 
     // Check if recipient is on the suppression list — log but still send
     if (this.suppressionChecker) {

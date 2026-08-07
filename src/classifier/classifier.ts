@@ -5,7 +5,7 @@ import type { Workflow, WorkflowData, SignalAction } from "../types/index.js";
 import { WORKFLOWS } from "../types/index.js";
 import type { Logger } from "../logger.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt-builder.js";
-import { WORKFLOW_REGISTRY } from "./workflow-registry.js";
+import { CLASSIFIER_WORKFLOW_REGISTRY } from "../types/workflow-registry.js";
 import { SPAM_TAGS } from "./tags.js";
 
 export const CLASSIFICATION_MODEL_ID = "qwen.qwen3-32b-v1:0";
@@ -92,7 +92,7 @@ export class SignalClassifier {
   }
 
   async classify(input: ClassificationInput): Promise<Result<ClassificationOutput, ClassificationError>> {
-    const systemPrompt = buildSystemPrompt(WORKFLOW_REGISTRY);
+    const systemPrompt = buildSystemPrompt(CLASSIFIER_WORKFLOW_REGISTRY.filter(w => w.classifierAssignable !== false));
     const userMessage = buildUserMessage(input);
     const requestBody = {
       messages: [
@@ -231,7 +231,7 @@ export class SignalClassifier {
    * Returns the raw text response (unparsed) for diagnostic logging.
    */
   private async classifyWithExplanations(input: ClassificationInput): Promise<string> {
-    const systemPrompt = buildSystemPrompt(WORKFLOW_REGISTRY);
+    const systemPrompt = buildSystemPrompt(CLASSIFIER_WORKFLOW_REGISTRY.filter(w => w.classifierAssignable !== false));
     const userMessage = buildUserMessage(input)
       + "\n\nAdditionally, for every tag you assign, include a field \"tagExplanations\" in your JSON response: an object mapping each tag to a one-sentence explanation of why you assigned it.";
 

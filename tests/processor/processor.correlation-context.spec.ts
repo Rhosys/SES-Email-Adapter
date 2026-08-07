@@ -48,7 +48,7 @@ describe("processSideEffect — correlation context", () => {
     const threadDb = makeThreadDbMock();
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
-    vi.mocked(accountDb.getDomainByName).mockReturnValue(Promise.resolve(ok(null)));
+    vi.mocked(accountDb.getDomainByName).mockReturnValue(Promise.resolve(ok({ domain: "example.com", senderSetupComplete: true } as never)));
     return { threadDb, accountDb, processingDb };
   }
 

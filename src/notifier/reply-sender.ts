@@ -66,7 +66,7 @@ export class ReplySenderService implements ReplySender {
     subject: string;
     body: string;
     inReplyTo: string;
-    accountId: string;
+    accountId?: string;
     signalId?: string;
     threadId?: string;
   }): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
@@ -76,14 +76,19 @@ export class ReplySenderService implements ReplySender {
       { Name: "References", Value: opts.inReplyTo },
     ];
 
+    // Platform-originated mail (a pong from the platform domain) carries no account. It sends
+    // under the platform tenant, and having no alias it never routes through a provider —
+    // route resolution below is deliberately given the original, possibly-absent accountId.
+    const resolvedAccountId = opts.accountId ?? this.emailService.platformTenant;
+
     const routeResult = await this.resolveExchangeRoute(opts.accountId, opts.from);
     if (routeResult.isErr()) return err(routeResult.error);
     const exchange = routeResult.value;
 
     if (exchange) {
-      return this.sendViaProvider(exchange, { ...opts, subject, headers });
+      return this.sendViaProvider(exchange, { ...opts, accountId: resolvedAccountId, subject, headers });
     }
-    return this.sendViaSes({ ...opts, subject, headers });
+    return this.sendViaSes({ ...opts, accountId: resolvedAccountId, subject, headers });
   }
 
   // ---------------------------------------------------------------------------

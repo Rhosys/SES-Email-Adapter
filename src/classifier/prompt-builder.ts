@@ -1,5 +1,5 @@
-import type { WorkflowDefinition } from "./workflow-registry.js";
-import { EnumValue } from "./workflow-registry.js";
+import type { WorkflowDefinition } from "../types/workflow-registry.js";
+import { EnumValue } from "../types/workflow-registry.js";
 import type { ClassificationInput } from "./classifier.js";
 import { SPAM_TAGS } from "./tags.js";
 

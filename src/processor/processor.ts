@@ -96,7 +96,8 @@ export interface ReplySender {
     subject: string;
     body: string;
     inReplyTo: string;
-    accountId: string;
+    /** Absent for platform-originated mail, which sends under the platform tenant. */
+    accountId?: string;
     signalId?: string;
     threadId?: string;
   }): Promise<Result<{
@@ -302,6 +303,7 @@ interface SignalProcessorOptions {
   schedulerClient: SchedulerClient;
   emailContentStore: EmailContentStore;
   contentStore: ContentStore;
+  platformTenantName: string;
 }
 
 export class SignalProcessor {
@@ -329,6 +331,7 @@ export class SignalProcessor {
   private readonly schedulerClient: SchedulerClient;
   private readonly emailContentStore: EmailContentStore;
   private readonly contentStore: ContentStore;
+  private readonly platformTenantName: string;
 
   constructor(opts: SignalProcessorOptions) {
     this.threadDb = opts.threadDb;
@@ -355,6 +358,7 @@ export class SignalProcessor {
     this.schedulerClient = opts.schedulerClient;
     this.emailContentStore = opts.emailContentStore;
     this.contentStore = opts.contentStore;
+    this.platformTenantName = opts.platformTenantName;
   }
 
   /**
@@ -458,16 +462,17 @@ export class SignalProcessor {
         const recipientDomain = signal.data.recipientAddress.split("@")[1] ?? "";
         const domainResult = await this.accountDb.getDomainByName(accountId, recipientDomain);
         const domain = domainResult.isOk() ? domainResult.value : null;
-        const from = domain?.senderSetupComplete
-          ? signal.data.recipientAddress
-          : `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`;
+        const usePlatformDomain = !domain?.senderSetupComplete;
+        const from = usePlatformDomain
+          ? `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`
+          : signal.data.recipientAddress;
         const pongResult = await this.replySender.sendReply({
           to: signal.data.from.address,
           from,
           subject: signal.data.subject ?? "",
           body: "textBody" in signal.data ? (signal.data.textBody ?? "") : "",
           inReplyTo: signal.id,
-          accountId,
+          accountId: usePlatformDomain ? this.platformTenantName : accountId,
           signalId: signal.id,
           threadId: thread.id,
         });

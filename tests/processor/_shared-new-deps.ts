@@ -17,6 +17,7 @@ export function makeSharedNewDeps() {
     billingHandler: new BillingHandler(),
     handlerRegistry: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as HandlerRegistry,
     schedulerClient: { createFollowup: vi.fn().mockResolvedValue(ok(undefined)), deleteFollowup: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as SchedulerClient,
+    platformTenantName: "test-platform",
   };
 }
 

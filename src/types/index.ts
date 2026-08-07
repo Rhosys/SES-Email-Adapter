@@ -2,29 +2,16 @@
 // Workflows (the kind of email this is — drives display, UX, and actions)
 // ---------------------------------------------------------------------------
 
-export const WORKFLOWS = [
-  "auth",          // OTPs, magic links, password resets, 2FA codes — copy/click, expires
-  "conversation",  // Human-to-human back-and-forth — read and reply
-  "crm",           // Sales outreach, proposals, client emails, follow-ups — reply or dismiss
-  "package",       // Order confirmations, shipping, delivery tracking — track or file
-  "travel",        // Flights, hotels, itineraries, boarding passes — date-triggered actions
-  "payments",      // Invoices, receipts, subscriptions, tax, bank statements — pay or file
-  "alert",         // Security events, fraud, CI failures, infra alerts — investigate now
-  "content",       // Newsletters, promotions, social digests — read or unsubscribe
-  "onboarding",    // Welcome emails, account creation, getting-started — new service signup
-  "notice",        // ToS updates, service notices, government notices, security awareness — passive informational
-  "healthcare",    // Appointments, test results, prescriptions, insurance
-  "job",           // Applications, interviews, offers, rejections — career pipeline
-  "support",       // Helpdesk tickets with threaded conversation and ticket ID
-  "events",        // Ticketed events: concerts, conferences, sports, theatre — venue + date + seats
-  "healthcheck",   // System-generated pipeline validation emails — daily automated checks
-  "test",          // Emails sent by the account owner to their own domain — triggers pong
-  "unspecified",   // Classification failed or was skipped — email is unclassified
-  // NOTE: spam is NOT a workflow. It is expressed via Signal.data.tags (e.g. ["phishing", "credential-harvest"]).
-  // A phishing email pretending to be a bank login is workflow:"auth" + tags:["phishing","credential-harvest"].
-  // The processor quarantines tagged signals; the workflow captures what kind of
-  // email it is (or is pretending to be), which is more actionable than just "spam".
-] as const;
+import { CLASSIFIER_WORKFLOW_REGISTRY } from "./workflow-registry.js";
+
+export const WORKFLOWS = CLASSIFIER_WORKFLOW_REGISTRY.map(w => w.name) as unknown as readonly [
+  "auth", "conversation", "crm", "package", "travel", "payments", "alert", "content",
+  "onboarding", "notice", "healthcare", "job", "support", "events", "healthcheck", "test", "unspecified",
+];
+// NOTE: spam is NOT a workflow. It is expressed via Signal.data.tags (e.g. ["phishing", "credential-harvest"]).
+// A phishing email pretending to be a bank login is workflow:"auth" + tags:["phishing","credential-harvest"].
+// The processor quarantines tagged signals; the workflow captures what kind of
+// email it is (or is pretending to be), which is more actionable than just "spam".
 
 export type Workflow = (typeof WORKFLOWS)[number];
 

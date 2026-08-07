@@ -376,6 +376,28 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     expect(emailService.send).toHaveBeenCalledOnce();
   });
 
+  it("sends platform-originated mail under the platform tenant without looking for an exchange", async () => {
+    // A pong from the platform domain carries no account. There is no alias to route on, and
+    // the SES tenant has to be the platform one or the send is rejected for tenant mismatch.
+    const emailService = makeEmailService();
+    (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "ses-1" }));
+    (emailService as unknown as { platformTenant: string }).platformTenant = "platform-tenant";
+    const accountDb = makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, exchange: ACTIVE_GMAIL_EXCHANGE });
+    const handler = makeSender({ emailService, accountDb });
+
+    const result = await handler.sendReply({
+      to: "recipient@example.com",
+      from: "noreply@platform.email.rhosys.cloud",
+      subject: "Original",
+      body: "Reply body",
+      inReplyTo: "<original@mail.example.com>",
+    });
+
+    expect(result.isOk()).toBe(true);
+    expect(accountDb.getAlias).not.toHaveBeenCalled();
+    expect((emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0].accountId).toBe("platform-tenant");
+  });
+
   it("goes to SES for an alias with no exchange behind it", async () => {
     const emailService = makeEmailService();
     (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "ses-1" }));

@@ -1,23 +1,23 @@
 import { describe, it, expect } from "vitest";
 import { buildSystemPrompt, buildUserMessage } from "../../src/classifier/prompt-builder.js";
 import type { ClassificationInput } from "../../src/classifier/classifier.js";
-import { WORKFLOW_REGISTRY, EnumValue } from "../../src/classifier/workflow-registry.js";
+import { CLASSIFIER_WORKFLOW_REGISTRY, EnumValue } from "../../src/types/workflow-registry.js";
 
 // ---------------------------------------------------------------------------
 // buildSystemPrompt
 // ---------------------------------------------------------------------------
 
 describe("buildSystemPrompt", () => {
-  const prompt = buildSystemPrompt(WORKFLOW_REGISTRY);
+  const prompt = buildSystemPrompt(CLASSIFIER_WORKFLOW_REGISTRY);
 
   it("includes every workflow name from registry", () => {
-    for (const workflow of WORKFLOW_REGISTRY) {
+    for (const workflow of CLASSIFIER_WORKFLOW_REGISTRY) {
       expect(prompt).toContain(`### ${workflow.name}`);
     }
   });
 
   it("includes all fields for each workflow", () => {
-    for (const workflow of WORKFLOW_REGISTRY) {
+    for (const workflow of CLASSIFIER_WORKFLOW_REGISTRY) {
       for (const field of workflow.fields) {
         expect(prompt).toContain(`| ${field.name} |`);
       }
@@ -25,7 +25,7 @@ describe("buildSystemPrompt", () => {
   });
 
   it("includes enum values with descriptions for enum fields", () => {
-    for (const workflow of WORKFLOW_REGISTRY) {
+    for (const workflow of CLASSIFIER_WORKFLOW_REGISTRY) {
       for (const field of workflow.fields) {
         if (field.enumValues) {
           for (const ev of field.enumValues) {

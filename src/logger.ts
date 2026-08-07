@@ -63,6 +63,7 @@ function redactValue(key: string, value: unknown): unknown {
   if (AUTH_KEYS.has(key) && typeof value === "string") {
     return value.length > 8 ? value.slice(0, 8) + "[REDACTED]" : "[REDACTED]";
   }
+  if (key === "embeddings" && value && typeof value === "object") return "<Embeddings-Map-Array>";
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "function") return `[Function: ${value.name || "anonymous"}]`;
   return value;
@@ -99,7 +100,17 @@ export function redactReplacer(key: string, value: unknown): unknown {
 function serializeErrors(obj: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
-    if (value instanceof Error) {
+    if (value instanceof AggregateError) {
+      result[key] = {
+        ...value,
+        message: value.message,
+        name: value.name,
+        stack: value.stack,
+        errors: value.errors.map((e: unknown) =>
+          e instanceof Error ? { ...e, message: e.message, name: e.name, stack: e.stack } : e,
+        ),
+      };
+    } else if (value instanceof Error) {
       result[key] = { ...value, message: value.message, name: value.name, stack: value.stack };
     } else {
       result[key] = value;

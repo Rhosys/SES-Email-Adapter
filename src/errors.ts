@@ -68,7 +68,11 @@ export const authError = (cause: unknown): AuthError => {
 };
 export const processorError = (cause: unknown): ProcessorError => {
   const error = toError(cause);
-  return { kind: "processor_error", message: error.message, cause: error };
+  const result: ProcessorError = { kind: "processor_error", message: error.message, cause: error };
+  if (cause instanceof AggregateError) {
+    result.message = `${error.message} [${cause.errors.map((e: unknown) => e instanceof Error ? e.message : JSON.stringify(e)).join("; ")}]`;
+  }
+  return result;
 };
 export const noAccountError = (recipientAddress: string, destination: string[], compositeMailMessageId: string, expectedAccountId?: string): NoAccountError => ({ kind: "no_account_for_recipient", recipientAddress, destination, compositeMailMessageId, expectedAccountId });
 export const reindexSegmentProcessingError = (segment: number, failures: Array<{ signalId: string; cause: unknown }>): ReindexSegmentProcessingError => ({ kind: "reindex_segment_processing_error", segment, failureCount: failures.length, failures });
