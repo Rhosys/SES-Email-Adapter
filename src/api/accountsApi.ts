@@ -46,6 +46,12 @@ export interface AccessService {
   removeUser(accountId: string, userId: string): Promise<Result<void, AuthressServiceError>>;
   checkAccess(userId: string, resourceUri: string, permission: string): Promise<void>;
   createInvite(accountId: string, email: string, role: AccountRole): Promise<Result<{ inviteId: string }, AuthressServiceError>>;
+  /**
+   * The user's identity at a given connection's provider, or null when they have not linked
+   * that connection. This is the authority on which provider identity a user actually holds —
+   * a client's claim about it is an assertion, not a fact.
+   */
+  getLinkedIdentity(userId: string, connectionId: string): Promise<Result<{ connectionUserId: string } | null, AuthressServiceError>>;
 }
 
 const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud";

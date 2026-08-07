@@ -111,6 +111,21 @@ export class AuthressAccessService implements AccessService {
     }
   }
 
+  async getLinkedIdentity(userId: string, connectionId: string): Promise<Result<{ connectionUserId: string } | null, AuthressServiceError>> {
+    try {
+      const response = await this.client.users.getUser(userId);
+      const linked = (response.data.linkedIdentities ?? [])
+        .find((identity) => identity.connection?.connectionId === connectionId);
+      // `connection.userId` is the user's id at the provider (Google's numeric subject,
+      // Microsoft's oid) — not an Authress user id.
+      const connectionUserId = linked?.connection?.userId;
+      return ok(connectionUserId ? { connectionUserId } : null);
+    } catch (e) {
+      if (isNotFound(e)) return ok(null);
+      return err(authressServiceError(e));
+    }
+  }
+
   async addUser(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>> {
     try {
       await this._upsertUser(accountId, userId, role);
