@@ -13,10 +13,9 @@ import { EMX_PLATFORMS, type ExternalMailExchange } from "../types/index.js";
 
 const CreateExternalExchangeRequest = z.object({
   platform: z.enum(EMX_PLATFORMS),
-  // Optional: resolved from the provider when omitted. A browser cannot determine the
-  // mailbox address on its own — the linked identity only exposes the provider-side user id,
-  // which for Google is a numeric subject — so the provider is the authority here.
-  emailAddress: z.string().email().optional(),
+  // Deliberately no emailAddress: it is resolved from the provider using the caller's own
+  // credentials. A client-supplied address would let a caller point an exchange — and the
+  // alias that routes outbound mail — at a mailbox it does not own.
   // The Authress identity-connection the caller just linked. The client chose it, so it is
   // the one thing here the server cannot derive on its own.
   connectionId: z.string().max(256).optional(),
@@ -132,12 +131,12 @@ export class ExternalExchangesApi {
     const { accountDb, adapters, getProviderToken, getLinkedIdentity, encryptionManager, signalQueue, logger } = this;
 
     /**
-     * Points the alias for a connected mailbox at its exchange, which is what tells the send
-     * path to route outbound mail from that address through the provider rather than SES.
-     * Pass undefined to unlink (on disconnect).
+     * Sets `emxId` on the alias item for a connected mailbox — the attribute the send path
+     * reads to route outbound mail from that address through the provider rather than SES.
+     * Pass undefined to clear it (on disconnect).
      */
-    const linkAliasToExchange = async (targetAccountId: string, aliasAddress: string, emxId: string | undefined) => {
-      const result = await accountDb.setAliasExchange(targetAccountId, aliasAddress, emxId);
+    const updateAliasExchangeId = async (targetAccountId: string, aliasAddress: string, emxId: string | undefined) => {
+      const result = await accountDb.updateAlias(targetAccountId, aliasAddress, { emxId });
       if (result.isErr()) {
         logger.error("Failed to link alias to external exchange — outbound mail from this address will not route through the provider.", { code: "api.emx.alias_link_failed", accountId: targetAccountId, aliasAddress, emxId, error: result.error });
       } else if (!result.value) {
@@ -225,7 +224,7 @@ export class ExternalExchangesApi {
         });
         if (result.isErr()) { logger.error("Failed to create IMAP exchange record", { code: "api.emx.imap.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
         await accountDb.ensureAlias(accountId, imapConfig.username, "allow_all", aliasCheck.isOk() ? aliasCheck.value : undefined);
-        await linkAliasToExchange(accountId, imapConfig.username, result.value.id);
+        await updateAliasExchangeId(accountId, imapConfig.username, result.value.id);
         await triggerDispatch(accountId, result.value.id);
         logger.info("IMAP exchange created and activated", { code: "api.emx.imap.created", accountId, emxId: result.value.id, emailAddress: imapConfig.username });
         return c.json(serializeEmx(result.value), 201);
@@ -275,7 +274,7 @@ export class ExternalExchangesApi {
         });
         if (result.isErr()) { logger.error("Failed to create JMAP exchange record", { code: "api.emx.jmap.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
         await accountDb.ensureAlias(accountId, jmapConfig.username, "allow_all", aliasCheck.isOk() ? aliasCheck.value : undefined);
-        await linkAliasToExchange(accountId, jmapConfig.username, result.value.id);
+        await updateAliasExchangeId(accountId, jmapConfig.username, result.value.id);
         await triggerDispatch(accountId, result.value.id);
         logger.info("JMAP exchange created and activated", { code: "api.emx.jmap.created", accountId, emxId: result.value.id, emailAddress: jmapConfig.username });
         return c.json(serializeEmx(result.value), 201);
@@ -300,6 +299,19 @@ export class ExternalExchangesApi {
       const userId = c.get("auth")?.userId;
       if (!userId) return err(c, 401, "Unauthorized");
 
+      // Fetching the credentials is the real test of whether this connection is usable: it is
+      // the exact call every later token fetch makes, so anything it cannot satisfy now it
+      // will not satisfy at sync or send time either. A failure here is the caller's
+      // connection not being linked (or not being linked with the scopes we need), not a
+      // mailbox worth recording — so it is refused rather than persisted as activation_failed.
+      let token: string;
+      try {
+        token = await getProviderToken(userId, connectionId);
+      } catch (e) {
+        logger.warn("No usable provider credentials for the caller on this connection — refusing to connect the mailbox", { code: "api.emx.create.no_credentials", accountId, connectionId, platform: body.platform, error: e });
+        return err(c, 422, "Could not obtain credentials for this provider. Reconnect the identity and try again.");
+      }
+
       // Which identity the caller holds at that provider is Authress' to state, not the
       // client's. The client sends its own view of it, but it is only ever an assertion —
       // this resolves the real one and treats a disagreement as a bug worth recording.
@@ -308,55 +320,24 @@ export class ExternalExchangesApi {
         logger.error("Failed to resolve the caller's linked identity", { code: "api.emx.create.linked_identity_failed", accountId, connectionId, error: linkedIdentityResult.error });
         return err(c, 503, "Could not verify the linked identity with the identity provider");
       }
-      const linkedIdentity = linkedIdentityResult.value;
-      if (!linkedIdentity) {
-        logger.warn("Refusing to connect a mailbox for a connection the caller has not linked", { code: "api.emx.create.no_linked_identity", accountId, connectionId });
-        return err(c, 422, "You have not connected this provider. Link the identity and try again.");
-      }
-      if (body.connectionUserId && body.connectionUserId !== linkedIdentity.connectionUserId) {
+      if (body.connectionUserId && body.connectionUserId !== linkedIdentityResult.value?.connectionUserId) {
         logger.track("Client-reported provider identity disagrees with the one Authress holds for this connection — using Authress'. A stale profile read on the client is the benign explanation; the alternative is a client attempting to bind an identity it does not hold.", {
           code: "api.emx.create.connection_user_mismatch",
-          accountId, connectionId, reported: body.connectionUserId, resolved: linkedIdentity.connectionUserId,
+          accountId, connectionId, reported: body.connectionUserId, resolved: linkedIdentityResult.value?.connectionUserId,
         });
       }
-      const connectionUserId = linkedIdentity.connectionUserId;
+      const connectionUserId = linkedIdentityResult.value?.connectionUserId;
 
-      let token: string;
-      try {
-        token = await getProviderToken(userId, connectionId);
-      } catch (e) {
-        logger.error("Failed to get provider token for activation", { code: "api.emx.create.token_failed", error: e });
-        // Without a token the mailbox address cannot be resolved either, so there is nothing
-        // to key a placeholder record on unless the client supplied one.
-        if (!body.emailAddress) return err(c, 503, "Could not reach the mail provider");
-        const listForFailure = await accountDb.listExternalExchanges(accountId);
-        const priorFailed = listForFailure.isOk()
-          ? listForFailure.value.find((e) => e.platform === body.platform && e.emailAddress === body.emailAddress)
-          : undefined;
-        if (priorFailed) {
-          const updateResult = await accountDb.updateExternalExchange(accountId, priorFailed.id, { status: "activation_failed", errorReason: "Failed to obtain provider token", consecutiveFailures: 0 });
-          if (updateResult.isErr()) { logger.error("Failed to update exchange record", { code: "api.emx.create_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
-          return c.json(serializeEmx(updateResult.value), 200);
-        }
-        const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress: body.emailAddress, status: "activation_failed", errorReason: "Failed to obtain provider token", syncCursor: "", lastSyncAt: DateTime.utc().toISO()! });
-        if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
-        return c.json(serializeEmx(result.value), 201);
+      // Ask the provider which mailbox this token belongs to. Never the client: an address it
+      // supplied would let a caller point an exchange — and the alias that routes outbound
+      // mail — at a mailbox it does not own.
+      if (!adapter.fetchMailboxAddress) return err(c, 422, "Unsupported platform");
+      const addressResult = await adapter.fetchMailboxAddress(token);
+      if (addressResult.isErr()) {
+        logger.error("Failed to resolve mailbox address from provider", { code: "api.emx.create.address_failed", accountId, platform: body.platform, error: addressResult.error });
+        return err(c, 503, "Could not determine the mailbox address from the mail provider");
       }
-
-      // Ask the provider which mailbox the token belongs to. The client cannot know this —
-      // the linked identity only exposes the provider-side user id — and everything
-      // downstream (alias, alias→exchange routing link, Gmail webhook mailbox match) is
-      // keyed on the real address.
-      let emailAddress = body.emailAddress;
-      if (!emailAddress && adapter.fetchMailboxAddress) {
-        const addressResult = await adapter.fetchMailboxAddress(token);
-        if (addressResult.isErr()) {
-          logger.error("Failed to resolve mailbox address from provider", { code: "api.emx.create.address_failed", accountId, platform: body.platform, error: addressResult.error });
-          return err(c, 503, "Could not determine the mailbox address from the mail provider");
-        }
-        emailAddress = addressResult.value;
-      }
-      if (!emailAddress) return err(c, 400, "Invalid request body");
+      const emailAddress = addressResult.value;
 
       // Alias conflict check: reject if another account already owns this email address
       const oauthAliasCheck = await accountDb.getAliasByGlobalAddress(emailAddress);
@@ -388,18 +369,18 @@ export class ExternalExchangesApi {
 
       const { syncCursor, expiresAt, providerSubscriptionId } = activateResult.value;
       if (existing) {
-        const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "active", syncCursor, expiresAt, providerSubscriptionId, userId, connectionUserId, connectionId, errorReason: undefined, consecutiveFailures: 0 });
+        const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "active", syncCursor, expiresAt, providerSubscriptionId, userId, ...(connectionUserId ? { connectionUserId } : {}), connectionId, errorReason: undefined, consecutiveFailures: 0 });
         if (updateResult.isErr()) { logger.error("Failed to update exchange record", { code: "api.emx.create_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
         await accountDb.ensureAlias(accountId, emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined);
-        await linkAliasToExchange(accountId, emailAddress, existing.id);
+        await updateAliasExchangeId(accountId, emailAddress, existing.id);
         await triggerDispatch(accountId, existing.id);
         logger.info("OAuth exchange reactivated", { code: "api.emx.oauth.reactivated", accountId, emxId: existing.id, platform: body.platform });
         return c.json(serializeEmx(updateResult.value), 200);
       }
-      const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress, status: "active", syncCursor, lastSyncAt: DateTime.utc().toISO()!, expiresAt, providerSubscriptionId, userId, connectionUserId, connectionId });
+      const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress, status: "active", syncCursor, lastSyncAt: DateTime.utc().toISO()!, expiresAt, providerSubscriptionId, userId, ...(connectionUserId ? { connectionUserId } : {}), connectionId });
       if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
       await accountDb.ensureAlias(accountId, emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined);
-      await linkAliasToExchange(accountId, emailAddress, result.value.id);
+      await updateAliasExchangeId(accountId, emailAddress, result.value.id);
       await triggerDispatch(accountId, result.value.id);
       logger.info("OAuth exchange created", { code: "api.emx.oauth.created", accountId, emxId: result.value.id, platform: body.platform });
       return c.json(serializeEmx(result.value), 201);
@@ -502,7 +483,7 @@ export class ExternalExchangesApi {
 
         // Ensure alias exists for the EMX email address (may have been missed or deleted)
         await accountDb.ensureAlias(accountId, emx.emailAddress, "allow_all");
-        await linkAliasToExchange(accountId, emx.emailAddress, emxId);
+        await updateAliasExchangeId(accountId, emx.emailAddress, emxId);
 
         // Re-activate if previously failed — connection test just proved creds work
         if (emx.status === "activation_failed") {
@@ -571,7 +552,7 @@ export class ExternalExchangesApi {
 
       // Ensure alias exists for the EMX email address (may have been missed or deleted)
       await accountDb.ensureAlias(accountId, emx.emailAddress, "allow_all");
-      await linkAliasToExchange(accountId, emx.emailAddress, emxId);
+      await updateAliasExchangeId(accountId, emx.emailAddress, emxId);
 
       // Re-activate if previously failed — connection test just proved creds work
       if (emx.status === "activation_failed") {
@@ -625,7 +606,7 @@ export class ExternalExchangesApi {
 
       // Unlink before deleting the exchange: an alias left pointing at a deleted exchange
       // would refuse every send from that address.
-      await linkAliasToExchange(accountId, emx.emailAddress, undefined);
+      await updateAliasExchangeId(accountId, emx.emailAddress, undefined);
 
       const deleteResult = await accountDb.deleteExternalExchange(accountId, emxId);
       if (deleteResult.isErr()) { logger.error("Failed to delete exchange", { code: "api.emx.delete_failed", error: deleteResult.error }); return err(c, 500, "Internal Server Error"); }

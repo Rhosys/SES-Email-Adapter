@@ -215,14 +215,18 @@ export class AccountDatabase {
   }
 
   /**
-   * Links (or unlinks, when emxId is undefined) an alias to the external mailbox that backs it.
-   * The link is what tells the send path to route outbound mail through the provider instead of
-   * SES, so it must be kept in step with the EMX lifecycle: set on activation, cleared on delete.
+   * Updates the ALIAS item for `aliasAddress`, setting `emxId` to the external mailbox that
+   * backs it — or removing the attribute when `emxId` is explicitly undefined.
+   *
+   * That attribute is what tells the send path to route outbound mail through the provider
+   * instead of SES, so it must be kept in step with the exchange lifecycle: set on activation,
+   * cleared on disconnect.
    *
    * Conditioned on the alias already existing — callers ensureAlias first. A missing alias
    * returns ok(null) rather than resurrecting a partial item through the update expression.
    */
-  async setAliasExchange(accountId: string, aliasAddress: string, emxId: string | undefined): Promise<Result<Alias | null, DbError>> {
+  async updateAlias(accountId: string, aliasAddress: string, fields: { emxId: string | undefined }): Promise<Result<Alias | null, DbError>> {
+    const { emxId } = fields;
     const { domain } = parseAddress(aliasAddress);
     const now = DateTime.utc().toISO()!;
     try {

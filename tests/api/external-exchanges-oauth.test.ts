@@ -42,7 +42,7 @@ function makeAccountDb() {
       Promise.resolve(ok({ id: "emx-1", accountId, ...data, createdAt: "", updatedAt: "" }))),
     updateExternalExchange: vi.fn().mockResolvedValue(ok({ id: "emx-1", accountId: "acct-1", platform: "gmail", emailAddress: "user@gmail.com", status: "active", createdAt: "", updatedAt: "" })),
     ensureAlias: vi.fn().mockResolvedValue(ok({ alias: { aliasAddress: "user@gmail.com" }, created: true })),
-    setAliasExchange: vi.fn().mockResolvedValue(ok({ aliasAddress: "user@gmail.com" })),
+    updateAlias: vi.fn().mockResolvedValue(ok({ aliasAddress: "user@gmail.com" })),
   };
 }
 
@@ -55,9 +55,10 @@ function makeGmailAdapter() {
   };
 }
 
-function build(overrides: { linkedIdentity?: unknown } = {}) {
+function build(overrides: { linkedIdentity?: unknown; getProviderToken?: () => Promise<string> } = {}) {
   const accountDb = makeAccountDb();
   const logger = createMockLogger();
+  const adapter = makeGmailAdapter();
   const getLinkedIdentity = vi.fn().mockResolvedValue(
     overrides.linkedIdentity === undefined ? ok({ connectionUserId: LINKED_GOOGLE_ID }) : overrides.linkedIdentity,
   );
@@ -66,10 +67,10 @@ function build(overrides: { linkedIdentity?: unknown } = {}) {
     auth: { verify: vi.fn().mockResolvedValue(ok({ userId: CALLER_USER_ID })) },
     access: { checkAccess: async () => {}, getLinkedIdentity } as never,
     logger,
-    adapters: { gmail: makeGmailAdapter() },
-    getProviderToken: async () => "provider-token",
+    adapters: { gmail: adapter },
+    getProviderToken: overrides.getProviderToken ?? (async () => "provider-token"),
   }));
-  return { app, accountDb, logger: logger as MockLogger, getLinkedIdentity };
+  return { app, accountDb, adapter, logger: logger as MockLogger, getLinkedIdentity };
 }
 
 describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
@@ -125,15 +126,31 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     expect(ctx.accountDb.createExternalExchange.mock.calls[0]![1].connectionUserId).toBe(LINKED_GOOGLE_ID);
   });
 
-  it("refuses to connect a mailbox for a connection the caller has not linked", async () => {
-    const unlinked = build({ linkedIdentity: ok(null) });
+  // Fetching the credentials is the same call every later sync and send makes, so it is the
+  // honest test of whether this connection is usable — not a separate existence check that
+  // could pass while the real thing fails.
+  it("refuses the connection when no usable credentials can be obtained", async () => {
+    const noCredentials = build({ getProviderToken: async () => { throw Object.assign(new Error("Not Found"), { status: 404 }); } });
 
-    const res = await req(unlinked.app, "POST", `${A}/external-exchanges`, {
-      body: { platform: "gmail", connectionId: "google", connectionUserId: "made-up" },
+    const res = await req(noCredentials.app, "POST", `${A}/external-exchanges`, {
+      body: { platform: "gmail", connectionId: "google" },
     });
 
     expect(res.status).toBe(422);
-    expect(unlinked.accountDb.createExternalExchange).not.toHaveBeenCalled();
+    expect(noCredentials.accountDb.createExternalExchange).not.toHaveBeenCalled();
+  });
+
+  it("resolves the mailbox address from the provider, never from the request", async () => {
+    const res = await req(ctx.app, "POST", `${A}/external-exchanges`, {
+      // A caller naming a mailbox it does not own must not get an exchange — or the alias
+      // that routes outbound mail — pointed at it.
+      body: { platform: "gmail", connectionId: "google", emailAddress: "victim@gmail.com" },
+    });
+
+    expect(res.status).toBe(201);
+    expect(ctx.adapter.fetchMailboxAddress).toHaveBeenCalledWith("provider-token");
+    expect(ctx.accountDb.createExternalExchange.mock.calls[0]![1].emailAddress).toBe("user@gmail.com");
+    expect(ctx.accountDb.ensureAlias.mock.calls[0]![1]).toBe("user@gmail.com");
   });
 
   it("fails closed when the identity provider cannot be reached", async () => {
