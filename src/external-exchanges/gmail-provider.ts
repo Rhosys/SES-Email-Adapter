@@ -6,6 +6,7 @@ import type { ExternalMailExchange } from "../types/index.js";
 import type {
   ProviderAdapter,
   ActivationResult,
+  ActivationIdentity,
   RawMimeResult,
   SendResult,
   ProviderActivationError,
@@ -51,10 +52,38 @@ export class GmailProvider implements ProviderAdapter {
   }
 
   // ---------------------------------------------------------------------------
+  // Credential resolution — shared by every method below activate()
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Resolves a fresh access token for `emx`, from the identity coordinates recorded on it at
+   * connect time. The one thing every ProviderAdapter method other than `activate` needs
+   * before it can do anything else, so it lives here rather than being re-derived per call
+   * site — the previous design left that to each caller, which is how `getConnectionCredentials`
+   * ended up invoked with the wrong id in more than one place.
+   */
+  private async resolveToken(emx: ExternalMailExchange): Promise<Result<string, { cause: unknown }>> {
+    const credentials = exchangeCredentials(emx);
+    if (!credentials) return err({ cause: "Exchange has no linked identity recorded — it predates connection tracking and must be reconnected by the user." });
+    try {
+      return ok(await this.getProviderToken(credentials.userId, credentials.connectionId));
+    } catch (e) {
+      return err({ cause: e });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // ProviderAdapter methods
   // ---------------------------------------------------------------------------
 
-  async activate(token: string, _emx: ExternalMailExchange): Promise<Result<ActivationResult, ProviderActivationError>> {
+  async activate(_emx: ExternalMailExchange, identity?: ActivationIdentity): Promise<Result<ActivationResult, ProviderActivationError>> {
+    if (!identity) return err({ kind: "provider_activation_failed", cause: "Missing linked identity for activation" });
+    let token: string;
+    try {
+      token = await this.getProviderToken(identity.userId, identity.connectionId);
+    } catch (e) {
+      return err({ kind: "provider_activation_failed", cause: e });
+    }
     try {
       const response = await fetch(`${GMAIL_API}/watch`, {
         method: "POST",
@@ -65,17 +94,31 @@ export class GmailProvider implements ProviderAdapter {
         return err({ kind: "provider_activation_failed", cause: await response.text() });
       }
       const data = await response.json() as { historyId: string; expiration: string };
+
+      // Resolved here rather than trusted from the caller: the only mailbox identifier
+      // available to a browser is the linked identity's provider-side user id (a numeric
+      // subject for Google), not an address.
+      const addressResult = await this.fetchMailboxAddress(token);
+      if (addressResult.isErr()) return err({ kind: "provider_activation_failed", cause: addressResult.error });
+
       return ok({
         syncCursor: data.historyId,
         expiresAt: DateTime.fromMillis(Number(data.expiration)).toISO()!,
         providerSubscriptionId: "watch",
+        emailAddress: addressResult.value,
       });
     } catch (e) {
       return err({ kind: "provider_activation_failed", cause: e });
     }
   }
 
-  async renew(token: string, emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>> {
+  async renew(emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>> {
+    const tokenResult = await this.resolveToken(emx);
+    if (tokenResult.isErr()) {
+      this.logger.error("Gmail renewal failed", { code: "emx.gmail.renewal_failed", emxId: emx.id, cause: tokenResult.error.cause });
+      return err({ kind: "provider_renewal_failed", cause: tokenResult.error.cause });
+    }
+    const token = tokenResult.value;
     try {
       const response = await fetch(`${GMAIL_API}/watch`, {
         method: "POST",
@@ -100,7 +143,10 @@ export class GmailProvider implements ProviderAdapter {
     }
   }
 
-  async deactivate(token: string, _emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>> {
+  async deactivate(emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>> {
+    const tokenResult = await this.resolveToken(emx);
+    if (tokenResult.isErr()) return err({ kind: "provider_deactivation_failed", cause: tokenResult.error.cause });
+    const token = tokenResult.value;
     try {
       const response = await fetch(`${GMAIL_API}/stop`, {
         method: "POST",
@@ -115,7 +161,10 @@ export class GmailProvider implements ProviderAdapter {
     }
   }
 
-  async fetchMessage(token: string, providerMessageId: string, _emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>> {
+  async fetchMessage(providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>> {
+    const tokenResult = await this.resolveToken(emx);
+    if (tokenResult.isErr()) return err({ kind: "provider_fetch_failed", cause: tokenResult.error.cause });
+    const token = tokenResult.value;
     try {
       const response = await fetch(`${GMAIL_API}/messages/${providerMessageId}?format=raw`, {
         headers: { "Authorization": `Bearer ${token}` },
@@ -137,7 +186,8 @@ export class GmailProvider implements ProviderAdapter {
     }
   }
 
-  async fetchMailboxAddress(token: string): Promise<Result<string, ProviderFetchError>> {
+  /** Not part of ProviderAdapter — only `activate` needs it, to resolve the record's address. */
+  private async fetchMailboxAddress(token: string): Promise<Result<string, ProviderFetchError>> {
     try {
       const response = await fetch(`${GMAIL_API}/profile`, { headers: { "Authorization": `Bearer ${token}` } });
       if (response.status === 401) return err({ kind: "provider_token_expired" });
@@ -158,7 +208,10 @@ export class GmailProvider implements ProviderAdapter {
    * Requires the `gmail.send` scope on the linked connection; a connection linked before
    * sending existed only carries read scopes and comes back 403.
    */
-  async sendMessage(token: string, rawMime: Uint8Array, emx: ExternalMailExchange): Promise<Result<SendResult, ProviderSendError>> {
+  async sendMessage(rawMime: Uint8Array, emx: ExternalMailExchange): Promise<Result<SendResult, ProviderSendError>> {
+    const tokenResult = await this.resolveToken(emx);
+    if (tokenResult.isErr()) return err({ kind: "provider_send_failed", cause: tokenResult.error.cause });
+    const token = tokenResult.value;
     try {
       const response = await fetch(`${GMAIL_API}/messages/send`, {
         method: "POST",

@@ -6,7 +6,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createApp } from "../../src/api/app.js";
-import { ok } from "../../src/errors.js";
+import { ok, err } from "../../src/errors.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
 import type { MockLogger } from "../helpers/mock-logger.js";
@@ -46,19 +46,20 @@ function makeAccountDb() {
   };
 }
 
-function makeGmailAdapter() {
+// activate() is now the single credential+address gate — the API makes exactly this one call
+// and trusts whatever it reports, the same way it will trust renew/fetchMessage/sendMessage
+// later. No separate token or address fetch happens at the API layer anymore.
+function makeGmailAdapter(activateResult: unknown = ok({ syncCursor: "1", expiresAt: "2026-09-01T00:00:00Z", providerSubscriptionId: "watch", emailAddress: "user@gmail.com" })) {
   return {
-    activate: vi.fn().mockResolvedValue(ok({ syncCursor: "1", expiresAt: "2026-09-01T00:00:00Z", providerSubscriptionId: "watch" })),
-    renew: vi.fn(), deactivate: vi.fn(), fetchMessage: vi.fn(),
-    fetchMailboxAddress: vi.fn().mockResolvedValue(ok("user@gmail.com")),
-    sendMessage: vi.fn(),
+    activate: vi.fn().mockResolvedValue(activateResult),
+    renew: vi.fn(), deactivate: vi.fn(), fetchMessage: vi.fn(), sendMessage: vi.fn(),
   };
 }
 
-function build(overrides: { linkedIdentity?: unknown; getProviderToken?: () => Promise<string> } = {}) {
+function build(overrides: { linkedIdentity?: unknown; activateResult?: unknown } = {}) {
   const accountDb = makeAccountDb();
   const logger = createMockLogger();
-  const adapter = makeGmailAdapter();
+  const adapter = makeGmailAdapter(overrides.activateResult);
   const getLinkedIdentity = vi.fn().mockResolvedValue(
     overrides.linkedIdentity === undefined ? ok({ connectionUserId: LINKED_GOOGLE_ID }) : overrides.linkedIdentity,
   );
@@ -68,7 +69,6 @@ function build(overrides: { linkedIdentity?: unknown; getProviderToken?: () => P
     access: { checkAccess: async () => {}, getLinkedIdentity } as never,
     logger,
     adapters: { gmail: adapter },
-    getProviderToken: overrides.getProviderToken ?? (async () => "provider-token"),
   }));
   return { app, accountDb, adapter, logger: logger as MockLogger, getLinkedIdentity };
 }
@@ -126,11 +126,10 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     expect(ctx.accountDb.createExternalExchange.mock.calls[0]![1].connectionUserId).toBe(LINKED_GOOGLE_ID);
   });
 
-  // Fetching the credentials is the same call every later sync and send makes, so it is the
-  // honest test of whether this connection is usable — not a separate existence check that
-  // could pass while the real thing fails.
-  it("refuses the connection when no usable credentials can be obtained", async () => {
-    const noCredentials = build({ getProviderToken: async () => { throw Object.assign(new Error("Not Found"), { status: 404 }); } });
+  // activate() resolving its own credentials is the real test of whether this connection is
+  // usable — not a separate existence check that could pass while the real thing fails.
+  it("refuses the connection when activate() cannot obtain usable credentials", async () => {
+    const noCredentials = build({ activateResult: err({ kind: "provider_activation_failed", cause: "credentials revoked" }) });
 
     const res = await req(noCredentials.app, "POST", `${A}/external-exchanges`, {
       body: { platform: "gmail", connectionId: "google" },
@@ -140,7 +139,7 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     expect(noCredentials.accountDb.createExternalExchange).not.toHaveBeenCalled();
   });
 
-  it("resolves the mailbox address from the provider, never from the request", async () => {
+  it("passes the caller's identity to activate() and persists the address activate() reports, never the request's", async () => {
     const res = await req(ctx.app, "POST", `${A}/external-exchanges`, {
       // A caller naming a mailbox it does not own must not get an exchange — or the alias
       // that routes outbound mail — pointed at it.
@@ -148,7 +147,7 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     });
 
     expect(res.status).toBe(201);
-    expect(ctx.adapter.fetchMailboxAddress).toHaveBeenCalledWith("provider-token");
+    expect(ctx.adapter.activate.mock.calls[0]![1]).toEqual({ userId: CALLER_USER_ID, connectionId: "google" });
     expect(ctx.accountDb.createExternalExchange.mock.calls[0]![1].emailAddress).toBe("user@gmail.com");
     expect(ctx.accountDb.ensureAlias.mock.calls[0]![1]).toBe("user@gmail.com");
   });

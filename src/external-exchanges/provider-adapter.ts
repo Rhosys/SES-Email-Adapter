@@ -31,6 +31,25 @@ export interface ActivationResult {
   syncCursor: string
   expiresAt: string
   providerSubscriptionId: string
+  /**
+   * The mailbox address, verified by the adapter itself — resolved from the provider for
+   * OAuth platforms (Gmail, Outlook), read off the caller-supplied config for IMAP/JMAP. Never
+   * trust a caller-supplied address instead: for OAuth in particular, the only mailbox
+   * identifier available to a browser is the linked identity's provider-side user id (a
+   * numeric subject for Google), and accepting a claimed address would let a caller point an
+   * exchange — and the alias that routes its outbound mail — at a mailbox it does not own.
+   */
+  emailAddress: string
+}
+
+/**
+ * Coordinates needed to obtain provider credentials for a *new* connection, before an
+ * exchange record exists to read them back from. Only OAuth adapters (Gmail, Outlook) use
+ * this; IMAP/JMAP authenticate with the config the caller supplied directly.
+ */
+export interface ActivationIdentity {
+  userId: string
+  connectionId: string
 }
 
 export interface RawMimeResult {
@@ -63,10 +82,20 @@ export interface SendResult {
 // ---------------------------------------------------------------------------
 
 export interface ProviderAdapter {
-  activate(token: string, emx: ExternalMailExchange): Promise<Result<ActivationResult, ProviderActivationError>>
-  renew(token: string, emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>>
-  deactivate(token: string, emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>>
-  fetchMessage(token: string, providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>>
+  /**
+   * Verifies the mailbox is reachable and returns what the exchange record needs to store.
+   *
+   * Credential resolution is the adapter's job, not the caller's: this is the same call every
+   * later renew/fetch/send makes, so it is the honest test of whether the connection will
+   * work. `identity` supplies the coordinates for that first credential fetch — the exchange
+   * doesn't exist yet, so there is nothing on it to read them back from. IMAP/JMAP ignore it;
+   * they authenticate from the config already on `emx`.
+   */
+  activate(emx: ExternalMailExchange, identity?: ActivationIdentity): Promise<Result<ActivationResult, ProviderActivationError>>
+  /** Every method past `activate` resolves its own credentials from `emx` — see `exchangeCredentials`. */
+  renew(emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>>
+  deactivate(emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>>
+  fetchMessage(providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>>
   /**
    * Sends a fully-formed RFC 5322 message through the provider on the mailbox owner's behalf.
    *
@@ -76,18 +105,5 @@ export interface ProviderAdapter {
    * "this exchange cannot send" and fails the send rather than silently falling back to SES,
    * which would emit unaligned mail from a domain we are not authorized for.
    */
-  sendMessage?(token: string, rawMime: Uint8Array, emx: ExternalMailExchange): Promise<Result<SendResult, ProviderSendError>>
-  /**
-   * Asks the provider which mailbox this token belongs to.
-   *
-   * The address has to come from the provider, not from the client: the only mailbox
-   * identifier an OAuth login exposes to the browser is the linked identity's provider-side
-   * user id, which for Google is a numeric subject, not an email address. Everything
-   * downstream is keyed on the real address — the alias, the alias→exchange link that routes
-   * outbound mail, and the Gmail webhook's mailbox match — so a guess that happens to look
-   * like an id silently breaks all three.
-   *
-   * Optional: IMAP and JMAP already know their own address from the configured username.
-   */
-  fetchMailboxAddress?(token: string): Promise<Result<string, ProviderFetchError>>
+  sendMessage?(rawMime: Uint8Array, emx: ExternalMailExchange): Promise<Result<SendResult, ProviderSendError>>
 }

@@ -3,7 +3,6 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { DateTime } from "luxon";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js";
-import { exchangeCredentials } from "../external-exchanges/provider-adapter.js";
 import type { EncryptionManager } from "../secrets/encryption-manager.js";
 import type { Logger } from "../logger.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
@@ -120,7 +119,6 @@ export class ExternalExchangesApi {
   constructor(
     private readonly accountDb: AccountDatabase,
     private readonly adapters: Record<string, ProviderAdapter>,
-    private readonly getProviderToken: (userId: string, connectionId: string) => Promise<string>,
     private readonly getLinkedIdentity: AccessService["getLinkedIdentity"],
     private readonly encryptionManager: EncryptionManager,
     private readonly signalQueue: SignalQueue,
@@ -128,7 +126,7 @@ export class ExternalExchangesApi {
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { accountDb, adapters, getProviderToken, getLinkedIdentity, encryptionManager, signalQueue, logger } = this;
+    const { accountDb, adapters, getLinkedIdentity, encryptionManager, signalQueue, logger } = this;
 
     /**
      * Sets `emxId` on the alias item for a connected mailbox — the attribute the send path
@@ -202,7 +200,7 @@ export class ExternalExchangesApi {
           imapConfig: { host: imapConfig.host, tlsConfig: imapConfig.tlsConfig, username: imapConfig.username, encryptedPassword: imapConfig.password },
         };
 
-        const activateResult = await adapter.activate("", tempEmx);
+        const activateResult = await adapter.activate(tempEmx);
         if (activateResult.isErr()) {
           const errorReason = String(activateResult.error.cause);
           const result = await accountDb.createImapExchange(accountId, {
@@ -252,7 +250,7 @@ export class ExternalExchangesApi {
           jmapConfig: { sessionUrl: jmapConfig.sessionUrl, username: jmapConfig.username, encryptedPassword: jmapConfig.password, apiUrl: "", downloadUrl: "", jmapAccountId: "", inboxId: "" },
         };
 
-        const activateResult = await adapter.activate("", tempEmx);
+        const activateResult = await adapter.activate(tempEmx);
         if (activateResult.isErr()) {
           const errorReason = String(activateResult.error.cause);
           const result = await accountDb.createJmapExchange(accountId, {
@@ -299,22 +297,11 @@ export class ExternalExchangesApi {
       const userId = c.get("auth")?.userId;
       if (!userId) return err(c, 401, "Unauthorized");
 
-      // Fetching the credentials is the real test of whether this connection is usable: it is
-      // the exact call every later token fetch makes, so anything it cannot satisfy now it
-      // will not satisfy at sync or send time either. A failure here is the caller's
-      // connection not being linked (or not being linked with the scopes we need), not a
-      // mailbox worth recording — so it is refused rather than persisted as activation_failed.
-      let token: string;
-      try {
-        token = await getProviderToken(userId, connectionId);
-      } catch (e) {
-        logger.warn("No usable provider credentials for the caller on this connection — refusing to connect the mailbox", { code: "api.emx.create.no_credentials", accountId, connectionId, platform: body.platform, error: e });
-        return err(c, 422, "Could not obtain credentials for this provider. Reconnect the identity and try again.");
-      }
-
       // Which identity the caller holds at that provider is Authress' to state, not the
       // client's. The client sends its own view of it, but it is only ever an assertion —
-      // this resolves the real one and treats a disagreement as a bug worth recording.
+      // this resolves the real one and treats a disagreement as a bug worth recording. This is
+      // a separate concern from the credential check below: it identifies which linked
+      // identity we're dealing with, it does not verify the connection can be used.
       const linkedIdentityResult = await getLinkedIdentity(userId, connectionId);
       if (linkedIdentityResult.isErr()) {
         logger.error("Failed to resolve the caller's linked identity", { code: "api.emx.create.linked_identity_failed", accountId, connectionId, error: linkedIdentityResult.error });
@@ -328,16 +315,18 @@ export class ExternalExchangesApi {
       }
       const connectionUserId = linkedIdentityResult.value?.connectionUserId;
 
-      // Ask the provider which mailbox this token belongs to. Never the client: an address it
-      // supplied would let a caller point an exchange — and the alias that routes outbound
-      // mail — at a mailbox it does not own.
-      if (!adapter.fetchMailboxAddress) return err(c, 422, "Unsupported platform");
-      const addressResult = await adapter.fetchMailboxAddress(token);
-      if (addressResult.isErr()) {
-        logger.error("Failed to resolve mailbox address from provider", { code: "api.emx.create.address_failed", accountId, platform: body.platform, error: addressResult.error });
-        return err(c, 503, "Could not determine the mailbox address from the mail provider");
+      // activate() resolves its own credentials and reports the verified mailbox address — the
+      // exact credential fetch every later renew/fetch/send makes, so a failure here means the
+      // connection genuinely will not work, not that it merely might. Nothing is persisted on
+      // failure: without a verified address there's no meaningful record to key one on, and an
+      // unusable connection isn't worth surfacing as a mailbox the user half-connected.
+      const emxStub: ExternalMailExchange = { id: "", accountId, platform: body.platform, emailAddress: "", status: "active", createdAt: "", updatedAt: "" };
+      const activateResult = await adapter.activate(emxStub, { userId, connectionId });
+      if (activateResult.isErr()) {
+        logger.warn("OAuth activation failed — refusing to connect the mailbox", { code: "api.emx.create.activation_failed", accountId, connectionId, platform: body.platform, error: activateResult.error });
+        return err(c, 422, "Could not activate this mailbox. Reconnect the identity and try again.");
       }
-      const emailAddress = addressResult.value;
+      const { syncCursor, expiresAt, providerSubscriptionId, emailAddress } = activateResult.value;
 
       // Alias conflict check: reject if another account already owns this email address
       const oauthAliasCheck = await accountDb.getAliasByGlobalAddress(emailAddress);
@@ -345,29 +334,13 @@ export class ExternalExchangesApi {
         return err(c, 409, "Email address is already registered to another account");
       }
 
-      // Idempotency: find existing exchange for same platform + emailAddress
+      // Idempotency: find existing exchange for same platform + emailAddress. The address is
+      // only known now, post-activation, so this check has to come after — an idempotency key
+      // is only meaningful once it's the real address, not a guess at one.
       const listResult = await accountDb.listExternalExchanges(accountId);
       const existing = listResult.isOk()
         ? listResult.value.find((e) => e.platform === body.platform && e.emailAddress === emailAddress)
         : undefined;
-
-      const emxStub = { id: existing?.id ?? "", accountId, platform: body.platform, emailAddress, status: "active" as const, createdAt: "", updatedAt: "" };
-      const activateResult = await adapter.activate(token, emxStub);
-      if (activateResult.isErr()) {
-        const errorReason = String(activateResult.error.cause);
-        if (existing) {
-          const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "activation_failed", errorReason, consecutiveFailures: 0 });
-          if (updateResult.isErr()) { logger.error("Failed to update exchange record", { code: "api.emx.create_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
-          logger.error("Failed to activate exchange", { code: "api.emx.activate_failed", error: activateResult.error });
-          return c.json(serializeEmx(updateResult.value), 200);
-        }
-        const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress, status: "activation_failed", errorReason, syncCursor: "", lastSyncAt: DateTime.utc().toISO()! });
-        if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
-        logger.error("Failed to activate exchange", { code: "api.emx.activate_failed", error: activateResult.error });
-        return c.json(serializeEmx(result.value), 201);
-      }
-
-      const { syncCursor, expiresAt, providerSubscriptionId } = activateResult.value;
       if (existing) {
         const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "active", syncCursor, expiresAt, providerSubscriptionId, userId, ...(connectionUserId ? { connectionUserId } : {}), connectionId, errorReason: undefined, consecutiveFailures: 0 });
         if (updateResult.isErr()) { logger.error("Failed to update exchange record", { code: "api.emx.create_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
@@ -452,7 +425,7 @@ export class ExternalExchangesApi {
           ...emx,
           jmapConfig: { ...emx.jmapConfig, sessionUrl: mergedSessionUrl, username: mergedUsername, encryptedPassword: testPassword },
         };
-        const testResult = await jmapAdapter.activate("", tempEmx);
+        const testResult = await jmapAdapter.activate(tempEmx);
         if (testResult.isErr()) {
           const reason = String(testResult.error.cause).slice(0, 512);
           logger.warn("JMAP connection test failed during PATCH", { code: "api.emx.patch.jmap.connection_test_failed", emxId, error: testResult.error });
@@ -527,7 +500,7 @@ export class ExternalExchangesApi {
         ...emx,
         imapConfig: { host: mergedHost, tlsConfig: mergedTlsConfig, username: mergedUsername, encryptedPassword: testPassword },
       };
-      const testResult = await imapAdapter.activate("", tempEmx);
+      const testResult = await imapAdapter.activate(tempEmx);
       if (testResult.isErr()) {
         const reason = String(testResult.error.cause).slice(0, 512);
         logger.warn("IMAP connection test failed during PATCH", { code: "api.emx.patch.connection_test_failed", emxId, error: testResult.error });
@@ -583,23 +556,15 @@ export class ExternalExchangesApi {
       const emx = getResult.value;
       if (!emx) return err(c, 404, "Exchange not found");
 
-      // Only deactivate with provider if the exchange was successfully activated
+      // Only deactivate with provider if the exchange was successfully activated. The adapter
+      // resolves its own credentials from `emx` now — see ProviderAdapter.deactivate — so a
+      // missing or unusable identity surfaces as its own failure rather than a silent skip.
       if (emx.status === "active") {
         const adapter = adapters[emx.platform];
         if (adapter) {
-          const credentials = exchangeCredentials(emx);
-          let token: string;
-          try {
-            token = credentials ? await getProviderToken(credentials.userId, credentials.connectionId) : "";
-          } catch (e) {
-            logger.warn("Failed to get provider token for deactivation — proceeding with local deletion", { code: "api.emx.deactivate.token_failed", emxId, error: e });
-            token = "";
-          }
-          if (token) {
-            const deactivateResult = await adapter.deactivate(token, emx);
-            if (deactivateResult.isErr()) {
-              logger.warn("Failed to deactivate exchange with provider — proceeding with local deletion", { code: "api.emx.deactivate_failed", emxId, error: deactivateResult.error });
-            }
+          const deactivateResult = await adapter.deactivate(emx);
+          if (deactivateResult.isErr()) {
+            logger.warn("Failed to deactivate exchange with provider — proceeding with local deletion", { code: "api.emx.deactivate_failed", emxId, error: deactivateResult.error });
           }
         }
       }

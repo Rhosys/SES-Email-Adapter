@@ -226,7 +226,6 @@ export class CompositeRoot {
       emailService,
       accountDb,
       adapters: emxAdapters,
-      getProviderToken,
       logger,
     });
 
@@ -374,14 +373,12 @@ export class CompositeRoot {
       adapters: emxAdapters,
       accountDb,
       processor,
-      getProviderToken,
     });
 
     const emxDispatchWorker = new EmxDispatchWorker({
       logger,
       db: accountDb,
       adapters: emxAdapters,
-      getProviderToken,
     });
 
     // -----------------------------------------------------------------------

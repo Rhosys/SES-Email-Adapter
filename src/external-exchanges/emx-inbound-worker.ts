@@ -2,7 +2,6 @@ import { ok, err } from "../errors.js";
 import type { Result } from "../errors.js";
 import type { ProcessorError } from "../errors.js";
 import type { ProviderAdapter, ProviderFetchError } from "./provider-adapter.js";
-import { exchangeCredentials } from "./provider-adapter.js";
 import type { InboundSignalMessage } from "../processor/processor.js";
 import type { Logger } from "../logger.js";
 import type { EmailContentStore } from "../content-store.js";
@@ -25,7 +24,6 @@ interface EmxInboundWorkerDeps {
   adapters: Record<string, ProviderAdapter>;
   accountDb: AccountDatabase;
   processor: EmxProcessor;
-  getProviderToken: (userId: string, connectionId: string) => Promise<string>;
 }
 
 export class EmxInboundWorker {
@@ -34,7 +32,6 @@ export class EmxInboundWorker {
   private readonly adapters: Record<string, ProviderAdapter>;
   private readonly accountDb: AccountDatabase;
   private readonly processor: EmxProcessor;
-  private readonly getProviderToken: EmxInboundWorkerDeps["getProviderToken"];
 
   constructor(deps: EmxInboundWorkerDeps) {
     this.logger = deps.logger;
@@ -42,7 +39,6 @@ export class EmxInboundWorker {
     this.adapters = deps.adapters;
     this.accountDb = deps.accountDb;
     this.processor = deps.processor;
-    this.getProviderToken = deps.getProviderToken;
   }
 
   async process(payload: EmxInboundPayload, sqsMessageId: string, receiveCount: number): Promise<Result<void, ProviderFetchError | ProcessorError>> {
@@ -59,8 +55,6 @@ export class EmxInboundWorker {
       return ok(undefined);
     }
 
-    // The EMX record is loaded before the token because it carries the connection user the
-    // provider credentials are keyed on.
     const emxResult = await this.accountDb.getExternalExchange(accountId, emxId);
     if (emxResult.isErr()) {
       this.logger.error("emx_inbound: failed to load EMX record", { code: "emx.inbound.emx_load_failed", source, emxId, error: emxResult.error });
@@ -72,24 +66,9 @@ export class EmxInboundWorker {
       return err({ kind: "provider_fetch_failed", cause: "EMX not found" });
     }
 
-    let token: string;
-    if (source === "imap" || source === "jmap") {
-      token = "";
-    } else {
-      const credentials = exchangeCredentials(emx);
-      if (!credentials) {
-        this.logger.error("emx_inbound: exchange has no linked identity recorded, so its provider credentials cannot be fetched. It predates connection tracking and must be reconnected by the user.", { code: "emx.inbound.no_connection", source, emxId });
-        return err({ kind: "provider_fetch_failed", cause: "Exchange has no linked identity recorded" });
-      }
-      try {
-        token = await this.getProviderToken(credentials.userId, credentials.connectionId);
-      } catch (e) {
-        this.logger.error("emx_inbound: failed to get provider token", { code: "emx.inbound.token_failed", source, emxId, error: e });
-        return err({ kind: "provider_fetch_failed", cause: e });
-      }
-    }
-
-    const fetchResult = await adapter.fetchMessage(token, providerMessageId, emx);
+    // The adapter resolves its own credentials from `emx` — a missing or unusable identity
+    // surfaces as a fetch failure below, same as any other fetch problem.
+    const fetchResult = await adapter.fetchMessage(providerMessageId, emx);
     if (fetchResult.isErr()) {
       const error = fetchResult.error;
       if (error.kind === "provider_token_expired") {

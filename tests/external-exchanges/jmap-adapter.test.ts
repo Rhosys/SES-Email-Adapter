@@ -132,12 +132,14 @@ describe("JmapAdapter.activate", () => {
       },
     });
 
-    const result = await adapter.activate("", emx);
+    const result = await adapter.activate(emx);
     expect(result.isOk()).toBe(true);
 
     const value = result._unsafeUnwrap();
     expect(value.syncCursor).toBe("state-initial-123");
     expect(value.providerSubscriptionId).toBe("poll");
+    // Read off jmapConfig.username directly — JMAP has no separate identity to verify against.
+    expect(value.emailAddress).toBe("user@example.com");
 
     // expiresAt should be approximately 1 hour from now
     const expiresAt = new Date(value.expiresAt).getTime();
@@ -175,7 +177,7 @@ describe("JmapAdapter.activate", () => {
       },
     });
 
-    const result = await adapter.activate("", emx);
+    const result = await adapter.activate(emx);
     expect(result.isErr()).toBe(true);
 
     const error = result._unsafeUnwrapErr();
@@ -205,7 +207,7 @@ describe("JmapAdapter.activate", () => {
       },
     });
 
-    const result = await adapter.activate("", emx);
+    const result = await adapter.activate(emx);
     expect(result.isErr()).toBe(true);
 
     const error = result._unsafeUnwrapErr();
@@ -243,7 +245,7 @@ describe("JmapAdapter.activate", () => {
       },
     });
 
-    const result = await adapter.activate("", emx);
+    const result = await adapter.activate(emx);
     expect(result.isErr()).toBe(true);
 
     const error = result._unsafeUnwrapErr();
@@ -288,7 +290,7 @@ describe("JmapAdapter.renew", () => {
     });
 
     const emx = makeEmx();
-    const result = await adapter.renew("", emx);
+    const result = await adapter.renew(emx);
 
     expect(result.isOk()).toBe(true);
     expect(signalQueue.sendBatch).toHaveBeenCalledTimes(1);
@@ -335,7 +337,7 @@ describe("JmapAdapter.renew", () => {
     });
 
     const emx = makeEmx();
-    const result = await adapter.renew("", emx);
+    const result = await adapter.renew(emx);
 
     expect(result.isOk()).toBe(true);
     // Fallback enqueues all returned IDs via batch
@@ -375,7 +377,7 @@ describe("JmapAdapter.renew", () => {
     });
 
     const emx = makeEmx();
-    const result = await adapter.renew("", emx);
+    const result = await adapter.renew(emx);
 
     expect(result.isOk()).toBe(true);
     expect(db.updateExternalExchange).toHaveBeenCalledWith("acct-1", "emx_test123", expect.objectContaining({
@@ -417,7 +419,7 @@ describe("JmapAdapter.fetchMessage", () => {
     });
 
     const emx = makeEmx();
-    const result = await adapter.fetchMessage("", "msg-001", emx);
+    const result = await adapter.fetchMessage("msg-001", emx);
 
     expect(result.isOk()).toBe(true);
 
@@ -449,7 +451,7 @@ describe("JmapAdapter.fetchMessage", () => {
     });
 
     const emx = makeEmx();
-    const result = await adapter.fetchMessage("", "msg-gone", emx);
+    const result = await adapter.fetchMessage("msg-gone", emx);
 
     expect(result.isErr()).toBe(true);
 
@@ -471,7 +473,7 @@ describe("JmapAdapter.deactivate", () => {
     });
 
     const emx = makeEmx();
-    const result = await adapter.deactivate("", emx);
+    const result = await adapter.deactivate(emx);
 
     expect(result.isOk()).toBe(true);
     expect(result._unsafeUnwrap()).toBeUndefined();

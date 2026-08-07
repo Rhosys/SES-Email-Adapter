@@ -30,7 +30,6 @@ interface ReplySenderDeps {
   emailService: EmailService;
   accountDb: AccountDatabase;
   adapters: Record<string, ProviderAdapter>;
-  getProviderToken: (userId: string, connectionId: string) => Promise<string>;
   logger: Logger;
 }
 
@@ -49,14 +48,12 @@ export class ReplySenderService implements ReplySender {
   private readonly emailService: EmailService;
   private readonly accountDb: AccountDatabase;
   private readonly adapters: Record<string, ProviderAdapter>;
-  private readonly getProviderToken: ReplySenderDeps["getProviderToken"];
   private readonly logger: Logger;
 
   constructor(deps: ReplySenderDeps) {
     this.emailService = deps.emailService;
     this.accountDb = deps.accountDb;
     this.adapters = deps.adapters;
-    this.getProviderToken = deps.getProviderToken;
     this.logger = deps.logger;
   }
 
@@ -151,18 +148,8 @@ export class ReplySenderService implements ReplySender {
     opts: { to: string; from: string; subject: string; body: string; accountId: string; signalId?: string; headers: Array<{ Name: string; Value: string }> },
   ): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
     const adapter = this.adapters[emx.platform];
-    // resolveExchangeRoute already established all of these; narrowing for the type checker.
+    // resolveExchangeRoute already established this; narrowing for the type checker.
     if (!adapter?.sendMessage) return err({ kind: "provider_send_rejected", cause: `${emx.platform} exchanges cannot send` });
-    const credentials = exchangeCredentials(emx);
-    if (!credentials) return err({ kind: "provider_send_rejected", cause: "Exchange has no linked identity recorded" });
-
-    let token: string;
-    try {
-      token = await this.getProviderToken(credentials.userId, credentials.connectionId);
-    } catch (e) {
-      this.logger.error("Failed to get provider token for send", { code: "reply_sender.provider_token_failed", emxId: emx.id, platform: emx.platform, error: e });
-      return err({ kind: "provider_send_failed", cause: e });
-    }
 
     const rawMime = buildMimeMessage({
       from: opts.from,
@@ -172,7 +159,9 @@ export class ReplySenderService implements ReplySender {
       headers: opts.headers,
     });
 
-    const result = await adapter.sendMessage(token, rawMime, emx);
+    // The adapter resolves its own credentials from `emx` — a missing or unusable identity
+    // surfaces as a send failure below, same as any other send problem.
+    const result = await adapter.sendMessage(rawMime, emx);
     if (result.isErr()) {
       if (isPermanentProviderError(result.error)) {
         this.logger.warn("Provider send permanently rejected — will not retry.", { code: "reply_sender.provider_send_permanent", emxId: emx.id, platform: emx.platform, error: result.error });

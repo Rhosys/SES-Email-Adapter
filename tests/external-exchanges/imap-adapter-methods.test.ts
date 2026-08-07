@@ -112,13 +112,15 @@ describe("ImapAdapter.activate", () => {
     const emx = makeEmx();
     const before = DateTime.utc();
 
-    const result = await adapter.activate("", emx);
+    const result = await adapter.activate(emx);
 
     expect(result.isOk()).toBe(true);
     const value = result._unsafeUnwrap();
     // syncCursor = "{uidvalidity}:{uidNext - 1}" = "123:42"
     expect(value.syncCursor).toBe("123:42");
     expect(value.providerSubscriptionId).toBe("poll");
+    // Read off imapConfig.username directly — IMAP has no separate identity to verify against.
+    expect(value.emailAddress).toBe("user@example.com");
     // expiresAt should be ~1hr from now
     const expiresAt = DateTime.fromISO(value.expiresAt);
     const diffMinutes = expiresAt.diff(before, "minutes").minutes;
@@ -131,7 +133,7 @@ describe("ImapAdapter.activate", () => {
     const emx = makeEmx();
     mockClient.connect.mockRejectedValue(new Error("Connection timeout after 10000ms"));
 
-    const result = await adapter.activate("", emx);
+    const result = await adapter.activate(emx);
 
     expect(result.isErr()).toBe(true);
     const error = result._unsafeUnwrapErr();
@@ -146,7 +148,7 @@ describe("ImapAdapter.activate", () => {
     (authError as unknown as { authenticationFailed: boolean }).authenticationFailed = true;
     mockClient.connect.mockRejectedValue(authError);
 
-    const result = await adapter.activate("", emx);
+    const result = await adapter.activate(emx);
 
     expect(result.isErr()).toBe(true);
     const error = result._unsafeUnwrapErr();
@@ -162,7 +164,7 @@ describe("ImapAdapter.renew", () => {
     const emx = makeEmx({ syncCursor: "100:50" });
     mockMailbox.uidValidity = BigInt(200);
 
-    const result = await adapter.renew("", emx);
+    const result = await adapter.renew(emx);
 
     expect(result.isErr()).toBe(true);
     const error = result._unsafeUnwrapErr();
@@ -178,7 +180,7 @@ describe("ImapAdapter.renew", () => {
     const allUids = Array.from({ length: 600 }, (_, i) => i + 1);
     mockClient.search.mockResolvedValue(allUids);
 
-    const result = await adapter.renew("", emx);
+    const result = await adapter.renew(emx);
 
     expect(result.isOk()).toBe(true);
     // Only 500 should be enqueued (via single batch call)
@@ -198,7 +200,7 @@ describe("ImapAdapter.renew", () => {
     mockMailbox.uidValidity = BigInt(123);
     mockClient.search.mockResolvedValue([43, 44, 45]);
 
-    const result = await adapter.renew("", emx);
+    const result = await adapter.renew(emx);
 
     expect(result.isOk()).toBe(true);
     expect(mockSignalQueue.sendBatch).toHaveBeenCalledTimes(1);
@@ -217,7 +219,7 @@ describe("ImapAdapter.fetchMessage", () => {
     const emx = makeEmx();
     mockClient.fetchOne.mockResolvedValue(null);
 
-    const result = await adapter.fetchMessage("acct-1", "99", emx);
+    const result = await adapter.fetchMessage("99", emx);
 
     expect(result.isErr()).toBe(true);
     const error = result._unsafeUnwrapErr();
@@ -230,7 +232,7 @@ describe("ImapAdapter.deactivate", () => {
     const adapter = createAdapter();
     const emx = makeEmx();
 
-    const result = await adapter.deactivate("", emx);
+    const result = await adapter.deactivate(emx);
 
     expect(result.isOk()).toBe(true);
     expect(result._unsafeUnwrap()).toBeUndefined();

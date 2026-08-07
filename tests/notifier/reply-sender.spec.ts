@@ -41,14 +41,12 @@ function makeSender(opts: {
   logger?: Logger;
   accountDb?: AccountDatabase;
   adapters?: Record<string, ProviderAdapter>;
-  getProviderToken?: (connectionUserId: string, connectionId: string) => Promise<string>;
 } ): ReplySenderService {
   return new ReplySenderService({
     emailService: opts.emailService,
     logger: opts.logger ?? makeLogger(),
     accountDb: opts.accountDb ?? makeAccountDb(),
     adapters: opts.adapters ?? {},
-    getProviderToken: opts.getProviderToken ?? (async () => "provider-token"),
   });
 }
 
@@ -250,23 +248,21 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     expect(adapter.sendMessage).toHaveBeenCalledOnce();
   });
 
-  it("uses the connection recorded on the exchange rather than one derived from the platform", async () => {
-    // A connection renamed in the Authress portal — a platform-derived "google" would miss it.
-    const getProviderToken = vi.fn().mockResolvedValue("token-xyz");
+  it("passes the exchange record through to the adapter untouched — credential resolution (including which connection to use) is the adapter's job now, not the router's", async () => {
+    // A connection renamed in the Authress portal — a platform-derived "google" would miss it,
+    // which is exactly why that resolution lives on the adapter's own emx-backed lookup
+    // (see GmailProvider.resolveToken in provider-send.test.ts) rather than being redone here.
+    const exchange = { ...ACTIVE_GMAIL_EXCHANGE, connectionId: "google-prod" };
     const adapter = makeGmailAdapter(ok({ providerMessageId: "gmail-msg-1" }));
     const handler = makeSender({
       emailService: makeEmailService(),
-      accountDb: makeAccountDb({
-        alias: ALIAS_WITH_EXCHANGE,
-        exchange: { ...ACTIVE_GMAIL_EXCHANGE, connectionId: "google-prod" },
-      }),
+      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, exchange }),
       adapters: { gmail: adapter },
-      getProviderToken,
     });
 
     await handler.sendReply(REPLY);
 
-    expect(getProviderToken).toHaveBeenCalledWith("authress-user-9", "google-prod");
+    expect((adapter.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]![1]).toEqual(exchange);
   });
 
   it("refuses to send when the exchange predates connection tracking", async () => {
@@ -286,20 +282,17 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     expect(emailService.send).not.toHaveBeenCalled();
   });
 
-  it("fetches the provider token with the exchange's connection user, not the accountId", async () => {
-    const getProviderToken = vi.fn().mockResolvedValue("token-xyz");
+  it("hands the provider a complete RFC 5322 message as the first argument", async () => {
     const adapter = makeGmailAdapter(ok({ providerMessageId: "gmail-msg-1" }));
     const handler = makeSender({
       emailService: makeEmailService(),
       accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, exchange: ACTIVE_GMAIL_EXCHANGE }),
       adapters: { gmail: adapter },
-      getProviderToken,
     });
 
     await handler.sendReply(REPLY);
 
-    expect(getProviderToken).toHaveBeenCalledWith("authress-user-9", "google");
-    expect((adapter.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toBe("token-xyz");
+    expect((adapter.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]![0]).toBeInstanceOf(Uint8Array);
   });
 
   it("hands the provider a complete RFC 5322 message carrying the reply headers", async () => {
@@ -312,7 +305,7 @@ describe("ReplySenderService — routing to an external mailbox", () => {
 
     await handler.sendReply(REPLY);
 
-    const rawMime = (adapter.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]![1] as Uint8Array;
+    const rawMime = (adapter.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Uint8Array;
     const message = Buffer.from(rawMime).toString("utf8");
     expect(message).toContain("From: user@gmail.com");
     expect(message).toContain("To: recipient@example.com");

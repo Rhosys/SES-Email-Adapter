@@ -32,14 +32,11 @@ const mockJmapAdapter: ProviderAdapter = {
   fetchMessage: vi.fn(),
 };
 
-const mockGetProviderToken = vi.fn();
-
 function createWorker(): EmxDispatchWorker {
   return new EmxDispatchWorker({
     logger: mockLogger,
     db: mockDb as never,
     adapters: { jmap: mockJmapAdapter },
-    getProviderToken: mockGetProviderToken,
   });
 }
 
@@ -72,11 +69,12 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// JMAP skips getProviderToken (token = "")
+// The worker delegates to the adapter uniformly — no credentials involved here;
+// JMAP authenticates from the config already on the exchange.
 // ---------------------------------------------------------------------------
 
-describe("JMAP skips getProviderToken", () => {
-  it("does not call getProviderToken for JMAP platform", async () => {
+describe("dispatch worker delegates renewal to the adapter", () => {
+  it("calls renew(emx) directly for JMAP", async () => {
     const emx = makeJmapEmx();
     mockDb.listExpiringExchanges.mockResolvedValue(ok([emx]));
     vi.mocked(mockJmapAdapter.renew).mockResolvedValue(ok(undefined));
@@ -85,8 +83,7 @@ describe("JMAP skips getProviderToken", () => {
     const result = await worker.dispatch();
 
     expect(result.isOk()).toBe(true);
-    expect(mockGetProviderToken).not.toHaveBeenCalled();
-    expect(mockJmapAdapter.renew).toHaveBeenCalledWith("", emx);
+    expect(mockJmapAdapter.renew).toHaveBeenCalledWith(emx);
   });
 });
 
