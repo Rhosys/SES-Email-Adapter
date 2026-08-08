@@ -18,12 +18,6 @@ const CreateExternalExchangeRequest = z.object({
   // The Authress identity-connection the caller just linked. The client chose it, so it is
   // the one thing here the server cannot derive on its own.
   connectionId: z.string().max(256).optional(),
-  // Which of the caller's (possibly several) identities linked under that connection this is.
-  // Required: a connection can have multiple linked identities, so the server has no way to
-  // pick the right one on its own. Never trusted outright — the server validates that this
-  // exact (connectionId, connectionUserId) pair is actually one of the caller's linked
-  // identities before using it, and refuses the request if it is not.
-  connectionUserId: z.string().max(256),
 });
 
 /**
@@ -299,25 +293,21 @@ export class ExternalExchangesApi {
       const userId = c.get("auth")?.userId;
       if (!userId) return err(c, 401, "Unauthorized");
 
-      // The client names which of its linked identities this is, but naming it is only ever an
-      // assertion — Authress is the source of truth for which identities actually belong to
-      // this user. Validate the exact (connectionId, connectionUserId) pair before trusting it;
-      // a client naming an identity it does not hold is refused outright rather than silently
-      // corrected, since there is no "the" identity to fall back to once a connection can have
-      // more than one.
-      const connectionUserId = body.connectionUserId;
-      const linkedIdentityResult = await getLinkedIdentity(userId, connectionId, connectionUserId);
+      // Which identity the caller holds at that provider is Authress' to state, not the
+      // client's — the client never names it. A connection can carry multiple linked
+      // identities (the same user linking more than one mailbox through the same provider
+      // connection); Authress reports a `linkedTime` per identity, and the one just linked by
+      // the OAuth redirect that is mid-flight right now is always the most recent for its
+      // connectionId, so that is the one resolved here.
+      const linkedIdentityResult = await getLinkedIdentity(userId, connectionId);
       if (linkedIdentityResult.isErr()) {
-        logger.error("Failed to verify the caller's linked identity", { code: "api.emx.create.linked_identity_failed", accountId, connectionId, error: linkedIdentityResult.error });
+        logger.error("Failed to resolve the caller's linked identity", { code: "api.emx.create.linked_identity_failed", accountId, connectionId, error: linkedIdentityResult.error });
         return err(c, 503, "Could not verify the linked identity with the identity provider");
       }
       if (!linkedIdentityResult.value) {
-        logger.track("Client named a provider identity that is not among its linked identities for this connection — refusing to connect the mailbox.", {
-          code: "api.emx.create.connection_user_not_linked",
-          accountId, connectionId, connectionUserId,
-        });
-        return err(c, 403, "This identity is not linked to your account for the given connection");
+        return err(c, 422, "No linked identity found for this connection. Link the identity before connecting a mailbox.");
       }
+      const connectionUserId = linkedIdentityResult.value.connectionUserId;
 
       // activate() resolves its own credentials and reports the verified mailbox address — the
       // exact credential fetch every later renew/fetch/send makes, so a failure here means the

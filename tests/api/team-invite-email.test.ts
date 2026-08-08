@@ -34,7 +34,7 @@ function makeAccess() {
     removeUser: vi.fn().mockResolvedValue(ok(undefined)),
     checkAccess: vi.fn().mockResolvedValue(undefined),
     createInvite: vi.fn().mockResolvedValue(ok({ inviteId: "inv-abc123" })),
-    getLinkedIdentity: vi.fn().mockResolvedValue(ok(true)),
+    getLinkedIdentity: vi.fn().mockResolvedValue(ok({ connectionUserId: "google-sub-12345" })),
   };
 }
 

@@ -2,10 +2,11 @@
 //
 // The caller's Authress userId comes from the verified access token, never the request body: a
 // caller that could name it could bind an identity it does not hold to its own account. The
-// caller's provider identity (connectionUserId) does come from the request body — a connection
-// can have more than one linked identity, so the server cannot pick one on its own — but it is
-// only ever an assertion until Authress confirms that exact (connectionId, connectionUserId)
-// pair is actually one of the caller's linked identities.
+// caller's provider identity (connectionUserId) is resolved entirely server-side, from
+// Authress' own record of linked identities — never named by the client at all. A connection
+// can carry more than one linked identity, but Authress reports a `linkedTime` per identity, and
+// the one an in-flight OAuth redirect just linked is always the most recent for its
+// connectionId, so that is the one the server resolves to.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createApp } from "../../src/api/app.js";
@@ -64,7 +65,7 @@ function build(overrides: { linkedIdentity?: unknown; activateResult?: unknown }
   const logger = createMockLogger();
   const adapter = makeGmailAdapter(overrides.activateResult);
   const getLinkedIdentity = vi.fn().mockResolvedValue(
-    overrides.linkedIdentity === undefined ? ok(true) : overrides.linkedIdentity,
+    overrides.linkedIdentity === undefined ? ok({ connectionUserId: LINKED_GOOGLE_ID }) : overrides.linkedIdentity,
   );
   const app = createApp(makeAppDeps({
     accountDb: accountDb as never,
@@ -86,43 +87,33 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
   it("stores the caller's own userId from the verified token, ignoring any the body names", async () => {
     const res = await req(ctx.app, "POST", `${A}/external-exchanges`, {
       // A caller naming someone else's identity must not get it persisted.
-      body: { platform: "gmail", connectionId: "google", userId: "someone-else", connectionUserId: LINKED_GOOGLE_ID },
+      body: { platform: "gmail", connectionId: "google", userId: "someone-else" },
     });
 
     expect(res.status).toBe(201);
     const stored = ctx.accountDb.createExternalExchange.mock.calls[0]![1];
     expect(stored.userId).toBe(CALLER_USER_ID);
-    expect(ctx.getLinkedIdentity).toHaveBeenCalledWith(CALLER_USER_ID, "google", LINKED_GOOGLE_ID);
+    expect(ctx.getLinkedIdentity).toHaveBeenCalledWith(CALLER_USER_ID, "google");
   });
 
-  it("persists the connectionUserId the body names once Authress confirms it is linked", async () => {
+  it("persists the connectionUserId Authress resolves, ignoring any the body claims", async () => {
     const res = await req(ctx.app, "POST", `${A}/external-exchanges`, {
-      body: { platform: "gmail", connectionId: "google", connectionUserId: LINKED_GOOGLE_ID },
+      body: { platform: "gmail", connectionId: "google", connectionUserId: "attacker-controlled-id" },
     });
 
     expect(res.status).toBe(201);
     expect(ctx.accountDb.createExternalExchange.mock.calls[0]![1].connectionUserId).toBe(LINKED_GOOGLE_ID);
   });
 
-  it("refuses the connection and logs a TRACK when the named identity is not one of the caller's linked identities", async () => {
-    const unlinked = build({ linkedIdentity: ok(false) });
+  it("refuses the connection when the caller has no identity linked under this connection", async () => {
+    const unlinked = build({ linkedIdentity: ok(null) });
 
     const res = await req(unlinked.app, "POST", `${A}/external-exchanges`, {
-      body: { platform: "gmail", connectionId: "google", connectionUserId: "attacker-controlled-id" },
-    });
-
-    expect(res.status).toBe(403);
-    expect(unlinked.accountDb.createExternalExchange).not.toHaveBeenCalled();
-    expect(unlinked.logger.calls.some(c => c.method === "track" && c.context?.code === "api.emx.create.connection_user_not_linked")).toBe(true);
-  });
-
-  it("rejects the request when connectionUserId is missing from the body", async () => {
-    const res = await req(ctx.app, "POST", `${A}/external-exchanges`, {
       body: { platform: "gmail", connectionId: "google" },
     });
 
-    expect(res.status).toBe(400);
-    expect(ctx.accountDb.createExternalExchange).not.toHaveBeenCalled();
+    expect(res.status).toBe(422);
+    expect(unlinked.accountDb.createExternalExchange).not.toHaveBeenCalled();
   });
 
   // activate() resolving its own credentials is the real test of whether this connection is
@@ -131,7 +122,7 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     const noCredentials = build({ activateResult: err({ kind: "provider_activation_failed", cause: "credentials revoked" }) });
 
     const res = await req(noCredentials.app, "POST", `${A}/external-exchanges`, {
-      body: { platform: "gmail", connectionId: "google", connectionUserId: LINKED_GOOGLE_ID },
+      body: { platform: "gmail", connectionId: "google" },
     });
 
     expect(res.status).toBe(422);
@@ -142,7 +133,7 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     const res = await req(ctx.app, "POST", `${A}/external-exchanges`, {
       // A caller naming a mailbox it does not own must not get an exchange — or the alias
       // that routes outbound mail — pointed at it.
-      body: { platform: "gmail", connectionId: "google", connectionUserId: LINKED_GOOGLE_ID, emailAddress: "victim@gmail.com" },
+      body: { platform: "gmail", connectionId: "google", emailAddress: "victim@gmail.com" },
     });
 
     expect(res.status).toBe(201);
@@ -155,7 +146,7 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     const unreachable = build({ linkedIdentity: { isErr: () => true, isOk: () => false, error: { kind: "authress_service_error" } } });
 
     const res = await req(unreachable.app, "POST", `${A}/external-exchanges`, {
-      body: { platform: "gmail", connectionId: "google", connectionUserId: LINKED_GOOGLE_ID },
+      body: { platform: "gmail", connectionId: "google" },
     });
 
     expect(res.status).toBe(503);

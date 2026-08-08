@@ -71,7 +71,7 @@ export async function createHarness(): Promise<IntegrationHarness> {
     removeUser: async () => ok(undefined),
     checkAccess: async () => { /* noop */ },
     createInvite: async () => ok({ inviteId: 'mock-invite' }),
-    getLinkedIdentity: async () => ok(true),
+    getLinkedIdentity: async () => ok({ connectionUserId: "google-sub-12345" }),
   };
 
   const app = createApp(makeAppDeps({

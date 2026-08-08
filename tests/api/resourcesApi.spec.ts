@@ -24,7 +24,7 @@ function makeAccess(): AccessService & { checkAccess: ReturnType<typeof vi.fn> }
     removeUser: vi.fn().mockResolvedValue(ok(undefined)),
     checkAccess: vi.fn().mockResolvedValue(undefined),
     createInvite: vi.fn().mockResolvedValue(ok({ inviteId: "inv-test" })),
-    getLinkedIdentity: vi.fn().mockResolvedValue(ok(true)),
+    getLinkedIdentity: vi.fn().mockResolvedValue(ok({ connectionUserId: "google-sub-12345" })),
     getUserProfile: vi.fn().mockReturnValue(Promise.resolve(ok({}))),
   } as unknown as AccessService & { checkAccess: ReturnType<typeof vi.fn> };
 }
