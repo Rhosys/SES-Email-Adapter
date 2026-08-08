@@ -57,7 +57,7 @@ interface OutlookProviderDeps {
   db: AccountDatabase;
   signalQueue: SignalQueue;
   logger: Logger;
-  getProviderToken: (userId: string, connectionId: string) => Promise<string>;
+  getProviderToken: (userId: string, connectionId: string, connectionUserId: string) => Promise<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,7 +118,7 @@ export class OutlookProvider implements ProviderAdapter {
     const credentials = exchangeCredentials(emx);
     if (!credentials) return err({ cause: "Exchange has no linked identity recorded — it predates connection tracking and must be reconnected by the user." });
     try {
-      return ok(await this.getProviderToken(credentials.userId, credentials.connectionId));
+      return ok(await this.getProviderToken(credentials.userId, credentials.connectionId, credentials.connectionUserId));
     } catch (e) {
       return err({ cause: e });
     }
@@ -132,7 +132,7 @@ export class OutlookProvider implements ProviderAdapter {
     if (!identity) return err({ kind: "provider_activation_failed", cause: "Missing linked identity for activation" });
     let token: string;
     try {
-      token = await this.getProviderToken(identity.userId, identity.connectionId);
+      token = await this.getProviderToken(identity.userId, identity.connectionId, identity.connectionUserId);
     } catch (e) {
       return err({ kind: "provider_activation_failed", cause: e });
     }

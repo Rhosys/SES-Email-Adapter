@@ -1,8 +1,11 @@
 // OAuth (Gmail/Outlook) mailbox connection — identity resolution.
 //
-// The caller's Authress userId comes from the verified access token, and their identity at
-// the provider comes from Authress. Neither is taken from the request body: a caller that
-// could name either could bind an identity it does not hold to its own account.
+// The caller's Authress userId comes from the verified access token, never the request body: a
+// caller that could name it could bind an identity it does not hold to its own account. The
+// caller's provider identity (connectionUserId) does come from the request body — a connection
+// can have more than one linked identity, so the server cannot pick one on its own — but it is
+// only ever an assertion until Authress confirms that exact (connectionId, connectionUserId)
+// pair is actually one of the caller's linked identities.
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createApp } from "../../src/api/app.js";
@@ -61,7 +64,7 @@ function build(overrides: { linkedIdentity?: unknown; activateResult?: unknown }
   const logger = createMockLogger();
   const adapter = makeGmailAdapter(overrides.activateResult);
   const getLinkedIdentity = vi.fn().mockResolvedValue(
-    overrides.linkedIdentity === undefined ? ok({ connectionUserId: LINKED_GOOGLE_ID }) : overrides.linkedIdentity,
+    overrides.linkedIdentity === undefined ? ok(true) : overrides.linkedIdentity,
   );
   const app = createApp(makeAppDeps({
     accountDb: accountDb as never,
@@ -89,41 +92,37 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     expect(res.status).toBe(201);
     const stored = ctx.accountDb.createExternalExchange.mock.calls[0]![1];
     expect(stored.userId).toBe(CALLER_USER_ID);
-    expect(ctx.getLinkedIdentity).toHaveBeenCalledWith(CALLER_USER_ID, "google");
+    expect(ctx.getLinkedIdentity).toHaveBeenCalledWith(CALLER_USER_ID, "google", LINKED_GOOGLE_ID);
   });
 
-  it("persists the provider identity Authress holds, not the one the body claims", async () => {
+  it("persists the connectionUserId the body names once Authress confirms it is linked", async () => {
     const res = await req(ctx.app, "POST", `${A}/external-exchanges`, {
-      body: { platform: "gmail", connectionId: "google", connectionUserId: "attacker-controlled-id" },
+      body: { platform: "gmail", connectionId: "google", connectionUserId: LINKED_GOOGLE_ID },
     });
 
     expect(res.status).toBe(201);
     expect(ctx.accountDb.createExternalExchange.mock.calls[0]![1].connectionUserId).toBe(LINKED_GOOGLE_ID);
   });
 
-  it("emits a TRACK when the client's claimed provider identity disagrees with Authress", async () => {
-    await req(ctx.app, "POST", `${A}/external-exchanges`, {
-      body: { platform: "gmail", connectionId: "google", connectionUserId: "stale-or-forged" },
+  it("refuses the connection and logs a TRACK when the named identity is not one of the caller's linked identities", async () => {
+    const unlinked = build({ linkedIdentity: ok(false) });
+
+    const res = await req(unlinked.app, "POST", `${A}/external-exchanges`, {
+      body: { platform: "gmail", connectionId: "google", connectionUserId: "attacker-controlled-id" },
     });
 
-    expect(ctx.logger.calls.some(c => c.method === "track" && c.context?.code === "api.emx.create.connection_user_mismatch")).toBe(true);
+    expect(res.status).toBe(403);
+    expect(unlinked.accountDb.createExternalExchange).not.toHaveBeenCalled();
+    expect(unlinked.logger.calls.some(c => c.method === "track" && c.context?.code === "api.emx.create.connection_user_not_linked")).toBe(true);
   });
 
-  it("stays quiet when the client's claim matches", async () => {
-    await req(ctx.app, "POST", `${A}/external-exchanges`, {
-      body: { platform: "gmail", connectionId: "google", connectionUserId: LINKED_GOOGLE_ID },
-    });
-
-    expect(ctx.logger.calls.some(c => c.context?.code === "api.emx.create.connection_user_mismatch")).toBe(false);
-  });
-
-  it("resolves the identity even when the client claims nothing", async () => {
+  it("rejects the request when connectionUserId is missing from the body", async () => {
     const res = await req(ctx.app, "POST", `${A}/external-exchanges`, {
       body: { platform: "gmail", connectionId: "google" },
     });
 
-    expect(res.status).toBe(201);
-    expect(ctx.accountDb.createExternalExchange.mock.calls[0]![1].connectionUserId).toBe(LINKED_GOOGLE_ID);
+    expect(res.status).toBe(400);
+    expect(ctx.accountDb.createExternalExchange).not.toHaveBeenCalled();
   });
 
   // activate() resolving its own credentials is the real test of whether this connection is
@@ -132,7 +131,7 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     const noCredentials = build({ activateResult: err({ kind: "provider_activation_failed", cause: "credentials revoked" }) });
 
     const res = await req(noCredentials.app, "POST", `${A}/external-exchanges`, {
-      body: { platform: "gmail", connectionId: "google" },
+      body: { platform: "gmail", connectionId: "google", connectionUserId: LINKED_GOOGLE_ID },
     });
 
     expect(res.status).toBe(422);
@@ -143,11 +142,11 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     const res = await req(ctx.app, "POST", `${A}/external-exchanges`, {
       // A caller naming a mailbox it does not own must not get an exchange — or the alias
       // that routes outbound mail — pointed at it.
-      body: { platform: "gmail", connectionId: "google", emailAddress: "victim@gmail.com" },
+      body: { platform: "gmail", connectionId: "google", connectionUserId: LINKED_GOOGLE_ID, emailAddress: "victim@gmail.com" },
     });
 
     expect(res.status).toBe(201);
-    expect(ctx.adapter.activate.mock.calls[0]![1]).toEqual({ userId: CALLER_USER_ID, connectionId: "google" });
+    expect(ctx.adapter.activate.mock.calls[0]![1]).toEqual({ userId: CALLER_USER_ID, connectionId: "google", connectionUserId: LINKED_GOOGLE_ID });
     expect(ctx.accountDb.createExternalExchange.mock.calls[0]![1].emailAddress).toBe("user@gmail.com");
     expect(ctx.accountDb.ensureAlias.mock.calls[0]![1]).toBe("user@gmail.com");
   });
@@ -156,7 +155,7 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     const unreachable = build({ linkedIdentity: { isErr: () => true, isOk: () => false, error: { kind: "authress_service_error" } } });
 
     const res = await req(unreachable.app, "POST", `${A}/external-exchanges`, {
-      body: { platform: "gmail", connectionId: "google" },
+      body: { platform: "gmail", connectionId: "google", connectionUserId: LINKED_GOOGLE_ID },
     });
 
     expect(res.status).toBe(503);

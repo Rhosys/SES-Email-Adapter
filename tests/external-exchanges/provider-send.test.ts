@@ -121,7 +121,7 @@ describe("credential resolution — shared by renew/deactivate/fetchMessage/send
 // ---------------------------------------------------------------------------
 
 describe("GmailProvider.activate", () => {
-  const IDENTITY = { userId: "authress-user-9", connectionId: "google" };
+  const IDENTITY = { userId: "authress-user-9", connectionId: "google", connectionUserId: "google-sub-12345" };
 
   it("fetches its own token from the supplied identity, subscribes, and resolves the address", async () => {
     fetchMock
@@ -133,7 +133,7 @@ describe("GmailProvider.activate", () => {
 
     expect(result.isOk()).toBe(true);
     expect(result._unsafeUnwrap()).toMatchObject({ syncCursor: "100", providerSubscriptionId: "watch", emailAddress: "user@gmail.com" });
-    expect(getProviderToken).toHaveBeenCalledWith("authress-user-9", "google");
+    expect(getProviderToken).toHaveBeenCalledWith("authress-user-9", "google", "google-sub-12345");
   });
 
   it("fails without making a request when no identity is supplied", async () => {
@@ -153,7 +153,7 @@ describe("GmailProvider.activate", () => {
 });
 
 describe("OutlookProvider.activate", () => {
-  const IDENTITY = { userId: "authress-user-9", connectionId: "microsoft" };
+  const IDENTITY = { userId: "authress-user-9", connectionId: "microsoft", connectionUserId: "microsoft-oid-12345" };
   const outlookEmx = { ...EMX, platform: "outlook" as const };
 
   it("fetches its own token, walks delta pages, subscribes, and resolves the address", async () => {
@@ -167,7 +167,7 @@ describe("OutlookProvider.activate", () => {
 
     expect(result.isOk()).toBe(true);
     expect(result._unsafeUnwrap()).toMatchObject({ providerSubscriptionId: "sub-1", emailAddress: "user@contoso.com" });
-    expect(getProviderToken).toHaveBeenCalledWith("authress-user-9", "microsoft");
+    expect(getProviderToken).toHaveBeenCalledWith("authress-user-9", "microsoft", "microsoft-oid-12345");
   });
 
   it("fails without making a request when no identity is supplied", async () => {
@@ -189,7 +189,7 @@ describe("mailbox address on IMAP/JMAP is read from config, not resolved from a 
       .mockResolvedValueOnce(jsonResponse(200, { id: "sub-1", expirationDateTime: "2026-09-01T00:00:00Z" }))
       .mockResolvedValueOnce(jsonResponse(200, { mail: "user@contoso.com", userPrincipalName: "user@contoso.onmicrosoft.com" }));
 
-    const result = await new OutlookProvider(deps()).activate({ ...EMX, platform: "outlook" }, { userId: "u", connectionId: "microsoft" });
+    const result = await new OutlookProvider(deps()).activate({ ...EMX, platform: "outlook" }, { userId: "u", connectionId: "microsoft", connectionUserId: "cu" });
     expect(result._unsafeUnwrap().emailAddress).toBe("user@contoso.com");
   });
 
@@ -199,7 +199,7 @@ describe("mailbox address on IMAP/JMAP is read from config, not resolved from a 
       .mockResolvedValueOnce(jsonResponse(200, { id: "sub-1", expirationDateTime: "2026-09-01T00:00:00Z" }))
       .mockResolvedValueOnce(jsonResponse(200, { mail: null, userPrincipalName: "user@contoso.onmicrosoft.com" }));
 
-    const result = await new OutlookProvider(deps()).activate({ ...EMX, platform: "outlook" }, { userId: "u", connectionId: "microsoft" });
+    const result = await new OutlookProvider(deps()).activate({ ...EMX, platform: "outlook" }, { userId: "u", connectionId: "microsoft", connectionUserId: "cu" });
     expect(result._unsafeUnwrap().emailAddress).toBe("user@contoso.onmicrosoft.com");
   });
 });

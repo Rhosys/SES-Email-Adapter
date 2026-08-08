@@ -111,17 +111,18 @@ export class AuthressAccessService implements AccessService {
     }
   }
 
-  async getLinkedIdentity(userId: string, connectionId: string): Promise<Result<{ connectionUserId: string } | null, AuthressServiceError>> {
+  async getLinkedIdentity(userId: string, connectionId: string, connectionUserId: string): Promise<Result<boolean, AuthressServiceError>> {
     try {
       const response = await this.client.users.getUser(userId);
-      const linked = (response.data.linkedIdentities ?? [])
-        .find((identity) => identity.connection?.connectionId === connectionId);
       // `connection.userId` is the user's id at the provider (Google's numeric subject,
-      // Microsoft's oid) — not an Authress user id.
-      const connectionUserId = linked?.connection?.userId;
-      return ok(connectionUserId ? { connectionUserId } : null);
+      // Microsoft's oid) — not an Authress user id. A connection can carry multiple linked
+      // identities, so this checks for the exact (connectionId, connectionUserId) pair rather
+      // than the first identity under the connection.
+      const linked = (response.data.linkedIdentities ?? [])
+        .some((identity) => identity.connection?.connectionId === connectionId && identity.connection?.userId === connectionUserId);
+      return ok(linked);
     } catch (e) {
-      if (isNotFound(e)) return ok(null);
+      if (isNotFound(e)) return ok(false);
       return err(authressServiceError(e));
     }
   }

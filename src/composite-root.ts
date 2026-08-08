@@ -171,15 +171,16 @@ export class CompositeRoot {
     /**
      * Fetches the provider access token Authress holds for a linked identity.
      *
-     * `connectionUserId` is the **Authress** userId of the user who linked the mailbox — the
-     * `userId` path parameter of GET /v1/connections/{connectionId}/users/{userId}/credentials.
-     * Authress returns no credentials for a provider-side user id, and an accountId is not a
-     * user at all (accounts are multi-user), so the value must come from the EMX record's
-     * connectionUserId, captured when the mailbox was connected.
+     * `userId` is the Authress account user who linked the mailbox — the `userId` path
+     * parameter of GET /v1/connections/{connectionId}/users/{userId}/credentials.
+     * `connectionUserId` selects which of that user's (possibly several) identities linked
+     * under `connectionId` to fetch credentials for — without it Authress returns whichever
+     * identity logged in most recently, which is wrong when a user has linked more than one
+     * mailbox through the same connection.
      */
-    const getProviderToken = async (userId: string, connectionId: string): Promise<string> => {
+    const getProviderToken = async (userId: string, connectionId: string, connectionUserId: string): Promise<string> => {
       const client = getAuthressClient();
-      const response = await client.connections.getConnectionCredentials(connectionId, userId);
+      const response = await client.connections.getConnectionCredentials(connectionId, userId, connectionUserId);
       return response.data.accessToken;
     };
 

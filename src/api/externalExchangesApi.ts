@@ -18,10 +18,12 @@ const CreateExternalExchangeRequest = z.object({
   // The Authress identity-connection the caller just linked. The client chose it, so it is
   // the one thing here the server cannot derive on its own.
   connectionId: z.string().max(256).optional(),
-  // The client's view of its own id at that provider. Never persisted as given — the server
-  // resolves the real one from Authress and only compares this against it, so that a client
-  // disagreeing with the identity provider shows up in the logs instead of in the database.
-  connectionUserId: z.string().max(256).optional(),
+  // Which of the caller's (possibly several) identities linked under that connection this is.
+  // Required: a connection can have multiple linked identities, so the server has no way to
+  // pick the right one on its own. Never trusted outright — the server validates that this
+  // exact (connectionId, connectionUserId) pair is actually one of the caller's linked
+  // identities before using it, and refuses the request if it is not.
+  connectionUserId: z.string().max(256),
 });
 
 /**
@@ -297,23 +299,25 @@ export class ExternalExchangesApi {
       const userId = c.get("auth")?.userId;
       if (!userId) return err(c, 401, "Unauthorized");
 
-      // Which identity the caller holds at that provider is Authress' to state, not the
-      // client's. The client sends its own view of it, but it is only ever an assertion —
-      // this resolves the real one and treats a disagreement as a bug worth recording. This is
-      // a separate concern from the credential check below: it identifies which linked
-      // identity we're dealing with, it does not verify the connection can be used.
-      const linkedIdentityResult = await getLinkedIdentity(userId, connectionId);
+      // The client names which of its linked identities this is, but naming it is only ever an
+      // assertion — Authress is the source of truth for which identities actually belong to
+      // this user. Validate the exact (connectionId, connectionUserId) pair before trusting it;
+      // a client naming an identity it does not hold is refused outright rather than silently
+      // corrected, since there is no "the" identity to fall back to once a connection can have
+      // more than one.
+      const connectionUserId = body.connectionUserId;
+      const linkedIdentityResult = await getLinkedIdentity(userId, connectionId, connectionUserId);
       if (linkedIdentityResult.isErr()) {
-        logger.error("Failed to resolve the caller's linked identity", { code: "api.emx.create.linked_identity_failed", accountId, connectionId, error: linkedIdentityResult.error });
+        logger.error("Failed to verify the caller's linked identity", { code: "api.emx.create.linked_identity_failed", accountId, connectionId, error: linkedIdentityResult.error });
         return err(c, 503, "Could not verify the linked identity with the identity provider");
       }
-      if (body.connectionUserId && body.connectionUserId !== linkedIdentityResult.value?.connectionUserId) {
-        logger.track("Client-reported provider identity disagrees with the one Authress holds for this connection — using Authress'. A stale profile read on the client is the benign explanation; the alternative is a client attempting to bind an identity it does not hold.", {
-          code: "api.emx.create.connection_user_mismatch",
-          accountId, connectionId, reported: body.connectionUserId, resolved: linkedIdentityResult.value?.connectionUserId,
+      if (!linkedIdentityResult.value) {
+        logger.track("Client named a provider identity that is not among its linked identities for this connection — refusing to connect the mailbox.", {
+          code: "api.emx.create.connection_user_not_linked",
+          accountId, connectionId, connectionUserId,
         });
+        return err(c, 403, "This identity is not linked to your account for the given connection");
       }
-      const connectionUserId = linkedIdentityResult.value?.connectionUserId;
 
       // activate() resolves its own credentials and reports the verified mailbox address — the
       // exact credential fetch every later renew/fetch/send makes, so a failure here means the
@@ -321,7 +325,7 @@ export class ExternalExchangesApi {
       // failure: without a verified address there's no meaningful record to key one on, and an
       // unusable connection isn't worth surfacing as a mailbox the user half-connected.
       const emxStub: ExternalMailExchange = { id: "", accountId, platform: body.platform, emailAddress: "", status: "active", createdAt: "", updatedAt: "" };
-      const activateResult = await adapter.activate(emxStub, { userId, connectionId });
+      const activateResult = await adapter.activate(emxStub, { userId, connectionId, connectionUserId });
       if (activateResult.isErr()) {
         logger.warn("OAuth activation failed — refusing to connect the mailbox", { code: "api.emx.create.activation_failed", accountId, connectionId, platform: body.platform, error: activateResult.error });
         return err(c, 422, "Could not activate this mailbox. Reconnect the identity and try again.");
@@ -342,7 +346,7 @@ export class ExternalExchangesApi {
         ? listResult.value.find((e) => e.platform === body.platform && e.emailAddress === emailAddress)
         : undefined;
       if (existing) {
-        const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "active", syncCursor, expiresAt, providerSubscriptionId, userId, ...(connectionUserId ? { connectionUserId } : {}), connectionId, errorReason: undefined, consecutiveFailures: 0 });
+        const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "active", syncCursor, expiresAt, providerSubscriptionId, userId, connectionUserId, connectionId, errorReason: undefined, consecutiveFailures: 0 });
         if (updateResult.isErr()) { logger.error("Failed to update exchange record", { code: "api.emx.create_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
         await accountDb.ensureAlias(accountId, emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined);
         await updateAliasExchangeId(accountId, emailAddress, existing.id);
@@ -350,7 +354,7 @@ export class ExternalExchangesApi {
         logger.info("OAuth exchange reactivated", { code: "api.emx.oauth.reactivated", accountId, emxId: existing.id, platform: body.platform });
         return c.json(serializeEmx(updateResult.value), 200);
       }
-      const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress, status: "active", syncCursor, lastSyncAt: DateTime.utc().toISO()!, expiresAt, providerSubscriptionId, userId, ...(connectionUserId ? { connectionUserId } : {}), connectionId });
+      const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress, status: "active", syncCursor, lastSyncAt: DateTime.utc().toISO()!, expiresAt, providerSubscriptionId, userId, connectionUserId, connectionId });
       if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
       await accountDb.ensureAlias(accountId, emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined);
       await updateAliasExchangeId(accountId, emailAddress, result.value.id);

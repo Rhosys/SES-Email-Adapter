@@ -31,7 +31,7 @@ function makeAccess(): AccessService {
     removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     checkAccess: vi.fn().mockResolvedValue(undefined),
     createInvite: vi.fn().mockReturnValue(Promise.resolve(ok({ inviteId: "inv-test" }))),
-    getLinkedIdentity: vi.fn().mockResolvedValue(ok({ connectionUserId: "google-sub-12345" })),
+    getLinkedIdentity: vi.fn().mockResolvedValue(ok(true)),
     getUserProfile: vi.fn().mockReturnValue(Promise.resolve(ok({}))),
   };
 }

@@ -50,6 +50,7 @@ export interface ActivationResult {
 export interface ActivationIdentity {
   userId: string
   connectionId: string
+  connectionUserId: string
 }
 
 export interface RawMimeResult {
@@ -65,9 +66,9 @@ export interface RawMimeResult {
  * reconnects it" — there is deliberately no fallback to deriving the connection from the
  * platform, because a derived value is a guess about someone else's configuration.
  */
-export function exchangeCredentials(emx: ExternalMailExchange): { userId: string; connectionId: string } | null {
-  if (!emx.userId || !emx.connectionId) return null
-  return { userId: emx.userId, connectionId: emx.connectionId }
+export function exchangeCredentials(emx: ExternalMailExchange): { userId: string; connectionId: string; connectionUserId: string } | null {
+  if (!emx.userId || !emx.connectionId || !emx.connectionUserId) return null
+  return { userId: emx.userId, connectionId: emx.connectionId, connectionUserId: emx.connectionUserId }
 }
 
 export interface SendResult {

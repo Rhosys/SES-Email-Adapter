@@ -22,7 +22,7 @@ function makeAccess(overrides: { getUserProfile?: ReturnType<typeof vi.fn> } = {
     removeUser: vi.fn().mockResolvedValue(ok(undefined)),
     checkAccess: vi.fn().mockResolvedValue(undefined),
     createInvite: vi.fn().mockResolvedValue(ok({ inviteId: "inv" })),
-    getLinkedIdentity: vi.fn().mockResolvedValue(ok({ connectionUserId: "google-sub-12345" })),
+    getLinkedIdentity: vi.fn().mockResolvedValue(ok(true)),
   };
 }
 
