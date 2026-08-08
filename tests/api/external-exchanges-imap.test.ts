@@ -74,6 +74,7 @@ function makeAccountDb() {
     createExternalExchange: vi.fn().mockResolvedValue(ok(makeImapEmx())),
     getAliasByGlobalAddress: vi.fn().mockResolvedValue(ok(null)),
     ensureAlias: vi.fn().mockResolvedValue(ok({ alias: { id: "a", accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", aliasName: "user", unknownSenderPolicy: "allow_all", createdAt: "", updatedAt: "" }, created: true })),
+    updateAlias: vi.fn().mockResolvedValue(ok({ id: "a", accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", aliasName: "user", unknownSenderPolicy: "allow_all", createdAt: "", updatedAt: "" })),
   };
 }
 

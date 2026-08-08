@@ -5,6 +5,7 @@ import type { ExternalMailExchange } from "../types/index.js";
 import type {
   ProviderAdapter,
   ActivationResult,
+  ActivationIdentity,
   RawMimeResult,
   ProviderActivationError,
   ProviderRenewalError,
@@ -144,7 +145,7 @@ export class JmapAdapter implements ProviderAdapter {
     this.logger = deps.logger;
   }
 
-  async activate(_token: string, emx: ExternalMailExchange): Promise<Result<ActivationResult, ProviderActivationError>> {
+  async activate(emx: ExternalMailExchange, _identity?: ActivationIdentity): Promise<Result<ActivationResult, ProviderActivationError>> {
     const jmapConfig = emx.jmapConfig;
     if (!jmapConfig) {
       return err({ kind: "provider_activation_failed", cause: "Missing jmapConfig" });
@@ -205,10 +206,11 @@ export class JmapAdapter implements ProviderAdapter {
       syncCursor: queryState,
       expiresAt: DateTime.utc().plus({ hours: 1 }).toISO()!,
       providerSubscriptionId: "poll",
+      emailAddress: jmapConfig.username,
     });
   }
 
-  async renew(_token: string, emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>> {
+  async renew(emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>> {
     const jmapConfig = emx.jmapConfig;
     if (!jmapConfig) {
       return err({ kind: "provider_renewal_failed", cause: "Missing jmapConfig" });
@@ -324,11 +326,11 @@ export class JmapAdapter implements ProviderAdapter {
     return ok(undefined);
   }
 
-  async deactivate(_token: string, _emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>> {
+  async deactivate(_emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>> {
     return ok(undefined);
   }
 
-  async fetchMessage(_token: string, providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>> {
+  async fetchMessage(providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>> {
     const jmapConfig = emx.jmapConfig;
     if (!jmapConfig) {
       return err({ kind: "provider_fetch_failed", cause: "EMX missing jmapConfig" });

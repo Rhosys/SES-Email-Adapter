@@ -9,7 +9,6 @@ interface EmxDispatchWorkerDeps {
   logger: Logger;
   db: AccountDatabase;
   adapters: Record<string, ProviderAdapter>;
-  getProviderToken: (accountId: string, connectionId: string) => Promise<string>;
 }
 
 export interface EmxDispatchPayload {
@@ -21,13 +20,11 @@ export class EmxDispatchWorker {
   private readonly logger: Logger;
   private readonly db: AccountDatabase;
   private readonly adapters: Record<string, ProviderAdapter>;
-  private readonly getProviderToken: EmxDispatchWorkerDeps["getProviderToken"];
 
   constructor(deps: EmxDispatchWorkerDeps) {
     this.logger = deps.logger;
     this.db = deps.db;
     this.adapters = deps.adapters;
-    this.getProviderToken = deps.getProviderToken;
   }
 
   async dispatch(payload?: EmxDispatchPayload): Promise<Result<void, never>> {
@@ -73,20 +70,10 @@ export class EmxDispatchWorker {
       return;
     }
 
-    let token: string;
-    if (emx.platform === "imap" || emx.platform === "jmap") {
-      token = "";
-    } else {
-      try {
-        token = await this.getProviderToken(emx.accountId, emx.platform === "gmail" ? "google" : "microsoft");
-      } catch (e) {
-        this.logger.error("emx_dispatch: failed to get provider token", { code: "emx.dispatch.token_failed", emxId: emx.id, platform: emx.platform, error: e });
-        return;
-      }
-    }
-
-    // Adapters own all DB writes (cursor, timing, failure tracking) internally
-    const renewResult = await adapter.renew(token, emx);
+    // Adapters resolve their own credentials from `emx` and own all DB writes (cursor, timing,
+    // failure tracking) internally — a missing or unusable identity surfaces as a renewal
+    // failure below, same as any other renewal problem, rather than a separate check here.
+    const renewResult = await adapter.renew(emx);
     if (renewResult.isErr()) {
       this.logger.error("emx_dispatch: renewal failed", { code: "emx.dispatch.renewal_failed", emxId: emx.id, platform: emx.platform, error: renewResult.error });
       return;

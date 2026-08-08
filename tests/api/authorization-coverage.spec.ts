@@ -35,6 +35,7 @@ function makeMockDeps() {
     removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     checkAccess: vi.fn().mockResolvedValue(undefined),
     createInvite: vi.fn().mockReturnValue(Promise.resolve(ok({ inviteId: "inv-test" }))),
+    getLinkedIdentity: vi.fn().mockResolvedValue(ok({ connectionUserId: "google-sub-12345" })),
     getUserProfile: vi.fn().mockReturnValue(Promise.resolve(ok({}))),
   };
 
@@ -185,6 +186,7 @@ describe("Authorization Coverage", () => {
       removeUser: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
       checkAccess: vi.fn().mockResolvedValue(undefined),
       createInvite: vi.fn().mockReturnValue(Promise.resolve(ok({ inviteId: "inv-test" }))),
+      getLinkedIdentity: vi.fn().mockResolvedValue(ok({ connectionUserId: "google-sub-12345" })),
       getUserProfile: vi.fn().mockReturnValue(Promise.resolve(ok({}))),
     };
     const authz = createAuthorize(access, createMockLogger());

@@ -111,6 +111,28 @@ export class AuthressAccessService implements AccessService {
     }
   }
 
+  async getLinkedIdentity(userId: string, connectionId: string): Promise<Result<{ connectionUserId: string } | null, AuthressServiceError>> {
+    try {
+      const response = await this.client.users.getUser(userId);
+      // `connection.userId` is the user's id at the provider (Google's numeric subject,
+      // Microsoft's oid) — not an Authress user id. `linkedTime` is on the linked-identity
+      // object itself, alongside `connection` — not typed on the SDK's `LinkedIdentity`
+      // interface, but present on the actual response. A connection can carry multiple linked
+      // identities, so this picks the most recently linked one under `connectionId`: whichever
+      // identity an in-flight OAuth redirect just linked is always the newest for its
+      // connectionId, which is exactly the one a connect-mailbox call means.
+      const linkedIdentities = (response.data.linkedIdentities ?? []) as Array<{ connection?: { connectionId?: string; userId?: string }; linkedTime?: string }>;
+      const mostRecent = linkedIdentities
+        .filter((identity) => identity.connection?.connectionId === connectionId && identity.connection?.userId)
+        .sort((a, b) => new Date(b.linkedTime ?? 0).getTime() - new Date(a.linkedTime ?? 0).getTime())[0];
+      const connectionUserId = mostRecent?.connection?.userId;
+      return ok(connectionUserId ? { connectionUserId } : null);
+    } catch (e) {
+      if (isNotFound(e)) return ok(null);
+      return err(authressServiceError(e));
+    }
+  }
+
   async addUser(accountId: string, userId: string, role: AccountRole): Promise<Result<void, AuthressServiceError>> {
     try {
       await this._upsertUser(accountId, userId, role);

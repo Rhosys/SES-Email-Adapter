@@ -290,6 +290,10 @@ export interface Alias {
   unknownSenderPolicy: UnknownSenderPolicy;
   // eTLD+1 of the site this alias was created for (set by the extension on alias generation)
   createdForOrigin?: string;
+  // Set when this alias is backed by an external mailbox (Gmail/Outlook/IMAP/JMAP). Outbound
+  // mail from this address must be sent through that provider, not SES — SES is not an
+  // authorized sender for e.g. gmail.com, so a SES send would fail DMARC at the recipient.
+  emxId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -731,6 +735,25 @@ export interface ExternalMailExchange {
   expiresAt?: string;              // ISO datetime — when watch/subscription lapses
   lastSyncAt?: string;             // ISO datetime — last successful sync completion
   providerSubscriptionId?: string; // Graph subscription UUID or "watch" for Gmail
+  // ── Linked-identity coordinates (gmail/outlook only) ──────────────────────
+  // Together these are everything needed to fetch provider credentials later:
+  //   GET /v1/connections/{connectionId}/users/{userId}/credentials
+  // All three are captured when the mailbox is connected and read back verbatim on every
+  // later use. Nothing downstream derives them from the platform.
+
+  // Authress userId of the user who linked this mailbox. NOT the provider-side identity id —
+  // Authress returns no credentials for a third-party user id. Accounts are multi-user, so
+  // the accountId cannot stand in for it either.
+  userId?: string;
+  // The user's id *at the provider* (Google's numeric subject, Microsoft's oid), as reported
+  // by the linked identity. Not used to fetch credentials; it identifies which of a user's
+  // linked identities backs this mailbox, and is the handle Authress' unlinkIdentity takes.
+  connectionUserId?: string;
+  // The Authress identity-connection id ("google", "microsoft", or whatever the connection is
+  // named in the management portal). Stored rather than derived from `platform`: connection
+  // ids are configuration, not a property of the mail platform, and a renamed or duplicated
+  // connection silently breaks a derivation.
+  connectionId?: string;
   encryptionCertificateId?: string; // which RSA key was used (for Outlook subscriptions)
   errorReason?: string;            // human-readable failure reason (only when activation_failed)
   imapConfig?: {

@@ -7,6 +7,7 @@ import type { IForwardingService } from "../forwarding/forwarding-service.js";
 import { ok, err, dbError, processorError, noAccountError, invalidResponseError, notFoundError } from "../errors.js";
 import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, NoAccountError } from "../errors.js";
 import type { EmailServiceError } from "../email/email-service.js";
+import type { ProviderSendError } from "../external-exchanges/provider-adapter.js";
 import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ThreadStatus, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo, InboundEmailSignalData, OutboundEmailSignalData } from "../types/index.js";
 import { deriveGroupingKey } from "../grouping-key.js";
 import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
@@ -82,6 +83,12 @@ export interface Notifier {
 }
 
 
+/**
+ * Failure modes of an outbound send, across both routes: SES rejections, provider-side
+ * rejections (Gmail/Graph), and the database reads that decide which route to take.
+ */
+export type ReplySendError = EmailServiceError | ProviderSendError | DbError;
+
 export interface ReplySender {
   sendReply(opts: {
     to: string;
@@ -89,10 +96,19 @@ export interface ReplySender {
     subject: string;
     body: string;
     inReplyTo: string;
+    /** Absent for platform-originated mail, which sends under the platform tenant. */
     accountId?: string;
     signalId?: string;
     threadId?: string;
-  }): Promise<Result<{ messageId: string }, EmailServiceError>>;
+  }): Promise<Result<{
+    messageId: string;
+    /**
+     * RFC 5322 Message-ID of what was sent, for keying the GSI3 lookup that matches an
+     * inbound reply's In-Reply-To back to this signal. Absent when the send route could not
+     * determine it — threading then falls back to subject/participant matching.
+     */
+    outboundMsgId?: string;
+  }, ReplySendError>>;
 }
 
 import type { SESReceiptStatus } from "aws-lambda";

@@ -161,7 +161,74 @@ export class CompositeRoot {
       sesv2, "mail", DKIM_PRIVATE_KEY, MAIL_DOMAIN, SES_CONFIG_SET_ARN,
     );
 
-    const externalEmailHandler = new ReplySenderService(emailService, logger);
+    // -----------------------------------------------------------------------
+    // External Mail Exchanges (EMX)
+    //
+    // Constructed ahead of the send path: outbound mail from an alias backed by an external
+    // mailbox has to go out through that provider, so ReplySenderService needs the adapters.
+    // -----------------------------------------------------------------------
+
+    /**
+     * Fetches the provider access token Authress holds for a linked identity.
+     *
+     * `userId` is the Authress account user who linked the mailbox — the `userId` path
+     * parameter of GET /v1/connections/{connectionId}/users/{userId}/credentials.
+     * `connectionUserId` selects which of that user's (possibly several) identities linked
+     * under `connectionId` to fetch credentials for — without it Authress returns whichever
+     * identity logged in most recently, which is wrong when a user has linked more than one
+     * mailbox through the same connection.
+     */
+    const getProviderToken = async (userId: string, connectionId: string, connectionUserId: string): Promise<string> => {
+      const client = getAuthressClient();
+      const response = await client.connections.getConnectionCredentials(connectionId, userId, connectionUserId);
+      return response.data.accessToken;
+    };
+
+    const gmailProvider = new GmailProvider({
+      db: accountDb,
+      signalQueue,
+      logger,
+      getProviderToken,
+    });
+
+    const outlookProvider = new OutlookProvider({
+      db: accountDb,
+      signalQueue,
+      logger,
+      getProviderToken,
+    });
+
+    const encryptionManager = new EncryptionManager(kms);
+    // Lazy init: KMS decrypt happens on first IMAP request (cold start resolves before traffic)
+    void encryptionManager.init();
+
+    const imapAdapter = new ImapAdapter({
+      encryptionManager,
+      db: accountDb,
+      signalQueue,
+      logger,
+    });
+
+    const jmapAdapter = new JmapAdapter({
+      encryptionManager,
+      db: accountDb,
+      signalQueue,
+      logger,
+    });
+
+    const emxAdapters: Record<string, ProviderAdapter> = {
+      gmail: gmailProvider,
+      outlook: outlookProvider,
+      imap: imapAdapter,
+      jmap: jmapAdapter,
+    };
+
+    const externalEmailHandler = new ReplySenderService({
+      emailService,
+      accountDb,
+      adapters: emxAdapters,
+      logger,
+    });
 
     const API_DOMAIN = process.env["API_DOMAIN"] ?? "";
     const AUTHRESS_KMS_KEY_ARN = process.env["AUTHRESS_KMS_KEY_ARN"] ?? "";
@@ -301,69 +368,18 @@ export class CompositeRoot {
       logger,
     });
 
-    // -----------------------------------------------------------------------
-    // External Mail Exchanges (EMX)
-    // -----------------------------------------------------------------------
-
-    const getProviderToken = async (accountId: string, connectionId: string): Promise<string> => {
-      const client = getAuthressClient();
-      const response = await client.connections.getConnectionCredentials(connectionId, accountId);
-      return response.data.accessToken;
-    };
-
-    const gmailProvider = new GmailProvider({
-      db: accountDb,
-      signalQueue,
-      logger,
-      getProviderToken,
-    });
-
-    const outlookProvider = new OutlookProvider({
-      db: accountDb,
-      signalQueue,
-      logger,
-      getProviderToken,
-    });
-
-    const encryptionManager = new EncryptionManager(kms);
-    // Lazy init: KMS decrypt happens on first IMAP request (cold start resolves before traffic)
-    void encryptionManager.init();
-
-    const imapAdapter = new ImapAdapter({
-      encryptionManager,
-      db: accountDb,
-      signalQueue,
-      logger,
-    });
-
-    const jmapAdapter = new JmapAdapter({
-      encryptionManager,
-      db: accountDb,
-      signalQueue,
-      logger,
-    });
-
-    const emxAdapters: Record<string, ProviderAdapter> = {
-      gmail: gmailProvider,
-      outlook: outlookProvider,
-      imap: imapAdapter,
-      jmap: jmapAdapter,
-    };
-
     const emxInboundWorker = new EmxInboundWorker({
       logger,
       emailContentStore: new EmailContentStore(s3),
       adapters: emxAdapters,
       accountDb,
       processor,
-      getProviderToken,
     });
 
     const emxDispatchWorker = new EmxDispatchWorker({
       logger,
       db: accountDb,
       adapters: emxAdapters,
-      getProviderToken,
     });
 
     // -----------------------------------------------------------------------

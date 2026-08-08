@@ -46,6 +46,16 @@ export interface AccessService {
   removeUser(accountId: string, userId: string): Promise<Result<void, AuthressServiceError>>;
   checkAccess(userId: string, resourceUri: string, permission: string): Promise<void>;
   createInvite(accountId: string, email: string, role: AccountRole): Promise<Result<{ inviteId: string }, AuthressServiceError>>;
+  /**
+   * The caller's most-recently-linked identity at a given connection's provider, or null when
+   * they have none linked under it. A connection can carry more than one linked identity (a
+   * user linking a second mailbox through the same provider connection); Authress reports a
+   * `linkedTime` per identity, and the one just linked by an in-flight OAuth redirect is always
+   * the most recent for its connectionId, so that is the one this resolves to. This is the
+   * authority on which provider identity a user actually holds — a client's claim about it
+   * would only ever be an assertion, which is why nothing here takes one.
+   */
+  getLinkedIdentity(userId: string, connectionId: string): Promise<Result<{ connectionUserId: string } | null, AuthressServiceError>>;
 }
 
 const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud";

@@ -24,7 +24,6 @@ interface EmxInboundWorkerDeps {
   adapters: Record<string, ProviderAdapter>;
   accountDb: AccountDatabase;
   processor: EmxProcessor;
-  getProviderToken: (accountId: string, connectionId: string) => Promise<string>;
 }
 
 export class EmxInboundWorker {
@@ -33,7 +32,6 @@ export class EmxInboundWorker {
   private readonly adapters: Record<string, ProviderAdapter>;
   private readonly accountDb: AccountDatabase;
   private readonly processor: EmxProcessor;
-  private readonly getProviderToken: EmxInboundWorkerDeps["getProviderToken"];
 
   constructor(deps: EmxInboundWorkerDeps) {
     this.logger = deps.logger;
@@ -41,7 +39,6 @@ export class EmxInboundWorker {
     this.adapters = deps.adapters;
     this.accountDb = deps.accountDb;
     this.processor = deps.processor;
-    this.getProviderToken = deps.getProviderToken;
   }
 
   async process(payload: EmxInboundPayload, sqsMessageId: string, receiveCount: number): Promise<Result<void, ProviderFetchError | ProcessorError>> {
@@ -58,18 +55,6 @@ export class EmxInboundWorker {
       return ok(undefined);
     }
 
-    let token: string;
-    if (source === "imap" || source === "jmap") {
-      token = "";
-    } else {
-      try {
-        token = await this.getProviderToken(accountId, source === "gmail" ? "google" : "microsoft");
-      } catch (e) {
-        this.logger.error("emx_inbound: failed to get provider token", { code: "emx.inbound.token_failed", source, emxId, error: e });
-        return err({ kind: "provider_fetch_failed", cause: e });
-      }
-    }
-
     const emxResult = await this.accountDb.getExternalExchange(accountId, emxId);
     if (emxResult.isErr()) {
       this.logger.error("emx_inbound: failed to load EMX record", { code: "emx.inbound.emx_load_failed", source, emxId, error: emxResult.error });
@@ -81,7 +66,9 @@ export class EmxInboundWorker {
       return err({ kind: "provider_fetch_failed", cause: "EMX not found" });
     }
 
-    const fetchResult = await adapter.fetchMessage(token, providerMessageId, emx);
+    // The adapter resolves its own credentials from `emx` — a missing or unusable identity
+    // surfaces as a fetch failure below, same as any other fetch problem.
+    const fetchResult = await adapter.fetchMessage(providerMessageId, emx);
     if (fetchResult.isErr()) {
       const error = fetchResult.error;
       if (error.kind === "provider_token_expired") {

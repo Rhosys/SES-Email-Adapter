@@ -39,14 +39,11 @@ const mockGmailAdapter: ProviderAdapter = {
   fetchMessage: vi.fn(),
 };
 
-const mockGetProviderToken = vi.fn();
-
 function createWorker(): EmxDispatchWorker {
   return new EmxDispatchWorker({
     logger: mockLogger,
     db: mockDb as never,
     adapters: { imap: mockImapAdapter, gmail: mockGmailAdapter },
-    getProviderToken: mockGetProviderToken,
   });
 }
 
@@ -76,11 +73,12 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// IMAP skips getProviderToken
+// The worker delegates to the adapter uniformly — no platform branching, no
+// credential handling. Each adapter resolves its own credentials from `emx`.
 // ---------------------------------------------------------------------------
 
-describe("IMAP skips getProviderToken", () => {
-  it("does not call getProviderToken for IMAP platform", async () => {
+describe("dispatch worker delegates renewal to the adapter", () => {
+  it("calls renew(emx) directly for IMAP — no credentials involved", async () => {
     const emx = makeImapEmx();
     mockDb.listExpiringExchanges.mockResolvedValue(ok([emx]));
     vi.mocked(mockImapAdapter.renew).mockResolvedValue(ok(undefined));
@@ -89,11 +87,10 @@ describe("IMAP skips getProviderToken", () => {
     const result = await worker.dispatch();
 
     expect(result.isOk()).toBe(true);
-    expect(mockGetProviderToken).not.toHaveBeenCalled();
-    expect(mockImapAdapter.renew).toHaveBeenCalledWith("", emx);
+    expect(mockImapAdapter.renew).toHaveBeenCalledWith(emx);
   });
 
-  it("calls getProviderToken for gmail platform", async () => {
+  it("calls renew(emx) directly for Gmail — the adapter resolves its own token", async () => {
     const gmailEmx: ExternalMailExchange = {
       id: "emx_gmail1",
       accountId: "acct-1",
@@ -101,18 +98,20 @@ describe("IMAP skips getProviderToken", () => {
       emailAddress: "user@gmail.com",
       status: "active",
       syncCursor: "12345",
+      userId: "authress-user-9",
+      connectionUserId: "google-sub-12345",
+      connectionId: "google",
       createdAt: "2025-01-01T00:00:00Z",
       updatedAt: "2025-01-01T00:00:00Z",
     };
     mockDb.listExpiringExchanges.mockResolvedValue(ok([gmailEmx]));
-    mockGetProviderToken.mockResolvedValue("oauth-token");
     vi.mocked(mockGmailAdapter.renew).mockResolvedValue(ok(undefined));
 
     const worker = createWorker();
     const result = await worker.dispatch();
 
     expect(result.isOk()).toBe(true);
-    expect(mockGetProviderToken).toHaveBeenCalledWith("acct-1", "google");
+    expect(mockGmailAdapter.renew).toHaveBeenCalledWith(gmailEmx);
   });
 });
 
@@ -153,7 +152,9 @@ describe("dispatch worker logs adapter errors", () => {
     );
   });
 
-  it("logs error when getProviderToken throws for Gmail", async () => {
+  it("logs the renewal failure uniformly when the adapter cannot get credentials", async () => {
+    // Credential resolution now lives inside the adapter (see gmail-provider.spec's
+    // resolveToken coverage); from here it is indistinguishable from any other renewal error.
     const gmailEmx: ExternalMailExchange = {
       id: "emx_gmail1",
       accountId: "acct-1",
@@ -161,19 +162,22 @@ describe("dispatch worker logs adapter errors", () => {
       emailAddress: "user@gmail.com",
       status: "active",
       syncCursor: "12345",
+      userId: "authress-user-9",
+      connectionUserId: "google-sub-12345",
+      connectionId: "google",
       createdAt: "2025-01-01T00:00:00Z",
       updatedAt: "2025-01-01T00:00:00Z",
     };
     mockDb.listExpiringExchanges.mockResolvedValue(ok([gmailEmx]));
-    mockGetProviderToken.mockRejectedValue(new Error("token refresh failed"));
+    vi.mocked(mockGmailAdapter.renew).mockResolvedValue(err({ kind: "provider_renewal_failed", cause: "token refresh failed" }));
 
     const worker = createWorker();
     const result = await worker.dispatch();
 
     expect(result.isOk()).toBe(true);
     expect(mockLogger.error).toHaveBeenCalledWith(
-      "emx_dispatch: failed to get provider token",
-      expect.objectContaining({ code: "emx.dispatch.token_failed", emxId: "emx_gmail1", platform: "gmail" }),
+      "emx_dispatch: renewal failed",
+      expect.objectContaining({ code: "emx.dispatch.renewal_failed", emxId: "emx_gmail1", platform: "gmail" }),
     );
   });
 });

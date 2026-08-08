@@ -6,6 +6,7 @@ import type { ExternalMailExchange } from "../types/index.js";
 import type {
   ProviderAdapter,
   ActivationResult,
+  ActivationIdentity,
   RawMimeResult,
   ProviderActivationError,
   ProviderRenewalError,
@@ -225,7 +226,7 @@ export class ImapAdapter implements ProviderAdapter {
     this.logger = deps.logger;
   }
 
-  async activate(_token: string, emx: ExternalMailExchange): Promise<Result<ActivationResult, ProviderActivationError>> {
+  async activate(emx: ExternalMailExchange, _identity?: ActivationIdentity): Promise<Result<ActivationResult, ProviderActivationError>> {
     const imapConfig = emx.imapConfig;
     if (!imapConfig) {
       return err({ kind: "provider_activation_failed", cause: "Missing imapConfig" });
@@ -260,10 +261,10 @@ export class ImapAdapter implements ProviderAdapter {
     const syncCursor = formatSyncCursor(uidvalidity, lastUid);
     const expiresAt = DateTime.utc().plus({ hours: 1 }).toISO()!;
     this.logger.info("IMAP activation succeeded", { code: "imap.activate.success", host: imapConfig.host, username: imapConfig.username, uidvalidity, lastUid });
-    return ok({ syncCursor, expiresAt, providerSubscriptionId: "poll" });
+    return ok({ syncCursor, expiresAt, providerSubscriptionId: "poll", emailAddress: imapConfig.username });
   }
 
-  async renew(_token: string, emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>> {
+  async renew(emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>> {
     const imapConfig = emx.imapConfig;
     if (!imapConfig) {
       return err({ kind: "provider_renewal_failed", cause: "Missing imapConfig" });
@@ -359,11 +360,11 @@ export class ImapAdapter implements ProviderAdapter {
     return ok(undefined);
   }
 
-  async deactivate(_token: string, _emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>> {
+  async deactivate(_emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>> {
     return ok(undefined);
   }
 
-  async fetchMessage(_token: string, providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>> {
+  async fetchMessage(providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>> {
     const imapConfig = emx.imapConfig;
     if (!imapConfig) {
       return err({ kind: "provider_fetch_failed", cause: "EMX missing imapConfig" });

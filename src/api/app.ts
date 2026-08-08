@@ -109,7 +109,7 @@ export interface AppDeps {
   outlookProvider?: OutlookProvider;
   adapters: Record<string, ProviderAdapter>;
   encryptionManager: EncryptionManager;
-  getProviderToken: (accountId: string, connectionId: string) => Promise<string>;
+  getProviderToken: (userId: string, connectionId: string, connectionUserId: string) => Promise<string>;
   signalQueue: SignalQueue;
 }
 
@@ -292,7 +292,9 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
   new AdminApi(jobDispatcher, healthCheckValidator).register(app, helpers);
   new UnsubscribeApi(unsubscribeTokenGenerator, accountDb, logger).register(app, helpers);
   new UserApi(accountDb, access, logger).register(app, helpers);
-  new ExternalExchangesApi(accountDb, adapters, getProviderToken, encryptionManager, signalQueue, logger).register(app, helpers);
+  // Resolved per call, not bound at construction: `access` is optional here (see the
+  // `authorize` guard above), and only the OAuth connect path ever reaches this.
+  new ExternalExchangesApi(accountDb, adapters, (userId, connectionId) => access.getLinkedIdentity(userId, connectionId), encryptionManager, signalQueue, logger).register(app, helpers);
 
   // ---------------------------------------------------------------------------
   // Not Found & Method Not Allowed — must be registered after all routes

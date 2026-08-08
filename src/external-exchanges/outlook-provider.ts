@@ -11,13 +11,18 @@ import type { ExternalMailExchange } from "../types/index.js";
 import type {
   ProviderAdapter,
   ActivationResult,
+  ActivationIdentity,
   RawMimeResult,
+  SendResult,
   ProviderActivationError,
   ProviderRenewalError,
   ProviderDeactivationError,
   ProviderFetchError,
+  ProviderSendError,
 } from "./provider-adapter.js";
+import { exchangeCredentials } from "./provider-adapter.js";
 import { createVerifier } from "./jwks-verifier.js";
+import { extractMsgId } from "../processor/message-id.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { SignalQueue } from "../messaging/signal-queue.js";
 import type { Logger } from "../logger.js";
@@ -52,7 +57,7 @@ interface OutlookProviderDeps {
   db: AccountDatabase;
   signalQueue: SignalQueue;
   logger: Logger;
-  getProviderToken: (accountId: string, connectionId: string) => Promise<string>;
+  getProviderToken: (userId: string, connectionId: string, connectionUserId: string) => Promise<string>;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,10 +104,38 @@ export class OutlookProvider implements ProviderAdapter {
   }
 
   // ---------------------------------------------------------------------------
+  // Credential resolution — shared by every method below activate()
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Resolves a fresh access token for `emx`, from the identity coordinates recorded on it at
+   * connect time. The one thing every ProviderAdapter method other than `activate` needs
+   * before it can do anything else, so it lives here rather than being re-derived per call
+   * site — the previous design left that to each caller, which is how `getConnectionCredentials`
+   * ended up invoked with the wrong id in more than one place.
+   */
+  private async resolveToken(emx: ExternalMailExchange): Promise<Result<string, { cause: unknown }>> {
+    const credentials = exchangeCredentials(emx);
+    if (!credentials) return err({ cause: "Exchange has no linked identity recorded — it predates connection tracking and must be reconnected by the user." });
+    try {
+      return ok(await this.getProviderToken(credentials.userId, credentials.connectionId, credentials.connectionUserId));
+    } catch (e) {
+      return err({ cause: e });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // ProviderAdapter methods
   // ---------------------------------------------------------------------------
 
-  async activate(token: string, _emx: ExternalMailExchange): Promise<Result<ActivationResult, ProviderActivationError>> {
+  async activate(_emx: ExternalMailExchange, identity?: ActivationIdentity): Promise<Result<ActivationResult, ProviderActivationError>> {
+    if (!identity) return err({ kind: "provider_activation_failed", cause: "Missing linked identity for activation" });
+    let token: string;
+    try {
+      token = await this.getProviderToken(identity.userId, identity.connectionId, identity.connectionUserId);
+    } catch (e) {
+      return err({ kind: "provider_activation_failed", cause: e });
+    }
     try {
       let deltaLink = "";
       let nextLink: string | null = `${GRAPH_API}/me/mailFolders/inbox/messages/delta?$select=id`;
@@ -143,11 +176,17 @@ export class OutlookProvider implements ProviderAdapter {
       }
       const sub = await subResp.json() as { id: string; expirationDateTime: string };
 
-      this.logger.info("Outlook exchange activated", { code: "emx.outlook.activated", emxId: _emx.id });
+      // Resolved here rather than trusted from the caller: the only mailbox identifier
+      // available to a browser is the linked identity's provider-side user id, not an address.
+      const addressResult = await this.fetchMailboxAddress(token);
+      if (addressResult.isErr()) return err({ kind: "provider_activation_failed", cause: addressResult.error });
+
+      this.logger.info("Outlook exchange activated", { code: "emx.outlook.activated" });
       return ok({
         syncCursor: deltaLink,
         expiresAt: sub.expirationDateTime,
         providerSubscriptionId: sub.id,
+        emailAddress: addressResult.value,
       });
     } catch (e) {
       this.logger.info("Outlook activation failed", { code: "emx.outlook.activation_failed", cause: e });
@@ -155,7 +194,13 @@ export class OutlookProvider implements ProviderAdapter {
     }
   }
 
-  async renew(token: string, emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>> {
+  async renew(emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>> {
+    const tokenResult = await this.resolveToken(emx);
+    if (tokenResult.isErr()) {
+      this.logger.error("Outlook renewal failed", { code: "emx.outlook.renewal_failed", emxId: emx.id, cause: tokenResult.error.cause });
+      return err({ kind: "provider_renewal_failed", cause: tokenResult.error.cause });
+    }
+    const token = tokenResult.value;
     try {
       const expirationDateTime = DateTime.utc().plus({ hours: 23 }).toISO()!;
       const response = await fetch(`${GRAPH_API}/subscriptions/${emx.providerSubscriptionId}`, {
@@ -182,7 +227,10 @@ export class OutlookProvider implements ProviderAdapter {
     }
   }
 
-  async deactivate(token: string, emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>> {
+  async deactivate(emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>> {
+    const tokenResult = await this.resolveToken(emx);
+    if (tokenResult.isErr()) return err({ kind: "provider_deactivation_failed", cause: tokenResult.error.cause });
+    const token = tokenResult.value;
     try {
       const response = await fetch(`${GRAPH_API}/subscriptions/${emx.providerSubscriptionId}`, {
         method: "DELETE",
@@ -201,7 +249,10 @@ export class OutlookProvider implements ProviderAdapter {
     }
   }
 
-  async fetchMessage(token: string, providerMessageId: string, _emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>> {
+  async fetchMessage(providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>> {
+    const tokenResult = await this.resolveToken(emx);
+    if (tokenResult.isErr()) return err({ kind: "provider_fetch_failed", cause: tokenResult.error.cause });
+    const token = tokenResult.value;
     try {
       const metaResp = await fetch(`${GRAPH_API}/me/messages/${providerMessageId}?$select=receivedDateTime`, {
         headers: { "Authorization": `Bearer ${token}` },
@@ -219,6 +270,89 @@ export class OutlookProvider implements ProviderAdapter {
       return ok({ rawMime, receivedAt: meta.receivedDateTime });
     } catch (e) {
       return err({ kind: "provider_fetch_failed", cause: e });
+    }
+  }
+
+  /** Not part of ProviderAdapter — only `activate` needs it, to resolve the record's address. */
+  private async fetchMailboxAddress(token: string): Promise<Result<string, ProviderFetchError>> {
+    try {
+      const response = await fetch(`${GRAPH_API}/me?$select=mail,userPrincipalName`, { headers: { "Authorization": `Bearer ${token}` } });
+      if (response.status === 401) return err({ kind: "provider_token_expired" });
+      if (!response.ok) return err({ kind: "provider_fetch_failed", cause: await response.text() });
+      const data = await response.json() as { mail?: string | null; userPrincipalName?: string };
+      // `mail` is the routable SMTP address; userPrincipalName is the sign-in name, which is
+      // usually the same but is the only value present on some account types.
+      const address = data.mail ?? data.userPrincipalName;
+      if (!address) return err({ kind: "provider_fetch_failed", cause: "Graph user carried neither mail nor userPrincipalName" });
+      return ok(address);
+    } catch (e) {
+      return err({ kind: "provider_fetch_failed", cause: e });
+    }
+  }
+
+  /**
+   * Sends through the user's own mailbox, which is the only way mail from their Outlook
+   * address passes DMARC at the recipient. Graph files the sent copy in Sent Items.
+   *
+   * Two calls rather than the single-shot `/me/sendMail`: creating the draft first returns
+   * `internetMessageId`, the RFC 5322 Message-ID that inbound replies will quote in
+   * In-Reply-To. `/me/sendMail` returns an empty 202 and would leave us unable to thread
+   * replies to what we just sent.
+   *
+   * Requires the `Mail.Send` scope on the linked connection.
+   */
+  async sendMessage(rawMime: Uint8Array, emx: ExternalMailExchange): Promise<Result<SendResult, ProviderSendError>> {
+    const tokenResult = await this.resolveToken(emx);
+    if (tokenResult.isErr()) return err({ kind: "provider_send_failed", cause: tokenResult.error.cause });
+    const token = tokenResult.value;
+    try {
+      // Graph accepts a full MIME message as the request body when the content type says so.
+      const createResp = await fetch(`${GRAPH_API}/me/messages`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "text/plain" },
+        body: Buffer.from(rawMime).toString("base64"),
+      });
+
+      if (createResp.status === 401) return err({ kind: "provider_token_expired" });
+      if (!createResp.ok) {
+        const cause = await createResp.text();
+        if (createResp.status === 403) {
+          this.logger.error("Outlook send rejected — connection is missing the Mail.Send scope. The user must re-link their Microsoft identity to grant it.", { code: "emx.outlook.send_scope_missing", emxId: emx.id, cause });
+          return err({ kind: "provider_send_scope_missing", cause });
+        }
+        if (createResp.status < 500) {
+          this.logger.warn("Outlook draft creation rejected", { code: "emx.outlook.send_rejected", emxId: emx.id, status: createResp.status, cause });
+          return err({ kind: "provider_send_rejected", cause });
+        }
+        return err({ kind: "provider_send_failed", cause });
+      }
+
+      const draft = await createResp.json() as { id: string; internetMessageId?: string };
+
+      const sendResp = await fetch(`${GRAPH_API}/me/messages/${draft.id}/send`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+
+      if (!sendResp.ok && sendResp.status !== 202 && sendResp.status !== 204) {
+        const cause = await sendResp.text();
+        if (sendResp.status === 401) return err({ kind: "provider_token_expired" });
+        if (sendResp.status === 403) {
+          this.logger.error("Outlook send rejected — connection is missing the Mail.Send scope. The user must re-link their Microsoft identity to grant it.", { code: "emx.outlook.send_scope_missing", emxId: emx.id, cause });
+          return err({ kind: "provider_send_scope_missing", cause });
+        }
+        if (sendResp.status < 500) {
+          this.logger.warn("Outlook send rejected", { code: "emx.outlook.send_rejected", emxId: emx.id, status: sendResp.status, cause });
+          return err({ kind: "provider_send_rejected", cause });
+        }
+        return err({ kind: "provider_send_failed", cause });
+      }
+
+      const messageId = draft.internetMessageId ? extractMsgId(draft.internetMessageId) : null;
+      this.logger.info("Outlook send succeeded", { code: "emx.outlook.send_success", emxId: emx.id, providerMessageId: draft.id });
+      return ok({ providerMessageId: draft.id, ...(messageId ? { messageId } : {}) });
+    } catch (e) {
+      return err({ kind: "provider_send_failed", cause: e });
     }
   }
 
