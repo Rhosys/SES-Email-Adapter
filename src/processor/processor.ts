@@ -1439,7 +1439,7 @@ export class SignalProcessor {
     // Unexpected exceptions propagate to the caller (SQS retry). Only IcsParseError is caught.
     await this.processCalendarAttachment(signal, thread, accountId, ttl);
 
-    // 13. S3 retention — fire-and-forget (idempotent, always attempted)
+    // 13. S3 retention — best-effort (idempotent, failure means default lifecycle applies instead of plan-specific)
     await this.attemptS3Retention(signal, billingPlan, thread);
 
     // 14. Aurora upserts — gates side-effect dispatch. All clusters must succeed.
@@ -1528,9 +1528,9 @@ export class SignalProcessor {
   }
 
   /**
-   * Fire-and-forget S3 retention. Always attempted on every delivery (idempotent).
+   * Best-effort S3 retention. Always attempted on every delivery (idempotent).
    * Errors are logged at warn level and never propagate — S3 retention failure
-   * must not alter the processing outcome or prevent Aurora/side-effect execution.
+   * means the default 5-year lifecycle rule applies instead of the plan-specific policy.
    */
   async attemptS3Retention(signal: Signal, billingPlan: BillingPlan, thread: Thread): Promise<void> {
     // The SYSTEM account only ever holds throwaway healthcheck emails, expired by
