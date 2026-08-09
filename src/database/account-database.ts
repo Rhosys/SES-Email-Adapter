@@ -1292,7 +1292,7 @@ export class AccountDatabase {
    *    - Row exists + key in history → return ok (deduplicated)
    * 3. If PutItem condition fails (race) → retry UpdateItem
    *
-   * Post-write: if history > 100 items, trim oldest 10 (fire-and-forget).
+   * Post-write: if history > 100 items, trim oldest 10.
    */
   private async writeDiffMetric(accountId: string, metric: StatsMetric, delta: number, idempotencyKey: string): Promise<Result<void, DbError>> {
     const now = DateTime.utc();
@@ -1397,7 +1397,7 @@ export class AccountDatabase {
     }
   }
 
-  /** Fire-and-forget: trim history list if over 100 items */
+  /** trim history list if over 100 items */
   private async trimHistory(key: { pk: string; sk: string }): Promise<void> {
     try {
       const res = await dynamo.send(new GetCommand({
@@ -1415,8 +1415,8 @@ export class AccountDatabase {
         Key: key,
         UpdateExpression: `REMOVE ${removeExpr}`,
       }));
-    } catch {
-      // Fire-and-forget — trim failure is non-critical
+    } catch (error) {
+      this.logger.error("Failed to clean up history list.", { code: "account_database.history_cleanup_failed", pk, sk, error });
     }
   }
 
