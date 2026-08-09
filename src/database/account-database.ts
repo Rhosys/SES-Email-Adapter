@@ -190,14 +190,22 @@ export class AccountDatabase {
   // A sender disposition recorded for an address implies that address is a recognised
   // alias, so callers that approve/block a sender must ensure the Alias record exists too.
   // Pass `existing` when the caller already has it (e.g. processor.ts) to skip the lookup.
-  async ensureAlias(accountId: string, aliasAddress: string, defaultUnknownSenderPolicy: UnknownSenderPolicy, existing?: Alias | null): Promise<Result<{ alias: Alias; created: boolean }, DbError>> {
+  async ensureAlias(accountId: string, aliasAddress: string, defaultUnknownSenderPolicy: UnknownSenderPolicy, existing?: Alias | null, emxId?: string): Promise<Result<{ alias: Alias; created: boolean }, DbError>> {
     let alias = existing;
     if (alias === undefined) {
       const existingResult = await this.getAlias(accountId, aliasAddress);
       if (existingResult.isErr()) return err(existingResult.error);
       alias = existingResult.value;
     }
-    if (alias) return ok({ alias, created: false });
+    if (alias) {
+      // Reconcile emxId if it differs from what's stored
+      if (emxId !== undefined && alias.emxId !== emxId) {
+        const updateResult = await this.updateAlias(accountId, aliasAddress, { emxId });
+        if (updateResult.isErr()) return err(updateResult.error);
+        if (updateResult.value) return ok({ alias: updateResult.value, created: false });
+      }
+      return ok({ alias, created: false });
+    }
 
     const now = DateTime.utc().toISO()!;
     const saveResult = await this.saveAlias({
@@ -209,6 +217,7 @@ export class AccountDatabase {
       unknownSenderPolicy: defaultUnknownSenderPolicy,
       createdAt: now,
       updatedAt: now,
+      ...(emxId !== undefined ? { emxId } : {}),
     });
     if (saveResult.isErr()) return err(saveResult.error);
     return ok({ alias: saveResult.value, created: true });

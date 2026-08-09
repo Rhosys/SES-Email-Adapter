@@ -124,19 +124,7 @@ export class ExternalExchangesApi {
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
     const { accountDb, adapters, getLinkedIdentity, encryptionManager, signalQueue, logger } = this;
 
-    /**
-     * Sets `emxId` on the alias item for a connected mailbox — the attribute the send path
-     * reads to route outbound mail from that address through the provider rather than SES.
-     * Pass undefined to clear it (on disconnect).
-     */
-    const updateAliasExchangeId = async (targetAccountId: string, aliasAddress: string, emxId: string | undefined) => {
-      const result = await accountDb.updateAlias(targetAccountId, aliasAddress, { emxId });
-      if (result.isErr()) {
-        logger.error("Failed to link alias to external exchange — outbound mail from this address will not route through the provider.", { code: "api.emx.alias_link_failed", accountId: targetAccountId, aliasAddress, emxId, error: result.error });
-      } else if (!result.value) {
-        logger.error("Alias missing while linking it to its external exchange — outbound mail from this address will not route through the provider.", { code: "api.emx.alias_link_missing", accountId: targetAccountId, aliasAddress, emxId });
-      }
-    };
+
 
     /** Trigger immediate dispatch for a specific exchange — awaited with error logging */
     const triggerDispatch = async (targetAccountId: string, emxId: string) => {
@@ -217,9 +205,8 @@ export class ExternalExchangesApi {
           syncCursor, lastSyncAt: now, nextSyncTime: expiresAt,
         });
         if (result.isErr()) { logger.error("Failed to create IMAP exchange record", { code: "api.emx.imap.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
-        const imapEnsureResult = await accountDb.ensureAlias(accountId, imapConfig.username, "allow_all", aliasCheck.isOk() ? aliasCheck.value : undefined);
+        const imapEnsureResult = await accountDb.ensureAlias(accountId, imapConfig.username, "allow_all", aliasCheck.isOk() ? aliasCheck.value : undefined, result.value.id);
         if (imapEnsureResult.isErr()) { logger.warn("Failed to ensure alias for IMAP exchange", { code: "api.emx.imap.ensure_alias_failed", accountId, error: imapEnsureResult.error }); }
-        await updateAliasExchangeId(accountId, imapConfig.username, result.value.id);
         await triggerDispatch(accountId, result.value.id);
         logger.info("IMAP exchange created and activated", { code: "api.emx.imap.created", accountId, emxId: result.value.id, emailAddress: imapConfig.username });
         return c.json(serializeEmx(result.value), 201);
@@ -268,9 +255,8 @@ export class ExternalExchangesApi {
           syncCursor, lastSyncAt: DateTime.utc().toISO()!, nextSyncTime: expiresAt,
         });
         if (result.isErr()) { logger.error("Failed to create JMAP exchange record", { code: "api.emx.jmap.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
-        const jmapEnsureResult = await accountDb.ensureAlias(accountId, jmapConfig.username, "allow_all", aliasCheck.isOk() ? aliasCheck.value : undefined);
+        const jmapEnsureResult = await accountDb.ensureAlias(accountId, jmapConfig.username, "allow_all", aliasCheck.isOk() ? aliasCheck.value : undefined, result.value.id);
         if (jmapEnsureResult.isErr()) { logger.warn("Failed to ensure alias for JMAP exchange", { code: "api.emx.jmap.ensure_alias_failed", accountId, error: jmapEnsureResult.error }); }
-        await updateAliasExchangeId(accountId, jmapConfig.username, result.value.id);
         await triggerDispatch(accountId, result.value.id);
         logger.info("JMAP exchange created and activated", { code: "api.emx.jmap.created", accountId, emxId: result.value.id, emailAddress: jmapConfig.username });
         return c.json(serializeEmx(result.value), 201);
@@ -340,18 +326,16 @@ export class ExternalExchangesApi {
       if (existing) {
         const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "active", syncCursor, expiresAt, providerSubscriptionId, userId, connectionUserId, connectionId, errorReason: undefined, consecutiveFailures: 0 });
         if (updateResult.isErr()) { logger.error("Failed to update exchange record", { code: "api.emx.create_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
-        const reactivateEnsureResult = await accountDb.ensureAlias(accountId, emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined);
+        const reactivateEnsureResult = await accountDb.ensureAlias(accountId, emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined, existing.id);
         if (reactivateEnsureResult.isErr()) { logger.warn("Failed to ensure alias for reactivated exchange", { code: "api.emx.oauth.reactivate_ensure_alias_failed", accountId, error: reactivateEnsureResult.error }); }
-        await updateAliasExchangeId(accountId, emailAddress, existing.id);
         await triggerDispatch(accountId, existing.id);
         logger.info("OAuth exchange reactivated", { code: "api.emx.oauth.reactivated", accountId, emxId: existing.id, platform: body.platform });
         return c.json(serializeEmx(updateResult.value), 200);
       }
       const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress, status: "active", syncCursor, lastSyncAt: DateTime.utc().toISO()!, expiresAt, providerSubscriptionId, userId, connectionUserId, connectionId });
       if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
-      const oauthEnsureResult = await accountDb.ensureAlias(accountId, emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined);
+      const oauthEnsureResult = await accountDb.ensureAlias(accountId, emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined, result.value.id);
       if (oauthEnsureResult.isErr()) { logger.warn("Failed to ensure alias for new OAuth exchange", { code: "api.emx.oauth.ensure_alias_failed", accountId, error: oauthEnsureResult.error }); }
-      await updateAliasExchangeId(accountId, emailAddress, result.value.id);
       await triggerDispatch(accountId, result.value.id);
       logger.info("OAuth exchange created", { code: "api.emx.oauth.created", accountId, emxId: result.value.id, platform: body.platform });
       return c.json(serializeEmx(result.value), 201);
@@ -454,9 +438,8 @@ export class ExternalExchangesApi {
         if (jmapTimingResult.isErr()) { logger.warn("Failed to update JMAP sync timing", { code: "api.emx.patch.jmap.timing_failed", accountId, emxId, error: jmapTimingResult.error }); }
 
         // Ensure alias exists for the EMX email address (may have been missed or deleted)
-        const jmapPatchEnsureResult = await accountDb.ensureAlias(accountId, emx.emailAddress, "allow_all");
+        const jmapPatchEnsureResult = await accountDb.ensureAlias(accountId, emx.emailAddress, "allow_all", undefined, emxId);
         if (jmapPatchEnsureResult.isErr()) { logger.warn("Failed to ensure alias during JMAP patch", { code: "api.emx.patch.jmap.ensure_alias_failed", accountId, error: jmapPatchEnsureResult.error }); }
-        await updateAliasExchangeId(accountId, emx.emailAddress, emxId);
 
         // Re-activate if previously failed — connection test just proved creds work
         if (emx.status === "activation_failed") {
@@ -526,9 +509,8 @@ export class ExternalExchangesApi {
       if (imapTimingResult.isErr()) { logger.warn("Failed to update IMAP sync timing", { code: "api.emx.patch.imap.timing_failed", accountId, emxId, error: imapTimingResult.error }); }
 
       // Ensure alias exists for the EMX email address (may have been missed or deleted)
-      const imapPatchEnsureResult = await accountDb.ensureAlias(accountId, emx.emailAddress, "allow_all");
+      const imapPatchEnsureResult = await accountDb.ensureAlias(accountId, emx.emailAddress, "allow_all", undefined, emxId);
       if (imapPatchEnsureResult.isErr()) { logger.warn("Failed to ensure alias during IMAP patch", { code: "api.emx.patch.imap.ensure_alias_failed", accountId, error: imapPatchEnsureResult.error }); }
-      await updateAliasExchangeId(accountId, emx.emailAddress, emxId);
 
       // Re-activate if previously failed — connection test just proved creds work
       if (emx.status === "activation_failed") {
@@ -575,7 +557,10 @@ export class ExternalExchangesApi {
 
       // Unlink before deleting the exchange: an alias left pointing at a deleted exchange
       // would refuse every send from that address.
-      await updateAliasExchangeId(accountId, emx.emailAddress, undefined);
+      const unlinkResult = await accountDb.updateAlias(accountId, emx.emailAddress, { emxId: undefined });
+      if (unlinkResult.isErr()) {
+        logger.error("Failed to unlink alias from deleted exchange — outbound mail from this address will not route through SES.", { code: "api.emx.alias_unlink_failed", accountId, aliasAddress: emx.emailAddress, error: unlinkResult.error });
+      }
 
       const deleteResult = await accountDb.deleteExternalExchange(accountId, emxId);
       if (deleteResult.isErr()) { logger.error("Failed to delete exchange", { code: "api.emx.delete_failed", error: deleteResult.error }); return err(c, 500, "Internal Server Error"); }

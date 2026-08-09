@@ -98,7 +98,7 @@ export class EmxInboundWorker {
         code: "emx.inbound.no_account_for_recipient.self_heal",
         source, providerMessageId, emxId, accountId, emailAddress: emx.emailAddress,
       });
-      const ensureResult = await this.accountDb.ensureAlias(accountId, emx.emailAddress, "allow_all", null);
+      const ensureResult = await this.accountDb.ensureAlias(accountId, emx.emailAddress, "allow_all", null, emxId);
       if (ensureResult.isErr()) {
         this.logger.error("EMX inbound: self-heal ensureAlias failed", { code: "emx.inbound.self_heal_failed", emxId, accountId, error: ensureResult.error });
       }
