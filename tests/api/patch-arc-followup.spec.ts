@@ -330,7 +330,7 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
   // Schedule creation failure → 500, arc status unchanged (rollback)
   // -------------------------------------------------------------------------
 
-  it("schedule creation failure with status change → 500 and arc rolled back", async () => {
+  it("schedule creation failure with status change → 500 and arc not mutated", async () => {
     const arc = makeThread({ status: "active" });
     threadDb.getThread.mockResolvedValue(ok(arc));
     schedulerClient.createFollowup.mockResolvedValue(err(dbError("Scheduler API failure")));
@@ -341,14 +341,11 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
     });
 
     expect(res.status).toBe(500);
-    // First call: archive the arc; second call: rollback to original status
-    expect(threadDb.updateThread).toHaveBeenCalledTimes(2);
-    expect(threadDb.updateThread).toHaveBeenLastCalledWith(
-      TEST_ACCOUNT_ID, ARC_ID, "active", arc.lastSignalAt, {},
-    );
+    // Schedule-first: if scheduling fails, thread is never mutated
+    expect(threadDb.updateThread).not.toHaveBeenCalled();
   });
 
-  it("schedule creation failure without status change → 500, no rollback needed", async () => {
+  it("schedule creation failure without status change → 500, thread not mutated", async () => {
     const arc = makeThread({ status: "active" });
     threadDb.getThread.mockResolvedValue(ok(arc));
     schedulerClient.createFollowup.mockResolvedValue(err(dbError("Scheduler throttled")));
@@ -359,8 +356,8 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
     });
 
     expect(res.status).toBe(500);
-    // Only one updateArc call (the initial no-op status write), no rollback
-    expect(threadDb.updateThread).toHaveBeenCalledTimes(1);
+    // Schedule-first: if scheduling fails, thread is never mutated
+    expect(threadDb.updateThread).not.toHaveBeenCalled();
   });
 
   // ---------------------------------------------------------------------------

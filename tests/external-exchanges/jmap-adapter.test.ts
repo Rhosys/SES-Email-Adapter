@@ -20,7 +20,7 @@ function mockEncryptionManager(overrides?: Partial<EncryptionManager>): Encrypti
 
 function mockDb(overrides?: Partial<AccountDatabase>): AccountDatabase {
   return {
-    updateExternalExchange: vi.fn(async () => ({ isOk: () => true })),
+    updateExternalExchange: vi.fn(async () => ({ isOk: () => true, isErr: () => false })),
     ...overrides,
   } as unknown as AccountDatabase;
 }

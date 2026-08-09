@@ -217,7 +217,8 @@ export class OutlookProvider implements ProviderAdapter {
       const expiresAt = data.expirationDateTime;
 
       // Update subscription expiry and next sync time (same value for Outlook)
-      await this.db.updateExternalExchange(emx.accountId, emx.id, { expiresAt, nextSyncTime: expiresAt });
+      const updateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { expiresAt, nextSyncTime: expiresAt });
+      if (updateResult.isErr()) { this.logger.warn("Failed to update Outlook exchange expiry", { code: "emx.outlook.update_expiry_failed", emxId: emx.id, error: updateResult.error }); }
 
       this.logger.info("Outlook subscription renewed", { code: "emx.outlook.renewed", emxId: emx.id, expiresAt });
       return ok(undefined);

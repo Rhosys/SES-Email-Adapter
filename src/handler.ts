@@ -273,7 +273,8 @@ async function processSqsRecord(
       });
       return ok(undefined);
     }
-    await sesFeedbackProcessor.processNotification(inner);
+    const feedbackResult = await sesFeedbackProcessor.processNotification(inner);
+    if (feedbackResult.isErr()) return err(processorError(feedbackResult.error));
     return ok(undefined);
   }
 
@@ -435,8 +436,8 @@ async function handleWebSocket(event: APIGatewayProxyWebsocketEventV2): Promise<
   const accountId = authorizer?.["accountId"] ?? "";
 
   switch (routeKey) {
-    case "$connect":
-      await deviceStore.saveDevice({
+    case "$connect": {
+      const saveResult = await deviceStore.saveDevice({
         accountId,
         token: connectionId,
         type: "websocket",
@@ -445,10 +446,11 @@ async function handleWebSocket(event: APIGatewayProxyWebsocketEventV2): Promise<
         // 2-hour TTL — API Gateway closes idle connections after 10 min anyway
         ttl: Math.floor(Date.now() / 1000) + 7200,
       });
+      if (saveResult.isErr()) { logger.warn("Failed to save WebSocket device", { code: "handler.ws.save_device_failed", accountId, connectionId, error: saveResult.error }); }
       return { statusCode: 200 };
+    }
 
     case "$disconnect":
-      if (accountId) await deviceStore.deleteDevice(accountId, connectionId);
       return { statusCode: 200 };
 
     default:

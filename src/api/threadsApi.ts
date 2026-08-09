@@ -246,11 +246,6 @@ export class ThreadsApi {
       }
 
       const statusChanged = body.status !== undefined && body.status !== thread.status;
-      const updateResult = await threadDb.updateThread(accountId, thread.id, status, lastSignalAt, fields);
-      if (updateResult.isErr()) {
-        logger.error("Failed to update thread.", { code: "api.thread.update_failed", error: updateResult.error });
-        return err(c, 500, "Internal Server Error");
-      }
 
       if (body.followupAt && schedulerClient) {
         const signalsResult = await threadDb.listSignals(accountId, thread.id, { limit: 1 });
@@ -261,9 +256,14 @@ export class ThreadsApi {
         });
         if (scheduleResult.isErr()) {
           logger.error("Failed to create followup schedule.", { code: "api.thread.followup_schedule_failed", error: scheduleResult.error });
-          if (statusChanged) await threadDb.updateThread(accountId, thread.id, thread.status, thread.lastSignalAt, {});
           return err(c, 500, "Failed to create followup schedule");
         }
+      }
+
+      const updateResult = await threadDb.updateThread(accountId, thread.id, status, lastSignalAt, fields);
+      if (updateResult.isErr()) {
+        logger.error("Failed to update thread.", { code: "api.thread.update_failed", error: updateResult.error });
+        return err(c, 500, "Internal Server Error");
       }
 
       const changedFields = Object.keys(fields).concat(statusChanged ? ["status"] : []);
@@ -389,7 +389,8 @@ export class ThreadsApi {
         logger.error("Failed to create draft signal.", { code: "api.thread.create_signal_failed", error: createResult.error });
         return err(c, 500, "Internal Server Error");
       }
-      await threadDb.updateThread(accountId, thread.id, thread.status, now, {});
+      const draftThreadUpdateResult = await threadDb.updateThread(accountId, thread.id, thread.status, now, {});
+      if (draftThreadUpdateResult.isErr()) { logger.warn("Failed to update thread recency after draft creation", { code: "api.thread.create_signal.update_thread_failed", accountId, threadId, error: draftThreadUpdateResult.error }); }
       logger.info("Draft signal created", { code: "api.threads.signal_created", accountId, threadId, signalId: id });
       return c.json(toApiSignal(createResult.value), 201);
     });
@@ -670,7 +671,8 @@ export class ThreadsApi {
             domain: aliasDomain,
           },
         };
-        await threadDb.saveSignal(misconfigSignal);
+        const misconfigSaveResult = await threadDb.saveSignal(misconfigSignal);
+        if (misconfigSaveResult.isErr()) { logger.warn("Failed to save domain misconfiguration signal", { code: "api.rsvp.save_misconfig_failed", accountId, error: misconfigSaveResult.error }); }
         return err(c, 422, "Domain misconfiguration", "DOMAIN_MISCONFIGURATION", { domain: aliasDomain, reason: "DKIM + SPF not configured for alias domain" });
       }
 

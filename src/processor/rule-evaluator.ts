@@ -82,7 +82,8 @@ export class JsonLogicRuleEvaluator implements RuleEvaluator {
 
   async annotateRuleError(rule: Rule, error: { message: string; errorType: string }): Promise<void> {
     try {
-      await this.accountDb.annotateRuleError(rule.accountId, rule.id, `[${error.errorType}] ${error.message}`);
+      const annotateResult = await this.accountDb.annotateRuleError(rule.accountId, rule.id, `[${error.errorType}] ${error.message}`);
+      if (annotateResult.isErr()) { this.logger.warn("Failed to annotate rule error", { code: "rule_evaluator.annotate_failed", ruleId: rule.id, error: annotateResult.error }); }
     } catch {
       // Best-effort — don't fail rule evaluation if annotation fails
       this.logger.track("Failed to annotate rule error.", { code: "rule_evaluator.annotate_failed", ruleId: rule.id });

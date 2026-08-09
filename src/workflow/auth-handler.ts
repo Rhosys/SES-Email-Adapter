@@ -82,7 +82,8 @@ export class AuthWorkflowHandler implements WorkflowHandler {
     for (const device of devicesResult.value) {
       const result: DeliveryResult = await this.wsDeliverer.deliver(device, payload as any, "interrupt");
       if (result.status === "stale") {
-        await this.deviceStore.deleteDevice(accountId, device.token);
+        const deleteResult = await this.deviceStore.deleteDevice(accountId, device.token);
+        if (deleteResult.isErr()) { this.logger.warn("Failed to delete stale WebSocket device", { code: "workflow.auth.delete_device_failed", accountId, token: device.token, error: deleteResult.error }); }
       } else if (result.status === "failed") {
         this.logger.warn("OTP delivery failed", {
           code: "workflow.auth.delivery_failed", accountId, token: device.token, reason: result.reason,

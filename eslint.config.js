@@ -1,11 +1,21 @@
-import tsParser from "@typescript-eslint/parser";
+import { typescriptConfig } from "@authress/eslint-config/typescript";
 
 export default [
+  // Type-aware TypeScript rules (no-floating-promises + must-use-result)
+  ...typescriptConfig,
+  {
+    files: ["src/**/*.ts"],
+    languageOptions: {
+      parserOptions: {
+        project: "./tsconfig.json",
+        tsconfigRootDir: import.meta.dirname,
+      },
+    },
+  },
+
+  // Project-specific: restricted imports for processor isolation (ADR 011)
   {
     files: ["src/processor/**/*.ts"],
-    languageOptions: {
-      parser: tsParser,
-    },
     rules: {
       "no-restricted-imports": ["error", {
         paths: [

@@ -186,10 +186,11 @@ export class DomainsApi {
       const receivingChanged = (receivingHealthy ?? false) !== domain.receivingSetupComplete;
       const senderChanged = senderHealthy !== domain.senderSetupComplete;
       if (receivingChanged || senderChanged) {
-        await accountDb.updateDomainSetup(accountId, domain.domain, {
+        const setupResult = await accountDb.updateDomainSetup(accountId, domain.domain, {
           receivingSetupComplete: receivingHealthy ?? false,
           senderSetupComplete: senderHealthy,
         });
+        if (setupResult.isErr()) { logger.error("Failed to update domain setup flags.", { code: "api.domains.verify.update_setup_failed", accountId, error: setupResult.error }); return err(c, 500, "Internal Server Error"); }
       }
 
       const updatedResult = await accountDb.getDomain(accountId, domain.domain);

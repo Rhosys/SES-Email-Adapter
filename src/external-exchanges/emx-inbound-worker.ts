@@ -94,21 +94,15 @@ export class EmxInboundWorker {
 
     const processResult = await this.processor.processInbound(message, receiveCount);
     if (processResult.isErr() && processResult.error.kind === "no_account_for_recipient") {
-      this.logger.error("EMX inbound message dropped — no alias found for recipient. The alias should have been created during exchange activation.", {
-        code: "emx.inbound.no_account_for_recipient",
-        source,
-        providerMessageId,
-        emxId,
-        accountId,
-        emailAddress: emx.emailAddress,
-        recipientAddress: processResult.error.recipientAddress,
-        destination: processResult.error.destination,
-        compositeMailMessageId: processResult.error.compositeMailMessageId,
-        expectedAccountId: processResult.error.expectedAccountId,
-        s3Key,
-        sqsMessageId,
+      this.logger.track("EMX inbound: no alias found for recipient, attempting self-heal.", {
+        code: "emx.inbound.no_account_for_recipient.self_heal",
+        source, providerMessageId, emxId, accountId, emailAddress: emx.emailAddress,
       });
-      return ok(undefined);
+      const ensureResult = await this.accountDb.ensureAlias(accountId, emx.emailAddress, "allow_all", null);
+      if (ensureResult.isErr()) {
+        this.logger.error("EMX inbound: self-heal ensureAlias failed", { code: "emx.inbound.self_heal_failed", emxId, accountId, error: ensureResult.error });
+      }
+      return err({ kind: "provider_fetch_failed", cause: "Alias missing — self-heal attempted, retrying" });
     }
     if (processResult.isErr()) return err(processResult.error as ProcessorError);
     this.logger.info("emx_inbound: processed successfully", { code: "emx.inbound.processed", source, providerMessageId, emxId, accountId });

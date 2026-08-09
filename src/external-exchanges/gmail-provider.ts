@@ -134,7 +134,8 @@ export class GmailProvider implements ProviderAdapter {
       const expiresAt = DateTime.fromMillis(Number(data.expiration)).toISO()!;
 
       // Update subscription expiry and next sync time (same value for Gmail)
-      await this.db.updateExternalExchange(emx.accountId, emx.id, { expiresAt, nextSyncTime: expiresAt });
+      const renewUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { expiresAt, nextSyncTime: expiresAt });
+      if (renewUpdateResult.isErr()) { this.logger.warn("Failed to update Gmail exchange after renewal", { code: "emx.gmail.renewal_update_failed", emxId: emx.id, error: renewUpdateResult.error }); }
 
       return ok(undefined);
     } catch (e) {
@@ -362,7 +363,8 @@ export class GmailProvider implements ProviderAdapter {
     }
 
     const newCursor = historyData.historyId ?? historyId;
-    await this.db.updateExternalExchange(emx.accountId, emx.id, { syncCursor: newCursor });
+    const webhookUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { syncCursor: newCursor });
+    if (webhookUpdateResult.isErr()) { this.logger.warn("Failed to update Gmail sync cursor after webhook", { code: "emx.gmail.webhook_cursor_update_failed", emxId: emx.id, error: webhookUpdateResult.error }); }
 
     return c.json({}, 200);
   }

@@ -92,7 +92,8 @@ export async function handlePostApprovalCalendar(
         linkedSignalId: signal.id,
       },
     };
-    await threadDb.saveSignal(invalidSignal);
+    const invalidSaveResult = await threadDb.saveSignal(invalidSignal);
+    if (invalidSaveResult.isErr()) { logger.warn("Failed to save calendar_invite_invalid signal in post-approval", { code: "processor.post_approval_calendar.save_invalid_failed", accountId, error: invalidSaveResult.error }); }
     logger.warn("Post-approval calendar: .ics rejected by parser.", {
       code: "processor.post_approval_calendar.parse_rejected",
       accountId,

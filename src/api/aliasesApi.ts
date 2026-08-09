@@ -101,7 +101,8 @@ export class AliasesApi {
         updatedAt: now,
       });
       if (createResult.isErr()) { logger.error("Failed to create alias.", { code: "api.aliases.create_failed", accountId, error: createResult.error }); return err(c, 500, "Internal Server Error"); }
-      await accountDb.incrementStatMetric(accountId, "totalAliases", 1, logger.getInvocationId());
+      const statIncrResult = await accountDb.incrementStatMetric(accountId, "totalAliases", 1, logger.getInvocationId());
+      if (statIncrResult.isErr()) { logger.warn("Failed to increment totalAliases stat", { code: "api.aliases.stat_incr_failed", accountId, error: statIncrResult.error }); }
       logger.info("Alias created", { code: "api.aliases.created", accountId, address: body.address });
       return c.json(toApiAlias(createResult.value), 201);
     });
@@ -164,7 +165,8 @@ export class AliasesApi {
       logger.info("Deleting alias", { code: "api.aliases.delete", accountId, address });
       const deleteResult = await accountDb.deleteAlias(accountId, address);
       if (deleteResult.isErr()) { logger.error("Failed to delete alias.", { code: "api.aliases.delete_failed", accountId, error: deleteResult.error }); return err(c, 500, "Internal Server Error"); }
-      await accountDb.incrementStatMetric(accountId, "totalAliases", -1, logger.getInvocationId());
+      const statDecrResult = await accountDb.incrementStatMetric(accountId, "totalAliases", -1, logger.getInvocationId());
+      if (statDecrResult.isErr()) { logger.warn("Failed to decrement totalAliases stat", { code: "api.aliases.stat_decr_failed", accountId, error: statDecrResult.error }); }
       const { userId } = c.get("auth");
       const auditResult = await auditDb.saveAuditEvent({
         accountId, userId, action: "deleted", resourceType: "alias", resourceId: address,

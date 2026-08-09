@@ -18,7 +18,7 @@
     "deploy": "tsx make.ts deploy",
     "db:generate": "drizzle-kit generate --name",
     "db:check": "drizzle-kit check",
-    "lint": "eslint src/processor/",
+    "lint": "eslint src/",
     "openapi": "tsx scripts/openapi.ts",
     "prepare": "husky"
   },
@@ -65,6 +65,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@authress/eslint-config": "^2.0.20",
     "@aws-sdk/client-cloudwatch-logs": "^3.1067.0",
     "@aws-sdk/client-codebuild": "^3.1067.0",
     "@aws-sdk/client-kms": "^3.1048.0",
@@ -91,6 +92,7 @@
     "qrcode": "^1.5.4",
     "tsx": "^4.0.0",
     "typescript": "^5.7.0",
+    "typescript-eslint": "^8.66.0",
     "vitest": "^2.0.0"
   },
   "engines": {

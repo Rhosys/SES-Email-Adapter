@@ -227,19 +227,7 @@ export class JmapAdapter implements ProviderAdapter {
 
     const sessionResult = await fetchSession(jmapConfig.sessionUrl, auth, 30_000);
     if (sessionResult.isErr()) {
-      const failures = (emx.consecutiveFailures ?? 0) + 1;
-      if (failures >= 3) {
-        await this.db.updateExternalExchange(emx.accountId, emx.id, {
-          status: "activation_failed",
-          errorReason: String(sessionResult.error.cause),
-          consecutiveFailures: failures,
-        });
-        this.logger.error("JMAP deactivated after 3 consecutive failures", { code: "jmap.renew.deactivated", emxId: emx.id, failures });
-      } else {
-        await this.db.updateExternalExchange(emx.accountId, emx.id, { consecutiveFailures: failures });
-        this.logger.warn("JMAP session fetch failed", { code: "jmap.renew.session_failed", emxId: emx.id, failures, cause: sessionResult.error.cause });
-      }
-      return err({ kind: "provider_renewal_failed", cause: sessionResult.error.cause });
+      return this.handleRenewalFailure(emx, sessionResult.error.cause);
     }
     const session = sessionResult.value;
     const jmapAccountId = session.primaryAccounts[MAIL_CAPABILITY]!;
@@ -255,19 +243,7 @@ export class JmapAdapter implements ProviderAdapter {
       }, "qc0"],
     ], 30_000);
     if (queryChangesResult.isErr()) {
-      const failures = (emx.consecutiveFailures ?? 0) + 1;
-      if (failures >= 3) {
-        await this.db.updateExternalExchange(emx.accountId, emx.id, {
-          status: "activation_failed",
-          errorReason: String(queryChangesResult.error.cause),
-          consecutiveFailures: failures,
-        });
-        this.logger.error("JMAP deactivated after 3 consecutive failures", { code: "jmap.renew.deactivated", emxId: emx.id, failures });
-      } else {
-        await this.db.updateExternalExchange(emx.accountId, emx.id, { consecutiveFailures: failures });
-        this.logger.warn("JMAP queryChanges failed", { code: "jmap.renew.query_changes_failed", emxId: emx.id, failures, cause: queryChangesResult.error.cause });
-      }
-      return err(queryChangesResult.error);
+      return this.handleRenewalFailure(emx, queryChangesResult.error.cause);
     }
 
     const qcResponse = queryChangesResult.value[0] as [string, Record<string, unknown>, string] | undefined;
@@ -277,18 +253,7 @@ export class JmapAdapter implements ProviderAdapter {
       if (errorType === "cannotCalculateChanges") {
         return this.renewFallback(session.apiUrl, auth, jmapAccountId, jmapConfig.inboxId, emx);
       }
-      const failures = (emx.consecutiveFailures ?? 0) + 1;
-      if (failures >= 3) {
-        await this.db.updateExternalExchange(emx.accountId, emx.id, {
-          status: "activation_failed",
-          errorReason: `JMAP error: ${errorType}`,
-          consecutiveFailures: failures,
-        });
-        this.logger.error("JMAP deactivated after 3 consecutive failures", { code: "jmap.renew.deactivated", emxId: emx.id, failures });
-      } else {
-        await this.db.updateExternalExchange(emx.accountId, emx.id, { consecutiveFailures: failures });
-      }
-      return err({ kind: "provider_renewal_failed", cause: `JMAP error: ${errorType}` });
+      return this.handleRenewalFailure(emx, "JMAP error: " + errorType);
     }
 
     if (!qcResponse) {
@@ -314,12 +279,13 @@ export class JmapAdapter implements ProviderAdapter {
       return err({ kind: "provider_renewal_failed", cause: "SQS batch send failed" });
     }
 
-    await this.db.updateExternalExchange(emx.accountId, emx.id, {
+    const cursorResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
       syncCursor: newQueryState,
       lastSyncAt: DateTime.utc().toISO()!,
       nextSyncTime: DateTime.utc().plus({ hours: 1 }).toISO()!,
       consecutiveFailures: 0,
     });
+    if (cursorResult.isErr()) { this.logger.warn("Failed to update JMAP sync cursor", { code: "jmap.renew.cursor_update_failed", emxId: emx.id, error: cursorResult.error }); }
 
     this.logger.info("JMAP sync complete", { code: "jmap.renew.synced", emxId: emx.id, newMessages: added.length, newQueryState });
 
@@ -401,6 +367,25 @@ export class JmapAdapter implements ProviderAdapter {
   }
 
   // ---------------------------------------------------------------------------
+  // Private: handle renewal failure with consecutive failure tracking
+  // ---------------------------------------------------------------------------
+
+  private async handleRenewalFailure(emx: ExternalMailExchange, cause: string | unknown): Promise<Result<void, ProviderRenewalError>> {
+    const causeStr = typeof cause === "string" ? cause : String(cause);
+    this.logger.info("JMAP renewal failed", { code: "jmap.renew.failed", emxId: emx.id, cause: causeStr });
+    const failures = (emx.consecutiveFailures ?? 0) + 1;
+    if (failures >= 3) {
+      const deactivateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { status: "activation_failed", errorReason: causeStr, consecutiveFailures: failures });
+      if (deactivateResult.isErr()) { this.logger.warn("Failed to deactivate JMAP exchange", { code: "jmap.renew.deactivate_write_failed", emxId: emx.id, error: deactivateResult.error }); }
+      this.logger.error("JMAP deactivated after 3 consecutive failures", { code: "jmap.renew.deactivated", emxId: emx.id, failures });
+    } else {
+      const failureResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { consecutiveFailures: failures });
+      if (failureResult.isErr()) { this.logger.warn("Failed to update JMAP consecutive failures", { code: "jmap.renew.failure_write_failed", emxId: emx.id, error: failureResult.error }); }
+    }
+    return err({ kind: "provider_renewal_failed", cause: causeStr });
+  }
+
+  // ---------------------------------------------------------------------------
   // Private: fallback when cannotCalculateChanges
   // ---------------------------------------------------------------------------
 
@@ -439,12 +424,13 @@ export class JmapAdapter implements ProviderAdapter {
       return err({ kind: "provider_renewal_failed", cause: "SQS batch send failed" });
     }
 
-    await this.db.updateExternalExchange(emx.accountId, emx.id, {
+    const fallbackCursorResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
       syncCursor: newQueryState,
       lastSyncAt: DateTime.utc().toISO()!,
       nextSyncTime: DateTime.utc().plus({ hours: 1 }).toISO()!,
       consecutiveFailures: 0,
     });
+    if (fallbackCursorResult.isErr()) { this.logger.warn("Failed to update JMAP fallback sync cursor", { code: "jmap.renew.fallback_cursor_update_failed", emxId: emx.id, error: fallbackCursorResult.error }); }
 
     this.logger.info("JMAP sync fallback complete", { code: "jmap.renew.fallback_synced", emxId: emx.id, newMessages: ids.length, newQueryState });
 

@@ -541,7 +541,8 @@ export class SignalProcessor {
                 {
                   const sigId = generateId("sgn-");
                   const sigTs = DateTime.utc().toISO()!;
-                  await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
+                  const invalidFnResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
+                  if (invalidFnResult.isErr()) { this.logger.warn("Failed to save invalid_template_function signal", { code: "processor.save_invalid_fn_signal_failed", accountId, threadId: thread.id, error: invalidFnResult.error }); }
                 }
                 actionVars[`fn.${fn.name}`] = "";
                 preventAutoSend = true;
@@ -563,7 +564,8 @@ export class SignalProcessor {
                   {
                     const sigId = generateId("sgn-");
                     const sigTs = DateTime.utc().toISO()!;
-                    await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
+                    const invalidReturnResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
+                    if (invalidReturnResult.isErr()) { this.logger.warn("Failed to save invalid_template_function signal", { code: "processor.save_invalid_fn_signal_failed", accountId, threadId: thread.id, error: invalidReturnResult.error }); }
                   }
                   actionVars[`fn.${fn.name}`] = "";
                   preventAutoSend = true;
@@ -596,7 +598,8 @@ export class SignalProcessor {
               {
                 const sigId = generateId("sgn-");
                 const sigTs = DateTime.utc().toISO()!;
-                await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "auto_send_blocked", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration, data: { recipientAddress: signal.data.recipientAddress } });
+                const autoSendBlockedResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "auto_send_blocked", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration, data: { recipientAddress: signal.data.recipientAddress } });
+                if (autoSendBlockedResult.isErr()) { this.logger.warn("Failed to save auto_send_blocked signal", { code: "processor.save_auto_send_blocked_failed", accountId, threadId: thread.id, error: autoSendBlockedResult.error }); }
               }
             }
           }
@@ -853,7 +856,8 @@ export class SignalProcessor {
       const ensureResult = await this.accountDb.ensureAlias(accountId, recipientAddress, defaultPolicy, null);
       if (ensureResult.isErr()) return err(ensureResult.error);
       if (ensureResult.value.created) {
-        await this.accountDb.incrementStatMetric(accountId, "totalAliases", 1, idempotencyKey + ".alias");
+        const aliasStatResult = await this.accountDb.incrementStatMetric(accountId, "totalAliases", 1, idempotencyKey + ".alias");
+        if (aliasStatResult.isErr()) { this.logger.warn("Failed to increment totalAliases stat after auto-create", { code: "processor.stats_alias_increment_failed", accountId, error: aliasStatResult.error }); }
       }
     }
 
@@ -1814,7 +1818,8 @@ export class SignalProcessor {
       ? `[${error.errorType}] ${error.message}`
       : "Function returned no value";
     try {
-      await this.accountDb.annotateTemplateError(accountId, templateId, functionName, errorMessage);
+      const annotateResult = await this.accountDb.annotateTemplateError(accountId, templateId, functionName, errorMessage);
+      if (annotateResult.isErr()) { this.logger.warn("Failed to annotate template function error", { code: "processor.annotate_template_failed", accountId, templateId, functionName, error: annotateResult.error }); }
     } catch {
       // Best-effort — don't fail draft generation if annotation fails
       this.logger.track("Failed to annotate template function error.", { code: "processor.annotate_template_failed", accountId, templateId, functionName });

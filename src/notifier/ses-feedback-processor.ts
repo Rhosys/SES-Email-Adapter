@@ -192,7 +192,8 @@ export class SesFeedbackProcessor {
                 subject: `Delivery failure: ${bouncedRecipients.length} recipient(s) bounced`,
               },
             };
-            await this.signalStore.saveSignal(deliverabilitySignal as unknown as Signal);
+            const deliverabilityResult = await this.signalStore.saveSignal(deliverabilitySignal as unknown as Signal);
+            if (deliverabilityResult.isErr()) return err(deliverabilityResult.error);
 
             // If ALL recipients permanently bounced → revert sent signal to draft
             if (isPermanent) {
@@ -201,11 +202,12 @@ export class SesFeedbackProcessor {
                 bouncedRecipients.some(b => b.address.toLowerCase() === addr && b.bounceType === "permanent")
               );
               if (allBounced) {
-                await this.signalStore.updateSignalSendStatus(sentSignal.accountId, sentSignal.signalLookupId, {
+                const revertResult = await this.signalStore.updateSignalSendStatus(sentSignal.accountId, sentSignal.signalLookupId, {
                   status: "draft",
                   sendFailureReason: "all_recipients_bounced",
                   sendInitiatedAt: null,
                 });
+                if (revertResult.isErr()) { this.logger.warn("Failed to revert bounced signal to draft", { code: "ses_feedback.revert_draft_failed", signalId: sentSignal.id, error: revertResult.error }); }
               }
             }
           }
