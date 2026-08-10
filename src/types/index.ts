@@ -19,7 +19,7 @@ export type Workflow = (typeof WORKFLOWS)[number];
 // SQS message types — discriminator for routing in the Lambda handler
 // ---------------------------------------------------------------------------
 
-export const SQS_MESSAGE_TYPES = ["reindex", "side_effect", "draft_send", "signal_followup", "rsvp_reminder", "digest_dispatch", "digest_send", "emx_inbound", "emx_dispatch"] as const;
+export const SQS_MESSAGE_TYPES = ["reindex", "side_effect", "draft_send", "signal_followup", "rsvp_reminder", "digest_dispatch", "digest_send", "emx_inbound", "emx_dispatch", "emx_idle"] as const;
 export type SqsMessageType = (typeof SQS_MESSAGE_TYPES)[number];
 
 export type WorkflowData =
@@ -770,6 +770,7 @@ export interface ExternalMailExchange {
     jmapAccountId: string;         // from primaryAccounts["urn:ietf:params:jmap:mail"]
     inboxId: string;               // from Mailbox/query role=inbox, discovered during activation
   };
+  pushSubscriptionId?: string;     // JMAP PushSubscription ID when registered (R5)
   nextSyncTime?: string;           // ISO datetime — when dispatcher should next process (IMAP/JMAP)
   consecutiveFailures?: number;    // Track auth failures for 3-strike rule
   createdAt: string;
