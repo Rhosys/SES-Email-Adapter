@@ -59,6 +59,7 @@ export class DeviceNotifier implements Notifier {
           successCount++;
         } else if (result.status === "stale") {
           staleTokens.push(device.token);
+          this.logger.info("Stale device connection cleaned up", { code: "notifier.stale_device", accountId, token: device.token, deviceType: device.type });
         } else {
           this.logger.warn("Device delivery failed", { code: "notifier.delivery_failed", signal, thread, deviceType: device.type, token: device.token, reason: result.reason });
         }
@@ -84,7 +85,7 @@ export class DeviceNotifier implements Notifier {
       return ok(undefined);
     }
 
-    this.logger.info("Total notification delivery failure", { code: "notifier.delivery_failed", accountId, threadId: thread.id });
+    this.logger.error("Total notification delivery failure", { code: "notifier.total_delivery_failure", accountId, threadId: thread.id });
     return err(dbError("Total delivery failure: all device deliveries failed"));
   }
 
@@ -94,12 +95,15 @@ export class DeviceNotifier implements Notifier {
 }
 
 function buildPayload(thread: Thread, signal: Signal, urgency: ThreadUrgency, reason?: NotificationReason): NotificationPayload {
+  const from: NotificationPayload["from"] = { address: signal.data.from.address };
+  if (signal.data.from.name) {
+    from.name = signal.data.from.name;
+  }
   const payload: NotificationPayload = {
-    type: "signal",
+    type: "signal:created",
     signalId: signal.id,
     threadId: thread.id,
-    sender: signal.data.from.address,
-    senderName: signal.data.from.name ?? signal.data.from.address,
+    from,
     subject: signal.data.subject,
     workflow: thread.workflow,
     urgency,

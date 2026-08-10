@@ -244,11 +244,10 @@ describe("DeviceNotifier", () => {
       await notifier.notify("acct-1", arc, signal, "high");
 
       const expectedPayload: NotificationPayload = {
-        type: "signal",
+        type: "signal:created",
         signalId: "sgn-msg001",
         threadId: "arc-001",
-        sender: "alice@example.com",
-        senderName: "Alice",
+        from: { address: "alice@example.com", name: "Alice" },
         subject: "Your order has shipped",
         workflow: "package",
         urgency: "high",
@@ -256,7 +255,7 @@ describe("DeviceNotifier", () => {
       expect(wsDeliverer.deliver).toHaveBeenCalledWith(wsDevice, expectedPayload, "interrupt");
     });
 
-    it("uses address as senderName when name is not provided", async () => {
+    it("uses address as from.address when name is not provided", async () => {
       const signalNoName: Signal = { ...signal, data: { ...signal.data, from: { address: "bob@example.com" } } };
       const wsDeliverer = mockDeliverer();
       const store = mockDeviceStore({ listDevices: vi.fn(async () => ok([wsDevice])) });
@@ -270,7 +269,8 @@ describe("DeviceNotifier", () => {
 
       const call = wsDeliverer.deliver.mock.calls[0]!;
       const deliveredPayload = call[1] as NotificationPayload;
-      expect(deliveredPayload.senderName).toBe("bob@example.com");
+      expect(deliveredPayload.from.address).toBe("bob@example.com");
+      expect(deliveredPayload.from.name).toBeUndefined();
     });
   });
 

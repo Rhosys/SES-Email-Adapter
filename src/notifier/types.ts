@@ -33,11 +33,10 @@ export interface Deliverer {
 export type NotificationReason = "new_signal" | "followup" | "rsvp_reminder";
 
 export interface NotificationPayload {
-  type: "signal";
+  type: "signal:created";
   signalId: string;
   threadId: string;
-  sender: string;
-  senderName: string;
+  from: { address: string; name?: string };
   subject: string;
   workflow: string;
   urgency: ThreadUrgency;

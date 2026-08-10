@@ -24,17 +24,18 @@ export class FcmDeliverer implements Deliverer {
 
 function buildFcmMessage(token: string, payload: NotificationPayload, priority: "interrupt" | "ambient"): FcmMessage {
   const isInterrupt = priority === "interrupt";
+  const displayName = payload.from.name ?? payload.from.address;
 
   return {
     token,
     notification: {
-      title: payload.senderName,
+      title: displayName,
       body: payload.subject,
     },
     data: {
       signalId: payload.signalId,
       threadId: payload.threadId,
-      senderName: payload.senderName,
+      senderName: displayName,
       subject: payload.subject,
       workflow: payload.workflow,
     },

@@ -23,11 +23,10 @@ const device: Device = {
 };
 
 const payload: NotificationPayload = {
-  type: "signal",
+  type: "signal:created",
   signalId: "SES#msg-001",
   threadId: "arc-uuid-1",
-  sender: "alice@example.com",
-  senderName: "Alice",
+  from: { address: "alice@example.com", name: "Alice" },
   subject: "Test subject",
   workflow: "default",
   urgency: "normal",
