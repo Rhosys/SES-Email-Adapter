@@ -160,7 +160,7 @@ describe("SignalClassifier", () => {
       expect(result.isOk()).toBe(true);
       const output = result._unsafeUnwrap();
       expect(output.workflow).toBe("payments");
-      expect(output.workflowData).toMatchObject({ vendor: "Acme Corp", amount: 149.0 });
+      expect(output.workflowData).toMatchObject({ vendor: "Acme Corp", amount: "149" });
       expect(output.labels).toContain("billing");
     });
   });

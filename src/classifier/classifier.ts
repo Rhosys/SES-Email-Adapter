@@ -7,6 +7,7 @@ import type { Logger } from "../logger.js";
 import { buildSystemPrompt, buildUserMessage } from "./prompt-builder.js";
 import { CLASSIFIER_WORKFLOW_REGISTRY } from "../types/workflow-registry.js";
 import { SPAM_TAGS } from "./tags.js";
+import { coerceWorkflowData } from "./coerce-workflow-data.js";
 
 export const CLASSIFICATION_MODEL_ID = "qwen.qwen3-32b-v1:0";
 
@@ -204,6 +205,13 @@ export class SignalClassifier {
         }
       }
     }
+
+    // Coerce workflowData field types (numeric → string, boolean normalization)
+    coerceWorkflowData(workflowData, raw.workflow, this.logger, {
+      signalId: input.signalId,
+      accountId: input.accountId,
+      workflow: raw.workflow,
+    });
 
     // Extract and validate actions
     const actions: SignalAction[] = [];

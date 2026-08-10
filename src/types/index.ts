@@ -49,7 +49,7 @@ export interface AuthData {
   authType: "verification" | "password_reset" | "two_factor" | "security_alert" | "other";
   code?: string;
   actionUrl?: string;
-  expiresInMinutes?: number;
+  expiresInMinutes?: string;
   service: string;
 }
 
@@ -73,8 +73,8 @@ export interface PackageData {
   trackingNumber?: string;
   trackingUrl?: string;
   estimatedDelivery?: string;
-  items?: Array<{ name: string; quantity: number; price?: number }>;
-  totalAmount?: number;
+  items?: Array<{ name: string; quantity: string; price?: string }>;
+  totalAmount?: string;
   currency?: string;
 }
 
@@ -88,7 +88,7 @@ export interface TravelData {
   origin?: string;
   destination?: string;
   passengers?: Array<{ name: string }>;
-  totalAmount?: number;
+  totalAmount?: string;
   currency?: string;
   flightNumber?: string;
   seatNumber?: string;
@@ -102,7 +102,7 @@ export interface PaymentsData {
   // money flows both ways: invoice = owed to someone, receipt = already paid, subscription = recurring
   paymentType: "invoice" | "receipt" | "subscription_renewal" | "payment_failed" | "plan_changed" | "tax" | "wire_transfer" | "refund" | "statement" | "other";
   vendor: string;
-  amount?: number;
+  amount?: string;
   currency?: string;
   dueDate?: string;
   invoiceNumber?: string;
@@ -197,9 +197,9 @@ export interface EventsData {
   performer?: string;
   ticketReference?: string;
   seatDetails?: string;
-  ticketCount?: number;
+  ticketCount?: string;
   ticketUrl?: string;
-  totalAmount?: number;
+  totalAmount?: string;
   currency?: string;
 }
 

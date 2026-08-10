@@ -202,6 +202,13 @@ describe("workflow registry ↔ TypeScript type alignment", () => {
             continue; // Intentionally widened — registry enums are LLM guidance only
           }
 
+          // Number fields in the registry are stored as string in TypeScript —
+          // the LLM is asked for numbers to encourage numeric output, but coercion
+          // converts them to strings at the classifier boundary before storage.
+          if (registryField.type === "number" && tsField.type === "string") {
+            continue;
+          }
+
           expect(
             registryField.type,
             `${entry.name}.${registryField.name} type mismatch`,

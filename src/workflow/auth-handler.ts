@@ -21,7 +21,7 @@ export interface OtpPayload {
   signalId: string;
   code: string;
   authType: AuthData["authType"];
-  expiresInMinutes?: number;
+  expiresInMinutes?: string;
   originDomain: string;
   subject: string;
 }

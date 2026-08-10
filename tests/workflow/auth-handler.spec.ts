@@ -106,7 +106,7 @@ describe("AuthWorkflowHandler", () => {
       { label: "single device, otp type", devices: 1, authType: "verification" as const, code: "123456", domain: "noreply@github.com", expectedOrigin: "github.com" },
       { label: "multiple devices, magic_link type", devices: 3, authType: "verification" as const, code: "ABC-DEF", domain: "security@accounts.google.com", expectedOrigin: "google.com" },
       { label: "subdomain sender", devices: 1, authType: "two_factor" as const, code: "9999", domain: "no-reply@auth.stripe.com", expectedOrigin: "stripe.com" },
-      { label: "with expiresInMinutes", devices: 2, authType: "verification" as const, code: "000000", domain: "noreply@example.co.uk", expectedOrigin: "example.co.uk", expiresInMinutes: 5 },
+      { label: "with expiresInMinutes", devices: 2, authType: "verification" as const, code: "000000", domain: "noreply@example.co.uk", expectedOrigin: "example.co.uk", expiresInMinutes: "5" },
     ])("delivers correct OTP payload — $label", async ({ devices, authType, code, domain, expectedOrigin, expiresInMinutes }) => {
       const deviceList = Array.from({ length: devices }, (_, i) => makeDevice(`token-${i}`));
       vi.mocked(mocks.deviceStore.listDevices).mockResolvedValue(ok(deviceList));

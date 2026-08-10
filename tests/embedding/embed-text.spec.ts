@@ -364,7 +364,7 @@ describe("buildEmbedText (classification output)", () => {
     it("includes numeric fields as string values", () => {
       const classification: ClassificationOutput = {
         workflow: "auth",
-        workflowData: { workflow: "auth", authType: "verification", service: "Slack", expiresInMinutes: 10 },
+        workflowData: { workflow: "auth", authType: "verification", service: "Slack", expiresInMinutes: "10" },
         tags: [],
         summary: "Slack verification code expiring in 10 minutes",
         labels: [],
