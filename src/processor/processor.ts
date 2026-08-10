@@ -1042,7 +1042,7 @@ export class SignalProcessor {
       domainsResult.value.some(d => getETLD1(d.domain) === fromETLD1);
     if (isTestEmail) {
       classificationOutput.workflow = "test";
-      classificationOutput.workflowData = { workflow: "test", triggeredBy: "user" };
+      classificationOutput.workflowData = { workflow: "test" };
 
       // Auto-mark onboarding testEmailReceived if not yet completed
       if (!onboardingCompleted) {

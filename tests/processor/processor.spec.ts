@@ -1086,7 +1086,7 @@ describe("SignalProcessor", () => {
     });
 
     it("uses senderETLD1 grouping for test workflow", () => {
-      expect(deriveGroupingKey("test", { workflow: "test", triggeredBy: "user" }, "me@example.com", "mydomain.com"))
+      expect(deriveGroupingKey("test", { workflow: "test" }, "me@example.com", "mydomain.com"))
         .toBe("me@example.com:test:mydomain.com");
     });
 
@@ -1163,7 +1163,7 @@ describe("SignalProcessor", () => {
     });
 
     it("test is always high (user is actively waiting for inbox confirmation)", () => {
-      expect(baseUrgency("test", { workflow: "test", triggeredBy: "user" })).toBe("high");
+      expect(baseUrgency("test", { workflow: "test" })).toBe("high");
     });
 
     it("support falls through to normal (urgency handled by system rules SR-10–SR-14)", () => {
@@ -1365,7 +1365,7 @@ describe("SignalProcessor", () => {
 
       const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.data.workflow).toBe("test");
-      expect(signal.data.workflowData).toMatchObject({ workflow: "test", triggeredBy: "user" });
+      expect(signal.data.workflowData).toMatchObject({ workflow: "test" });
     });
 
     it("does not override workflow when the from-domain is not owned by the account", async () => {
@@ -1585,7 +1585,7 @@ describe("SignalProcessor", () => {
 
   const testClassification: ClassificationOutput = {
     workflow: "test",
-    workflowData: { workflow: "test", triggeredBy: "user" },
+    workflowData: { workflow: "test" },
     tags: [],
     summary: "Test email from account owner.",
     labels: [],

@@ -352,12 +352,7 @@ export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
   {
     name: "test",
     description: "Emails sent by the account owner to their own domain — triggers pong",
-    fields: [
-      { name: "triggeredBy", type: "enum", required: true, enumValues: [
-        e("user", "sent manually by the account owner"),
-        e("system", "generated automatically by the platform"),
-      ] },
-    ],
+    fields: [],
     classifierAssignable: false,
   },
   {

@@ -74,7 +74,7 @@ describe("processSideEffect — correlation context", () => {
         headers: {},
         recipientAddress: "user@example.com",
         workflow: "test",
-        workflowData: { workflow: "test", triggeredBy: "user" },
+        workflowData: { workflow: "test" },
         tags: [],
         summary: "A test email.",
         s3Key: "emails/corr-msg",

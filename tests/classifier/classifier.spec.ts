@@ -637,7 +637,7 @@ describe("SignalClassifier", () => {
     it("classifies unambiguous test content as the test workflow", async () => {
       mockClassifyResponse({
         workflow: "test",
-        workflowData: { workflow: "test", triggeredBy: "user" },
+        workflowData: { workflow: "test" },
         tags: [],
         summary: "User sent a test email to verify inbox delivery.",
         labels: [],
@@ -657,7 +657,7 @@ describe("SignalClassifier", () => {
       expect(result.isOk()).toBe(true);
       const output = result._unsafeUnwrap();
       expect(output.workflow).toBe("test");
-      expect(output.workflowData).toMatchObject({ triggeredBy: "user" });
+      expect(output.workflowData).toMatchObject({ workflow: "test" });
       expect(output.tags).toEqual([]);
     });
   });
