@@ -432,7 +432,7 @@ export class JmapAdapter implements ProviderAdapter {
       }
 
       // Do one queryChanges sync now
-      await this.doQueryChangesSync(session.apiUrl, auth, jmapAccountId, jmapConfig.inboxId, emx);
+      await this.performQueryChanges(session.apiUrl, auth, jmapAccountId, jmapConfig.inboxId, emx);
       return "handled";
     }
 
@@ -466,7 +466,7 @@ export class JmapAdapter implements ProviderAdapter {
         this.logger.warn("Failed to renew push subscription timing", { code: "jmap.push.renew_failed", emxId: emx.id, error: renewResult.error });
       }
 
-      await this.doQueryChangesSync(session.apiUrl, auth, jmapAccountId, jmapConfig.inboxId, emx);
+      await this.performQueryChanges(session.apiUrl, auth, jmapAccountId, jmapConfig.inboxId, emx);
       return "handled";
     }
 
@@ -474,10 +474,10 @@ export class JmapAdapter implements ProviderAdapter {
   }
 
   // ---------------------------------------------------------------------------
-  // Private: perform a queryChanges sync cycle (shared between push and polling paths)
+  // Private: perform a queryChanges cycle (shared between push and polling paths)
   // ---------------------------------------------------------------------------
 
-  private async doQueryChangesSync(apiUrl: string, auth: string, jmapAccountId: string, inboxId: string, emx: ExternalMailExchange): Promise<void> {
+  private async performQueryChanges(apiUrl: string, auth: string, jmapAccountId: string, inboxId: string, emx: ExternalMailExchange): Promise<void> {
     const sinceQueryState = emx.syncCursor!;
     const queryChangesResult = await jmapCall(apiUrl, auth, JMAP_USING, [
       ["Email/queryChanges", {

@@ -106,7 +106,7 @@ describe("JMAP push subscription registration", () => {
       methodResponses: [["PushSubscription/set", { created: { push0: { id: "new-push-id" } } }, "ps0"]],
     }), { status: 200 }));
 
-    // 3. Email/queryChanges (doQueryChangesSync)
+    // 3. Email/queryChanges (performQueryChanges)
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       methodResponses: [["Email/queryChanges", { added: [], newQueryState: "state-456" }, "qc0"]],
     }), { status: 200 }));
@@ -242,7 +242,7 @@ describe("JMAP push subscription registration", () => {
       methodResponses: [["PushSubscription/get", { list: [{ id: "existing-push-id" }], notFound: [] }, "pg0"]],
     }), { status: 200 }));
 
-    // 3. Email/queryChanges (doQueryChangesSync)
+    // 3. Email/queryChanges (performQueryChanges)
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
       methodResponses: [["Email/queryChanges", { added: [], newQueryState: "state-renewed" }, "qc0"]],
     }), { status: 200 }));
