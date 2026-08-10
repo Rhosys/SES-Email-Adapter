@@ -1646,7 +1646,7 @@ export class AccountDatabase {
     }
   }
 
-  async updateExternalExchange(accountId: string, emxId: string, fields: Partial<Pick<ExternalMailExchange, "status" | "syncCursor" | "expiresAt" | "lastSyncAt" | "nextSyncTime" | "providerSubscriptionId" | "pushSubscriptionId" | "userId" | "connectionUserId" | "connectionId" | "encryptionCertificateId" | "consecutiveFailures">> & { errorReason?: string | undefined }): Promise<Result<ExternalMailExchange, DbError>> {
+  async updateExternalExchange(accountId: string, emxId: string, fields: Partial<Pick<ExternalMailExchange, "status" | "syncCursor" | "expiresAt" | "lastSyncAt" | "nextSyncTime" | "userId" | "connectionUserId" | "connectionId" | "consecutiveFailures">> & { errorReason?: string | undefined; pushSubscriptionId?: string | undefined; providerSubscriptionId?: string | undefined; encryptionCertificateId?: string | undefined }): Promise<Result<ExternalMailExchange, DbError>> {
     const now = DateTime.utc().toISO()!;
     const names: Record<string, string> = { "#updatedAt": "updatedAt" };
     const values: Record<string, unknown> = { ":updatedAt": now };
