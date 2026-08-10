@@ -5,6 +5,7 @@ import type { SqsMessageType } from "../types/index.js"
 import type { Logger } from "../logger.js"
 
 const QUEUE_URL = process.env["SIGNAL_QUEUE_URL"]!
+const LONG_POLLER_QUEUE_URL = process.env["LONG_POLLER_QUEUE_URL"]!
 
 const sqs = new SQSClient({})
 
@@ -32,6 +33,22 @@ export class SignalQueue {
       return ok(undefined)
     } catch (e) {
       this.logger.warn("SignalQueue: send failed", { code: "signal_queue.send_failed", messageType, error: e })
+      return err(dbError(e))
+    }
+  }
+
+  async sendToLongPoller(messageType: SqsMessageType, payload: unknown): Promise<Result<void, DbError>> {
+    try {
+      await sqs.send(new SendMessageCommand({
+        QueueUrl: LONG_POLLER_QUEUE_URL,
+        MessageBody: JSON.stringify(payload),
+        MessageAttributes: {
+          messageType: { DataType: "String", StringValue: messageType },
+        },
+      }))
+      return ok(undefined)
+    } catch (e) {
+      this.logger.warn("SignalQueue: sendToLongPoller failed", { code: "signal_queue.send_long_poller_failed", messageType, error: e })
       return err(dbError(e))
     }
   }
