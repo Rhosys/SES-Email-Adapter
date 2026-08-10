@@ -102,6 +102,7 @@ const EXPECTED_ROUTES = [
   "GET /accounts/{accountId}/external-exchanges/{emxId}",
   "PATCH /accounts/{accountId}/external-exchanges/{emxId}",
   "DELETE /accounts/{accountId}/external-exchanges/{emxId}",
+  "POST /external-exchanges/{platform}/target",
 ] as const;
 
 describe("Route Registry", () => {

@@ -29,6 +29,7 @@ import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js"
 import type { EncryptionManager } from "../secrets/encryption-manager.js";
 import type { SignalQueue } from "../messaging/signal-queue.js";
 
+import { timingSafeEqual } from "node:crypto";
 import { WellKnownApi } from "./wellKnownApi.js";
 import { AccountsApi } from "./accountsApi.js";
 
@@ -44,6 +45,7 @@ import type { HealthCheckValidatorPort } from "./adminApi.js";
 import { UnsubscribeApi } from "./unsubscribeApi.js";
 import type { UnsubscribeTokenGenerator } from "../email/unsubscribe-token-generator.js";
 import { ExternalExchangesApi } from "./externalExchangesApi.js";
+import { buildBasicAuth, fetchSession, jmapCall, JMAP_USING } from "../external-exchanges/jmap-adapter.js";
 import { ThreadsApi } from "./threadsApi.js";
 import { ResourcesApi } from "./resourcesApi.js";
 import { SignalsApi } from "./signalsApi.js";
@@ -264,6 +266,106 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
   app.use("*", authorizationGuard(logger));
 
   // -------------------------------------------------------------------------
+  // JMAP push webhook handler (public — verified by HMAC token)
+  // -------------------------------------------------------------------------
+  async function handleJmapWebhook(c: Context<AppEnv>): Promise<Response> {
+    const token = c.req.query("token");
+
+    let body: Record<string, unknown>;
+    try {
+      body = await c.req.json() as Record<string, unknown>;
+    } catch {
+      return c.json({ title: "Bad Request" }, 400);
+    }
+
+    const type = body["@type"] as string | undefined;
+    const deviceClientId = body["deviceClientId"] as string | undefined;
+
+    if (!deviceClientId || !token) {
+      logger.track("JMAP webhook: missing deviceClientId or token", { code: "emx.jmap.webhook.missing_params" });
+      return c.json({}, 200);
+    }
+
+    // Look up EMX by deviceClientId (= emxId) — scan all active exchanges
+    const allResult = await accountDb.listExpiringExchanges("9999-12-31T23:59:59Z");
+    if (allResult.isErr()) {
+      logger.error("JMAP webhook: DB query failed", { code: "emx.jmap.webhook.db_error", error: allResult.error });
+      return c.json({}, 200);
+    }
+
+    const emx = allResult.value.find(e => e.id === deviceClientId && e.platform === "jmap");
+    if (!emx) {
+      logger.track("JMAP webhook: unknown deviceClientId", { code: "emx.jmap.webhook.unknown_device", deviceClientId });
+      return c.json({}, 200);
+    }
+
+    // Validate HMAC — timing-safe comparison
+    const expectedToken = encryptionManager.hash(emx.id);
+    const tokenBuf = Buffer.from(token);
+    const expectedBuf = Buffer.from(expectedToken);
+    if (tokenBuf.length !== expectedBuf.length || !timingSafeEqual(tokenBuf, expectedBuf)) {
+      logger.track("JMAP webhook: invalid HMAC token", { code: "emx.jmap.webhook.invalid_hmac", emxId: emx.id });
+      return c.json({}, 200);
+    }
+
+    if (emx.status !== "active") {
+      logger.track("JMAP webhook: exchange no longer active", { code: "emx.jmap.webhook.inactive_exchange", emxId: emx.id, status: emx.status });
+      return c.json({}, 200);
+    }
+
+    if (type === "PushVerification") {
+      const verificationCode = body["verificationCode"] as string | undefined;
+      if (!verificationCode || !emx.pushSubscriptionId) {
+        return c.json({}, 200);
+      }
+
+      // Decrypt password and call PushSubscription/set to confirm verification
+      const jmapConfig = emx.jmapConfig;
+      if (!jmapConfig) {
+        return c.json({}, 200);
+      }
+
+      let password: string;
+      try {
+        password = encryptionManager.decrypt(jmapConfig.encryptedPassword);
+      } catch (e) {
+        logger.error("JMAP webhook: failed to decrypt password for verification", { code: "emx.jmap.webhook.decrypt_failed", emxId: emx.id, error: e });
+        return c.json({}, 200);
+      }
+
+      const auth = buildBasicAuth(jmapConfig.username, password);
+      const sessionResult = await fetchSession(jmapConfig.sessionUrl, auth, 30_000);
+      if (sessionResult.isErr()) {
+        logger.warn("JMAP webhook: failed to fetch session for verification", { code: "emx.jmap.webhook.session_failed", emxId: emx.id, cause: sessionResult.error.cause });
+        return c.json({}, 200);
+      }
+
+      const confirmResult = await jmapCall(sessionResult.value.apiUrl, auth, JMAP_USING, [
+        ["PushSubscription/set", {
+          update: { [emx.pushSubscriptionId]: { verificationCode } },
+        }, "pv0"],
+      ], 30_000);
+
+      if (confirmResult.isErr()) {
+        logger.warn("JMAP webhook: PushSubscription/set verification failed", { code: "emx.jmap.webhook.verify_failed", emxId: emx.id, cause: confirmResult.error.cause });
+      }
+
+      return c.json({}, 200);
+    }
+
+    if (type === "StateChange") {
+      const enqueueResult = await signalQueue.send("emx_dispatch", { emxId: emx.id, accountId: emx.accountId });
+      if (enqueueResult.isErr()) {
+        logger.error("JMAP webhook: failed to enqueue emx_dispatch", { code: "emx.jmap.webhook.enqueue_failed", emxId: emx.id, error: enqueueResult.error });
+      }
+      return c.json({}, 200);
+    }
+
+    // Unknown @type — accept silently
+    return c.json({}, 200);
+  }
+
+  // -------------------------------------------------------------------------
   // Webhook routes (public — provider-verified at application layer)
   // -------------------------------------------------------------------------
   if (gmailProvider && outlookProvider) {
@@ -271,6 +373,13 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
       const platform = c.req.param("platform");
       if (platform === "gmail") return gmailProvider.handle(c);
       if (platform === "outlook") return outlookProvider.handle(c);
+      if (platform === "jmap") return handleJmapWebhook(c);
+      return c.json({ title: "Not Found" }, 404);
+    });
+  } else {
+    app.post("/external-exchanges/:platform/target", async (c) => {
+      const platform = c.req.param("platform");
+      if (platform === "jmap") return handleJmapWebhook(c);
       return c.json({ title: "Not Found" }, 404);
     });
   }
