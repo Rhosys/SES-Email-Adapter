@@ -23,6 +23,7 @@ function makeInput(overrides: Partial<ClassificationInput>): ClassificationInput
     receivedAt: "2025-01-15T10:00:00Z",
     headers: {},
     allowedLabels: [],
+    labelInstructions: {},
     signalId: "sgn-integration-test",
     accountId: "acc-integration-test",
     ...overrides,

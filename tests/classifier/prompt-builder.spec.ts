@@ -50,6 +50,7 @@ describe("buildUserMessage", () => {
     receivedAt: "2025-01-15T10:00:00Z",
     headers: {},
     allowedLabels: ["billing", "urgent"],
+    labelInstructions: {},
   };
 
   it("wraps content in <email_content> delimiters", () => {

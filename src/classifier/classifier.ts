@@ -26,6 +26,7 @@ export interface ClassificationInput {
   receivedAt: string;
   headers: Record<string, string>;
   allowedLabels: string[];
+  labelInstructions: Record<string, string>;
   signalId?: string;
   accountId?: string;
 }

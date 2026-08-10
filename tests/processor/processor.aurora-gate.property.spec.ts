@@ -141,6 +141,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
     return {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)),
     };
   }
 
@@ -374,6 +375,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
     return {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)),
     };
   }
 
@@ -653,6 +655,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
     return {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)),
     };
   }
 
@@ -937,6 +940,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
     return {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)),
     };
   }
 

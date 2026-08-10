@@ -291,6 +291,7 @@ export function toApiLabel(label: DbLabel): Api.Label {
   return {
     label: label.id,
     name: label.name,
+    applyInstruction: label.applyInstruction,
     ...(label.color ? { color: label.color } : {}),
     ...(label.icon ? { icon: label.icon } : {}),
     createdAt: label.createdAt,

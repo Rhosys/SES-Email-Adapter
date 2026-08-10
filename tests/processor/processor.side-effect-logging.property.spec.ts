@@ -109,7 +109,7 @@ describe("Side effect caller logging", () => {
   }
 
   function makeThreadMatcher(): ThreadMatcherPort {
-    return { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
+    return { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)) };
   }
 
   function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit<Signal, "data">> = {}): Signal {

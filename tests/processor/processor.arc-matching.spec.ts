@@ -188,7 +188,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
       classifier: overrides.classifier ?? makeConversationClassifier(),
       embeddingGenerator: makeEmbeddingGenerator(),
       auroraWriter: overrides.auroraWriter ?? makeAuroraWriter(),
-      threadMatcher: overrides.threadMatcher ?? { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as ThreadMatcherPort,
+      threadMatcher: overrides.threadMatcher ?? { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)) } as ThreadMatcherPort,
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
@@ -216,7 +216,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
       threadDb,
       classifier: makeNoticeClassifier(),
       contentSanitizer: makeContentSanitizer(),
-      threadMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(SAME_ARC))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as ThreadMatcherPort,
+      threadMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(SAME_ARC))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)) } as ThreadMatcherPort,
     });
 
     const result = await processor.processInbound(makeMessage("msg-all-agree"), 1);
@@ -297,7 +297,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     const processor = buildProcessor({
       classifier: makeConversationClassifier(),
       contentSanitizer: makeContentSanitizer({ inReplyTo: null }),
-      threadMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(TIER2_ARC))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as ThreadMatcherPort,
+      threadMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(TIER2_ARC))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)) } as ThreadMatcherPort,
     });
 
     const result = await processor.processInbound(makeMessage("msg-tier2-only"), 1);

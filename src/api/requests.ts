@@ -121,6 +121,7 @@ export const CreateLabelRequest = z.object({
   name: z.string(),
   color: z.string().optional(),
   icon: z.string().optional(),
+  applyInstruction: z.string(),
 });
 export type CreateLabelRequest = z.infer<typeof CreateLabelRequest>;
 
@@ -128,6 +129,7 @@ export const UpdateLabelRequest = z.object({
   name: z.string().optional(),
   color: z.string().optional(),
   icon: z.string().optional(),
+  applyInstruction: z.string().optional(),
 });
 export type UpdateLabelRequest = z.infer<typeof UpdateLabelRequest>;
 

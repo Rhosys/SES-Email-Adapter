@@ -432,6 +432,27 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
       return err(dbError(e));
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Delete all embeddings for a thread — used when reprocessing empties a thread
+  // ---------------------------------------------------------------------------
+
+  async deleteEmbeddingsForThread(accountId: string, threadId: string): Promise<Result<void, DbError>> {
+    const cluster = getPrimaryThreadMatcherRegistry();
+    const db = getDbForCluster(cluster);
+
+    try {
+      await withRetry(async () => {
+        await db.delete(threadEmbeddings).where(and(
+          eq(threadEmbeddings.threadId, threadId),
+          eq(threadEmbeddings.accountId, accountId),
+        ));
+      }, this.logger, "deleteEmbeddingsForThread");
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

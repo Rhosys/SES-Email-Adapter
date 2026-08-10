@@ -109,6 +109,7 @@ describe("long email handling — tl;dr sec newsletter (~128 KB)", () => {
         headers: parsed.headers,
         receivedAt: "2026-07-02T19:25:30Z",
         allowedLabels: [],
+        labelInstructions: {},
       });
 
       expect(userMessage).toContain("[... truncated]");

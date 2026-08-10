@@ -127,7 +127,7 @@ function makeProcessor(opts: {
     classifier: { classify: vi.fn() },
     embeddingGenerator: { generateForModel: vi.fn(), generateForSecondaryClusters: vi.fn() } as unknown as EmbeddingGenerator,
     auroraWriter: { upsertEmbedding: vi.fn(), findMatch: vi.fn() } as unknown as MultiClusterAuroraWriter,
-    threadMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+    threadMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)) },
     ruleEvaluator: makeRuleEvaluator3(logger),
     logger,
     notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

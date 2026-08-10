@@ -72,6 +72,7 @@ export interface SqsDispatcher {
 export interface ThreadMatcherPort {
   findMatch(accountId: string, recipientAddress: string, embedding: number[]): Promise<Result<Thread | null, DbError>>;
   upsertEmbedding(threadId: string, embedding: number[], accountId: string, recipientAddress: string, signalId: string): Promise<Result<void, DbError>>;
+  deleteEmbeddingsForThread(accountId: string, threadId: string): Promise<Result<void, DbError>>;
 }
 
 export interface RuleEvaluator {
@@ -977,6 +978,12 @@ export class SignalProcessor {
     // 3. Fetch account labels for closed-set label selection
     const labelsResult = await this.accountDb.listLabels(accountId);
     const allowedLabels = labelsResult.isOk() ? labelsResult.value.map(l => l.name) : [];
+    const labelInstructions: Record<string, string> = {};
+    if (labelsResult.isOk()) {
+      for (const label of labelsResult.value) {
+        labelInstructions[label.name] = label.applyInstruction;
+      }
+    }
 
     // 4. Classify email (must complete before embedding — sequential dependency)
     const classificationHeaders: Record<string, string> = {};
@@ -991,6 +998,7 @@ export class SignalProcessor {
       headers: classificationHeaders,
       receivedAt: timestamp,
       allowedLabels,
+      labelInstructions,
       signalId: msg.compositeMailMessageId,
       accountId,
     });
@@ -1746,6 +1754,29 @@ export class SignalProcessor {
     const compositeMailMessageId = existing.signalLookupId;
     const recipientAddress = existing.data.recipientAddress;
     const timestamp = existing.data.receivedAt ?? existing.createdAt;
+
+    // Pre-process cleanup: if this is the only signal on the source thread, the thread
+    // will be empty after reprocessing moves it. Delete embeddings from Aurora (prevents
+    // future vector matches to an empty thread) and set a 5-year TTL if absent.
+    const otherSignalsResult = await this.threadDb.listSignals(accountId, threadId, { limit: 2 });
+    if (otherSignalsResult.isOk()) {
+      const otherSignals = otherSignalsResult.value.items.filter(s => s.id !== signalId);
+      if (otherSignals.length === 0) {
+        const deleteEmbResult = await this.threadMatcher.deleteEmbeddingsForThread(accountId, threadId);
+        if (deleteEmbResult.isErr()) {
+          this.logger.warn("Failed to delete embeddings for thread being emptied by reprocess.", { code: "processor.reprocess.pre_embedding_cleanup_failed", accountId, threadId, error: deleteEmbResult.error });
+        }
+
+        const threadResult = await this.threadDb.getThread(accountId, threadId);
+        if (threadResult.isOk() && threadResult.value && !threadResult.value.ttl) {
+          const fiveYearsTtl = Math.floor(Date.now() / 1000) + (5 * 365 * 24 * 60 * 60);
+          const ttlResult = await this.threadDb.setThreadTtl(accountId, threadId, fiveYearsTtl);
+          if (ttlResult.isErr()) {
+            this.logger.warn("Failed to set 5-year TTL on thread being emptied by reprocess.", { code: "processor.reprocess.pre_ttl_set_failed", accountId, threadId, error: ttlResult.error });
+          }
+        }
+      }
+    }
 
     // Pass the admin-supplied accountId as expectedAccountId only — processMessage
     // re-derives the owning account from the recipient address (and tracks a mismatch).

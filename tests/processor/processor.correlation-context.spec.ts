@@ -112,7 +112,7 @@ describe("processSideEffect — correlation context", () => {
       classifier: { classify: vi.fn() },
       embeddingGenerator: { generateForModel: vi.fn(), generateForSecondaryClusters: vi.fn() } as unknown as EmbeddingGenerator,
       auroraWriter: { upsertEmbedding: vi.fn(), findMatch: vi.fn() } as unknown as MultiClusterAuroraWriter,
-      threadMatcher: { findMatch: vi.fn(), upsertEmbedding: vi.fn() } as unknown as ThreadMatcherPort,
+      threadMatcher: { findMatch: vi.fn(), upsertEmbedding: vi.fn(), deleteEmbeddingsForThread: vi.fn() } as unknown as ThreadMatcherPort,
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       forwardingService: opts.forwardingService,

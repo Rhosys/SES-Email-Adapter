@@ -126,6 +126,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     threadMatcher: {
       findMatch: async () => ok(null),
       upsertEmbedding: async () => ok(undefined),
+      deleteEmbeddingsForThread: async () => ok(undefined),
     },
     ruleEvaluator: new JsonLogicRuleEvaluator(logger, { invoke: async () => ({ success: true, result: undefined }) as never, validateAst: async () => ({ success: true }) as never, validateAstBatch: async () => ({ success: true }) as never } as unknown as UserCodeExecutorClient, { annotateRuleError: async () => ok(undefined) }),
     notifier: { notify: async () => ok(undefined) },

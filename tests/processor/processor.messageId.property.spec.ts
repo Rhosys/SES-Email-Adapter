@@ -89,6 +89,7 @@ describe("ProcessError on database failure", () => {
     const threadMatcher: ThreadMatcherPort = {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)),
     };
     const mockLogger = createMockLogger();
     return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),

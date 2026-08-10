@@ -256,6 +256,7 @@ function makeLabel(overrides: Partial<Label> = {}): Label {
     accountId: TEST_ACCOUNT_ID,
     name: "billing",
     color: "#ff0000",
+    applyInstruction: "Apply to emails about billing, invoices, and payment receipts",
     createdAt: "2024-01-01T00:00:00Z",
     ...overrides,
   };
@@ -758,13 +759,13 @@ describe("API", () => {
   describe("POST /accounts/:accountId/labels", () => {
     it("creates a Label and returns 201", async () => {
       vi.mocked(accountDb.createLabel).mockResolvedValueOnce(ok(makeLabel() as never));
-      const res = await req(app, "POST", `${A}/labels`, { body: { name: "urgent", color: "#ff0000" } });
+      const res = await req(app, "POST", `${A}/labels`, { body: { name: "urgent", applyInstruction: "Apply to time-sensitive emails requiring immediate action", color: "#ff0000" } });
       expect(res.status).toBe(201);
       expect(accountDb.createLabel).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.objectContaining({ name: "urgent" }));
     });
 
     it("returns 400 when name is missing", async () => {
-      const res = await req(app, "POST", `${A}/labels`, { body: { color: "#ff0000" } });
+      const res = await req(app, "POST", `${A}/labels`, { body: { applyInstruction: "test", color: "#ff0000" } });
       expect(res.status).toBe(400);
     });
   });

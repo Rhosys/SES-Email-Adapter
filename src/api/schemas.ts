@@ -272,7 +272,6 @@ export const SupportData = z.object({
 
 export const TestData = z.object({
   workflow: z.literal("test"),
-  triggeredBy: z.enum(["user", "system"]),
 }).openapi("TestData");
 
 export const WorkflowData = z.discriminatedUnion("workflow", [
@@ -585,6 +584,7 @@ export const Label = z.object({
   name: z.string(),
   color: z.string().optional(),
   icon: z.string().optional(),
+  applyInstruction: z.string(),
   createdAt: z.string().readonly(),
 }).openapi("Label");
 

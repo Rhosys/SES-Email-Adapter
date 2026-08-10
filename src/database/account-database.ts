@@ -592,7 +592,11 @@ export class AccountDatabase {
         KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
         ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "LABEL#" },
       }));
-      return ok((res.Items ?? []) as Label[]);
+      const labels = (res.Items ?? []).map((item) => ({
+        ...item,
+        applyInstruction: (item as Record<string, unknown>).applyInstruction || "",
+      })) as Label[];
+      return ok(labels);
     } catch (e) {
       return err(dbError(e));
     }
@@ -604,6 +608,7 @@ export class AccountDatabase {
       id: data.name,
       accountId,
       name: data.name,
+      applyInstruction: data.applyInstruction,
       ...(data.color !== undefined ? { color: data.color } : {}),
       ...(data.icon !== undefined ? { icon: data.icon } : {}),
       createdAt: now,

@@ -16,6 +16,7 @@ const basicInput: ClassificationInput = {
   receivedAt: "2024-01-15T10:00:00Z",
   headers: { "authentication-results": "spf=pass dkim=pass" },
   allowedLabels: [],
+  labelInstructions: {},
   signalId: "sig_abc123",
   accountId: "acc_xyz789",
 };

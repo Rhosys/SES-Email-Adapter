@@ -16,6 +16,7 @@ const baseInput: ClassificationInput = {
   receivedAt: "2024-01-15T10:00:00Z",
   headers: { "authentication-results": "spf=pass dkim=pass" },
   allowedLabels: ["billing", "urgent"],
+  labelInstructions: {},
 };
 
 // ---------------------------------------------------------------------------

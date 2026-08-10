@@ -108,6 +108,7 @@ function makeArcMatcher(): ThreadMatcherPort {
   return {
     findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)),
   };
 }
 
@@ -307,6 +308,7 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
       const threadMatcher: ThreadMatcherPort = {
         findMatch: vi.fn().mockResolvedValue(ok(existingArc)),
         upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+        deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)),
       };
 
       const processor = buildProcessor({
@@ -359,6 +361,7 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
       const threadMatcher: ThreadMatcherPort = {
         findMatch: vi.fn().mockResolvedValue(ok(existingArc)),
         upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
+        deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)),
       };
 
       const processor = buildProcessor({

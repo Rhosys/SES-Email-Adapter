@@ -77,7 +77,7 @@ describe("Single saveThread call with complete mutations", () => {
     const classification: ClassificationOutput = {
       workflow: testCase.workflow,
       workflowData: testCase.workflow === "test"
-        ? { workflow: "test", triggeredBy: "user" }
+        ? { workflow: "test" }
         : { workflow: "conversation", sentiment: "neutral", requiresReply: false },
       tags: [],
       summary: "Test signal.",
@@ -168,6 +168,7 @@ describe("Single saveThread call with complete mutations", () => {
     const threadMatcher: ThreadMatcherPort = {
       findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)),
     };
 
     let pongMessageId: string | null = null;

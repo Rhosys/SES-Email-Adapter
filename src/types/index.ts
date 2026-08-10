@@ -665,6 +665,7 @@ export interface Label {
   name: string;
   color?: string;
   icon?: string;
+  applyInstruction: string;
   createdAt: string;
 }
 

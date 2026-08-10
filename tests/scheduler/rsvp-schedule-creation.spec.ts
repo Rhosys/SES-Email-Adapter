@@ -97,6 +97,7 @@ function makeArcMatcher(): ThreadMatcherPort {
   return {
     findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)),
   };
 }
 

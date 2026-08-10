@@ -19,6 +19,7 @@ const githubOtpEmail: ClassificationInput = {
     "dkim-signature": "v=1; a=rsa-sha256; d=github.com",
   },
   allowedLabels: [],
+  labelInstructions: {},
 };
 
 const stripeInvoiceEmail: ClassificationInput = {
@@ -29,6 +30,7 @@ const stripeInvoiceEmail: ClassificationInput = {
   receivedAt: "2024-01-15T09:00:00Z",
   headers: { "authentication-results": "spf=pass dkim=pass" },
   allowedLabels: ["billing"],
+  labelInstructions: {},
 };
 
 const recruiterEmail: ClassificationInput = {
@@ -39,6 +41,7 @@ const recruiterEmail: ClassificationInput = {
   receivedAt: "2024-01-15T14:00:00Z",
   headers: { "authentication-results": "spf=pass dkim=pass" },
   allowedLabels: ["recruiting"],
+  labelInstructions: {},
 };
 
 const phishingEmail: ClassificationInput = {
@@ -49,6 +52,7 @@ const phishingEmail: ClassificationInput = {
   receivedAt: "2024-01-15T08:00:00Z",
   headers: { "authentication-results": "spf=fail dkim=fail" },
   allowedLabels: [],
+  labelInstructions: {},
 };
 
 const shippingEmail: ClassificationInput = {
@@ -59,6 +63,7 @@ const shippingEmail: ClassificationInput = {
   receivedAt: "2024-01-15T07:00:00Z",
   headers: { "authentication-results": "spf=pass dkim=pass" },
   allowedLabels: [],
+  labelInstructions: {},
 };
 
 // ---------------------------------------------------------------------------
@@ -376,6 +381,7 @@ describe("SignalClassifier", () => {
         receivedAt: "2024-01-15T10:00:00Z",
         headers: {},
         allowedLabels: [],
+        labelInstructions: {},
       });
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
@@ -404,6 +410,7 @@ describe("SignalClassifier", () => {
           "received-spf": "pass",
         },
         allowedLabels: [],
+        labelInstructions: {},
       });
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
@@ -430,6 +437,7 @@ describe("SignalClassifier", () => {
         receivedAt: "2024-01-15T10:00:00Z",
         headers: {},
         allowedLabels: [],
+        labelInstructions: {},
       });
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
@@ -454,6 +462,7 @@ describe("SignalClassifier", () => {
         receivedAt: "2024-01-15T10:00:00Z",
         headers: {},
         allowedLabels: [],
+        labelInstructions: {},
       });
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
@@ -490,6 +499,7 @@ describe("SignalClassifier", () => {
         receivedAt: "2024-01-15T10:00:00Z",
         headers: {},
         allowedLabels: [],
+        labelInstructions: {},
       });
 
       const callArgs = mockSend.mock.calls[0]![0] as { body: Uint8Array };
@@ -529,6 +539,7 @@ describe("SignalClassifier", () => {
         receivedAt: "2024-01-15T08:00:00Z",
         headers: { "authentication-results": "spf=pass dkim=pass" },
         allowedLabels: ["urgent", "action-needed"],
+        labelInstructions: {},
       });
 
       expect(result.isOk()).toBe(true);
@@ -569,6 +580,7 @@ describe("SignalClassifier", () => {
         receivedAt: "2024-01-15T12:00:00Z",
         headers: { "authentication-results": "spf=pass dkim=pass" },
         allowedLabels: [],
+        labelInstructions: {},
       });
 
       expect(result.isOk()).toBe(true);
@@ -610,6 +622,7 @@ describe("SignalClassifier", () => {
         receivedAt: "2024-01-15T03:00:00Z",
         headers: { "authentication-results": "spf=pass dkim=pass" },
         allowedLabels: ["action-needed", "urgent"],
+        labelInstructions: {},
       });
 
       expect(result.isOk()).toBe(true);
@@ -638,6 +651,7 @@ describe("SignalClassifier", () => {
         receivedAt: "2024-01-15T10:00:00Z",
         headers: {},
         allowedLabels: [],
+        labelInstructions: {},
       });
 
       expect(result.isOk()).toBe(true);

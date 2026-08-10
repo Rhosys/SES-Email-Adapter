@@ -175,6 +175,7 @@ describe("Feature: split-embedding-pipeline, Property 2: Primary vector flows to
         return Promise.resolve(ok(null));
       }),
       upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+      deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)),
     };
 
     const embeddingGenerator: EmbeddingGenerator = {

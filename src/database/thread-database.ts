@@ -376,6 +376,21 @@ export class ThreadDatabase {
     }
   }
 
+  async setThreadTtl(accountId: string, threadId: string, ttl: number): Promise<Result<void, DbError>> {
+    try {
+      await dynamo.send(new UpdateCommand({
+        TableName: SIGNALS_TABLE,
+        Key: { pk: threadPk(accountId, threadId), sk: ITEM_SK },
+        UpdateExpression: "SET #ttl = :ttl",
+        ExpressionAttributeNames: { "#ttl": "ttl" },
+        ExpressionAttributeValues: { ":ttl": ttl },
+      }));
+      return ok(undefined);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
   async updateSignal(accountId: string, signalLookupId: string, update: Partial<Pick<OutboundEmailSignalData, "subject" | "textBody" | "from" | "to">>): Promise<Result<Signal, DbError>> {
     const now = DateTime.utc().toISO()!;
     const setParts: string[] = ["updatedAt = :now"];
