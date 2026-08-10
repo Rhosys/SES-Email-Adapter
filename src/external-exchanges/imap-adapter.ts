@@ -188,6 +188,35 @@ export class ImapConnection {
     }
   }
 
+  /**
+   * Enter IMAP IDLE on INBOX and wait for new mail (EXISTS event) or timeout.
+   * imapflow enters IDLE automatically when a mailbox lock is held and no commands are running.
+   * We listen for the 'exists' event which fires when the server sends an untagged EXISTS response.
+   */
+  async idle(timeoutMs: number): Promise<Result<"new_mail" | "timeout", ImapError>> {
+    let lock: { release: () => void } | undefined;
+    try {
+      lock = await this.client.getMailboxLock("INBOX");
+      return await new Promise<Result<"new_mail" | "timeout", ImapError>>((resolve) => {
+        const timer = setTimeout(() => {
+          this.client.removeAllListeners("exists");
+          lock!.release();
+          resolve(ok("timeout" as const));
+        }, timeoutMs);
+
+        this.client.on("exists", (_data: { path: string; count: number; prevCount: number }) => {
+          clearTimeout(timer);
+          this.client.removeAllListeners("exists");
+          lock!.release();
+          resolve(ok("new_mail" as const));
+        });
+      });
+    } catch (e) {
+      if (lock) lock.release();
+      return err(imapErr(e));
+    }
+  }
+
   async logout(): Promise<void> {
     try { await this.client.logout(); } catch { /* best-effort */ }
   }

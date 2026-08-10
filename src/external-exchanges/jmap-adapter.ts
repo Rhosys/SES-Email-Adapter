@@ -25,14 +25,16 @@ interface JmapSession {
   apiUrl: string;
   downloadUrl: string;
   primaryAccounts: Record<string, string>;
+  capabilities: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-const JMAP_USING = ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"] as const;
+export const JMAP_USING = ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"] as const;
 const MAIL_CAPABILITY = "urn:ietf:params:jmap:mail";
+const JMAP_PUSH_WEBHOOK_BASE = "https://api.email.rhosys.cloud/api/external-exchanges/jmap/target";
 
 export function buildBasicAuth(username: string, password: string): string {
   return "Basic " + Buffer.from(`${username}:${password}`).toString("base64");
@@ -78,14 +80,17 @@ export async function fetchSession(sessionUrl: string, auth: string, timeout: nu
     return err({ kind: "provider_activation_failed", cause: "server does not support JMAP Mail" });
   }
 
+  const capabilities = (session["capabilities"] as Record<string, unknown> | undefined) ?? {};
+
   return ok({
     apiUrl: session["apiUrl"] as string,
     downloadUrl: session["downloadUrl"] as string,
     primaryAccounts,
+    capabilities,
   });
 }
 
-async function jmapCall(apiUrl: string, auth: string, using: readonly string[], methodCalls: unknown[][], timeout: number): Promise<Result<unknown[][], ProviderRenewalError>> {
+export async function jmapCall(apiUrl: string, auth: string, using: readonly string[], methodCalls: unknown[][], timeout: number): Promise<Result<unknown[][], ProviderRenewalError>> {
   let response: Response;
   try {
     response = await fetch(apiUrl, {
@@ -232,6 +237,12 @@ export class JmapAdapter implements ProviderAdapter {
     const session = sessionResult.value;
     const jmapAccountId = session.primaryAccounts[MAIL_CAPABILITY]!;
 
+    // --- JMAP Push Subscription: register or verify ---
+    const pushResult = await this.handlePushSubscription(emx, session, auth, jmapAccountId);
+    if (pushResult === "handled") {
+      return ok(undefined);
+    }
+
     const sinceQueryState = emx.syncCursor!;
     const queryChangesResult = await jmapCall(session.apiUrl, auth, JMAP_USING, [
       ["Email/queryChanges", {
@@ -364,6 +375,158 @@ export class JmapAdapter implements ProviderAdapter {
 
     const rawMime = new Uint8Array(await mimeResponse.arrayBuffer());
     return ok({ rawMime, receivedAt: email.receivedAt });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: JMAP Push Subscription registration and verification (R5)
+  // ---------------------------------------------------------------------------
+
+  private async handlePushSubscription(emx: ExternalMailExchange, session: JmapSession, auth: string, jmapAccountId: string): Promise<"handled" | "fallthrough"> {
+    const jmapConfig = emx.jmapConfig!;
+    const supportsPush = Object.keys(session.capabilities).some(key => key.includes("push") || key === "urn:ietf:params:jmap:core");
+
+    // Case 1: Server supports push and no existing subscription — attempt registration
+    if (supportsPush && !emx.pushSubscriptionId) {
+      const token = this.encryptionManager.hash(emx.id);
+      const webhookUrl = `${JMAP_PUSH_WEBHOOK_BASE}?token=${token}`;
+
+      const registerResult = await jmapCall(session.apiUrl, auth, JMAP_USING, [
+        ["PushSubscription/set", {
+          create: {
+            push0: {
+              deviceClientId: emx.id,
+              url: webhookUrl,
+              types: ["Email"],
+            },
+          },
+        }, "ps0"],
+      ], 30_000);
+
+      if (registerResult.isErr()) {
+        this.logger.warn("JMAP push registration failed", { code: "jmap.push.registration_failed", emxId: emx.id, cause: registerResult.error.cause });
+        return "fallthrough";
+      }
+
+      const psResponse = registerResult.value[0] as [string, Record<string, unknown>, string] | undefined;
+      if (!psResponse || psResponse[0] === "error") {
+        const errorType = psResponse ? (psResponse[1] as { type?: string }).type : "unknown";
+        this.logger.warn("JMAP push registration failed", { code: "jmap.push.registration_failed", emxId: emx.id, cause: errorType });
+        return "fallthrough";
+      }
+
+      const created = (psResponse[1] as { created?: Record<string, { id?: string }> }).created;
+      const pushId = created?.["push0"]?.id;
+      if (!pushId) {
+        this.logger.warn("JMAP push registration failed", { code: "jmap.push.registration_failed", emxId: emx.id, cause: "no id in created response" });
+        return "fallthrough";
+      }
+
+      // Registration succeeded — store subscription ID, set nextSyncTime to +4 days
+      const updateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
+        pushSubscriptionId: pushId,
+        nextSyncTime: DateTime.utc().plus({ days: 4 }).toISO()!,
+        consecutiveFailures: 0,
+      });
+      if (updateResult.isErr()) {
+        this.logger.warn("Failed to store push subscription ID", { code: "jmap.push.store_failed", emxId: emx.id, error: updateResult.error });
+      }
+
+      // Do one queryChanges sync now
+      await this.doQueryChangesSync(session.apiUrl, auth, jmapAccountId, jmapConfig.inboxId, emx);
+      return "handled";
+    }
+
+    // Case 2: Existing pushSubscriptionId — verify still active
+    if (emx.pushSubscriptionId) {
+      const verifyResult = await jmapCall(session.apiUrl, auth, JMAP_USING, [
+        ["PushSubscription/get", { ids: [emx.pushSubscriptionId] }, "pg0"],
+      ], 30_000);
+
+      if (verifyResult.isErr()) {
+        // Cannot verify — clear subscription, fall through to polling
+        await this.db.updateExternalExchange(emx.accountId, emx.id, { pushSubscriptionId: undefined });
+        return "fallthrough";
+      }
+
+      const pgResponse = verifyResult.value[0] as [string, Record<string, unknown>, string] | undefined;
+      const notFound = pgResponse ? (pgResponse[1] as { notFound?: string[] }).notFound : undefined;
+
+      if (pgResponse && pgResponse[0] === "error" || (notFound && notFound.includes(emx.pushSubscriptionId))) {
+        // Subscription gone — clear and fall through
+        await this.db.updateExternalExchange(emx.accountId, emx.id, { pushSubscriptionId: undefined });
+        return "fallthrough";
+      }
+
+      // Subscription still active — renew nextSyncTime, do queryChanges sync
+      const renewResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
+        nextSyncTime: DateTime.utc().plus({ days: 4 }).toISO()!,
+        consecutiveFailures: 0,
+      });
+      if (renewResult.isErr()) {
+        this.logger.warn("Failed to renew push subscription timing", { code: "jmap.push.renew_failed", emxId: emx.id, error: renewResult.error });
+      }
+
+      await this.doQueryChangesSync(session.apiUrl, auth, jmapAccountId, jmapConfig.inboxId, emx);
+      return "handled";
+    }
+
+    return "fallthrough";
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private: perform a queryChanges sync cycle (shared between push and polling paths)
+  // ---------------------------------------------------------------------------
+
+  private async doQueryChangesSync(apiUrl: string, auth: string, jmapAccountId: string, inboxId: string, emx: ExternalMailExchange): Promise<void> {
+    const sinceQueryState = emx.syncCursor!;
+    const queryChangesResult = await jmapCall(apiUrl, auth, JMAP_USING, [
+      ["Email/queryChanges", {
+        accountId: jmapAccountId,
+        filter: { inMailbox: inboxId },
+        sort: [{ property: "receivedAt", isAscending: false }],
+        sinceQueryState,
+        maxChanges: 500,
+      }, "qc0"],
+    ], 30_000);
+
+    if (queryChangesResult.isErr()) {
+      this.logger.warn("JMAP push sync queryChanges failed", { code: "jmap.push.sync_failed", emxId: emx.id, cause: queryChangesResult.error.cause });
+      return;
+    }
+
+    const qcResponse = queryChangesResult.value[0] as [string, Record<string, unknown>, string] | undefined;
+    if (!qcResponse || qcResponse[0] === "error") {
+      return;
+    }
+
+    const responseData = qcResponse[1] as { added?: Array<{ id: string; index: number }>; newQueryState?: string };
+    const added = responseData.added ?? [];
+    const newQueryState = responseData.newQueryState;
+
+    if (!newQueryState) {
+      return;
+    }
+
+    if (added.length > 0) {
+      const entries = added.map((entry, i) => ({
+        id: `jmap-${i}`,
+        payload: { source: "jmap", providerMessageId: entry.id, emxId: emx.id, accountId: emx.accountId },
+      }));
+      const batchResult = await this.signalQueue.sendBatch("emx_inbound", entries);
+      if (batchResult.isErr()) {
+        this.logger.error("JMAP push sync: failed to enqueue emx_inbound batch", { code: "jmap.push.batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
+      }
+    }
+
+    const cursorResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
+      syncCursor: newQueryState,
+      lastSyncAt: DateTime.utc().toISO()!,
+    });
+    if (cursorResult.isErr()) {
+      this.logger.warn("Failed to update JMAP push sync cursor", { code: "jmap.push.cursor_update_failed", emxId: emx.id, error: cursorResult.error });
+    }
+
+    this.logger.info("JMAP push sync complete", { code: "jmap.push.synced", emxId: emx.id, newMessages: added.length, newQueryState });
   }
 
   // ---------------------------------------------------------------------------
