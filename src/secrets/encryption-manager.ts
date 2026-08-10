@@ -1,7 +1,12 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 import { KMSClient, DecryptCommand } from "@aws-sdk/client-kms";
 import encryptionSecret from "./encryption.kms.json" with { type: "json" };
 
+/**
+ * Owns the KMS-derived encryption key. All cryptographic operations (encrypt, decrypt, hash)
+ * are exposed as methods — the key material MUST NEVER be exported, returned, or made
+ * accessible to other classes. Callers pass data in, get results out.
+ */
 export class EncryptionManager {
   private key: Buffer | null = null;
 
@@ -38,5 +43,10 @@ export class EncryptionManager {
     const decipher = createDecipheriv("aes-256-gcm", this.key!, iv, { authTagLength: 16 });
     decipher.setAuthTag(authTag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf-8");
+  }
+
+  /** HMAC-SHA256 keyed hash — returns base64url (no padding). */
+  hash(data: string): string {
+    return createHmac("sha256", this.key!).update(data).digest("base64url");
   }
 }

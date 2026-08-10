@@ -160,13 +160,19 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Sid      = "SQSSend"
         Effect   = "Allow"
         Action   = ["sqs:SendMessage"]
-        Resource = aws_sqs_queue.signals.arn
+        Resource = [
+          aws_sqs_queue.signals.arn,
+          aws_sqs_queue.long_poller.arn,
+        ]
       },
       {
         Sid      = "SQSConsume"
         Effect   = "Allow"
         Action   = ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"]
-        Resource = aws_sqs_queue.signals.arn
+        Resource = [
+          aws_sqs_queue.signals.arn,
+          aws_sqs_queue.long_poller.arn,
+        ]
       },
       {
         Sid      = "StepFunctionsStart"
@@ -268,6 +274,7 @@ resource "aws_lambda_function" "main" {
       WS_API_ENDPOINT          = "https://wss.${data.aws_route53_zone.main.name}"
       CF_ORIGIN_SECRET         = random_password.cf_origin_secret.result
       SIGNAL_QUEUE_URL         = aws_sqs_queue.signals.url
+      LONG_POLLER_QUEUE_URL    = aws_sqs_queue.long_poller.url
       MAIL_DOMAIN              = "platform.${data.aws_route53_zone.main.name}"
       DKIM_PRIVATE_KEY         = data.aws_kms_secrets.dkim.plaintext["private_key"]
       # Pass only the name — the Lambda constructs the ARN at runtime from

@@ -204,7 +204,7 @@ export class JmapAdapter implements ProviderAdapter {
 
     return ok({
       syncCursor: queryState,
-      expiresAt: DateTime.utc().plus({ hours: 1 }).toISO()!,
+      expiresAt: DateTime.utc().plus({ minutes: 15 }).toISO()!,
       providerSubscriptionId: "poll",
       emailAddress: jmapConfig.username,
     });
@@ -282,7 +282,7 @@ export class JmapAdapter implements ProviderAdapter {
     const cursorResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
       syncCursor: newQueryState,
       lastSyncAt: DateTime.utc().toISO()!,
-      nextSyncTime: DateTime.utc().plus({ hours: 1 }).toISO()!,
+      nextSyncTime: DateTime.utc().plus({ minutes: 15 }).toISO()!,
       consecutiveFailures: 0,
     });
     if (cursorResult.isErr()) { this.logger.warn("Failed to update JMAP sync cursor", { code: "jmap.renew.cursor_update_failed", emxId: emx.id, error: cursorResult.error }); }
@@ -427,7 +427,7 @@ export class JmapAdapter implements ProviderAdapter {
     const fallbackCursorResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
       syncCursor: newQueryState,
       lastSyncAt: DateTime.utc().toISO()!,
-      nextSyncTime: DateTime.utc().plus({ hours: 1 }).toISO()!,
+      nextSyncTime: DateTime.utc().plus({ minutes: 15 }).toISO()!,
       consecutiveFailures: 0,
     });
     if (fallbackCursorResult.isErr()) { this.logger.warn("Failed to update JMAP fallback sync cursor", { code: "jmap.renew.fallback_cursor_update_failed", emxId: emx.id, error: fallbackCursorResult.error }); }

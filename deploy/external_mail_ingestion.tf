@@ -11,36 +11,26 @@
 # }
 
 # ---------------------------------------------------------------------------
-# Hourly dispatcher — renews expiring provider subscriptions + catch-up sync
+# EMX dispatch — renews expiring provider subscriptions + catch-up sync
 # ---------------------------------------------------------------------------
 
-# resource "aws_cloudwatch_event_rule" "emx_dispatch" {
-#   name                = "${var.service_name}-emx-dispatch"
-#   description         = "Hourly EMX subscription renewal and catch-up sync"
-#   schedule_expression = "rate(1 hour)"
-# }
+resource "aws_scheduler_schedule" "emx_dispatch" {
+  name       = "${var.service_name}-emx-dispatch"
+  group_name = "default"
 
-# resource "aws_cloudwatch_event_target" "emx_dispatch_sqs" {
-#   rule = aws_cloudwatch_event_rule.emx_dispatch.name
-#   arn  = aws_sqs_queue.main.arn
-#
-#   input = jsonencode({
-#     messageType = "emx_dispatch"
-#   })
-# }
+  flexible_time_window {
+    mode = "OFF"
+  }
 
-# resource "aws_sqs_queue_policy" "emx_dispatch_eventbridge" {
-#   queue_url = aws_sqs_queue.main.id
-#   policy = jsonencode({
-#     Version = "2012-10-17"
-#     Statement = [{
-#       Effect    = "Allow"
-#       Principal = { Service = "events.amazonaws.com" }
-#       Action    = "sqs:SendMessage"
-#       Resource  = aws_sqs_queue.main.arn
-#       Condition = {
-#         ArnEquals = { "aws:SourceArn" = aws_cloudwatch_event_rule.emx_dispatch.arn }
-#       }
-#     }]
-#   })
-# }
+  schedule_expression          = "rate(15 minutes)"
+  schedule_expression_timezone = "UTC"
+
+  target {
+    arn      = aws_sqs_queue.signals.arn
+    role_arn = aws_iam_role.scheduler_sqs.arn
+
+    input = jsonencode({
+      sqsMessageAttributeMessageType = "emx_dispatch"
+    })
+  }
+}

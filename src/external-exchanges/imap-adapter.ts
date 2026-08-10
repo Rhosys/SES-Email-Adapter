@@ -259,7 +259,7 @@ export class ImapAdapter implements ProviderAdapter {
     const { uidvalidity, uidNext } = stateResult.value;
     const lastUid = uidNext > 1 ? uidNext - 1 : 0;
     const syncCursor = formatSyncCursor(uidvalidity, lastUid);
-    const expiresAt = DateTime.utc().plus({ hours: 1 }).toISO()!;
+    const expiresAt = DateTime.utc().plus({ minutes: 15 }).toISO()!;
     this.logger.info("IMAP activation succeeded", { code: "imap.activate.success", host: imapConfig.host, username: imapConfig.username, uidvalidity, lastUid });
     return ok({ syncCursor, expiresAt, providerSubscriptionId: "poll", emailAddress: imapConfig.username });
   }
@@ -331,7 +331,7 @@ export class ImapAdapter implements ProviderAdapter {
       const cursorUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
         syncCursor: formatSyncCursor(currentUidvalidity, highestUid),
         lastSyncAt: DateTime.utc().toISO()!,
-        nextSyncTime: DateTime.utc().plus({ hours: 1 }).toISO()!,
+        nextSyncTime: DateTime.utc().plus({ minutes: 15 }).toISO()!,
         consecutiveFailures: 0,
       });
       if (cursorUpdateResult.isErr()) { this.logger.warn("Failed to update IMAP sync cursor after batch", { code: "imap.renew.cursor_update_failed", emxId: emx.id, error: cursorUpdateResult.error }); }
@@ -340,7 +340,7 @@ export class ImapAdapter implements ProviderAdapter {
     } else {
       // No new messages — just update timing
       const timingUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
-        nextSyncTime: DateTime.utc().plus({ hours: 1 }).toISO()!,
+        nextSyncTime: DateTime.utc().plus({ minutes: 15 }).toISO()!,
         consecutiveFailures: 0,
       });
       if (timingUpdateResult.isErr()) { this.logger.warn("Failed to update IMAP timing after empty sync", { code: "imap.renew.timing_update_failed", emxId: emx.id, error: timingUpdateResult.error }); }

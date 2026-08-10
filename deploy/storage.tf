@@ -141,6 +141,7 @@ resource "aws_sqs_queue_policy" "signals_sns" {
         Condition = { ArnEquals = { "aws:SourceArn" = [
           "arn:aws:scheduler:*:${var.aws_account_id}:schedule/signal-followups/*",
           aws_scheduler_schedule.digest_dispatch.arn,
+          aws_scheduler_schedule.emx_dispatch.arn,
         ] } }
       },
     ]
