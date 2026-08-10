@@ -148,6 +148,21 @@ export class ResourceDatabase {
     }
   }
 
+  // All resources for a single thread (any status) — used by thread detail view. The PK is
+  // ACCT#{accountId}#THREAD#{threadId}, so this queries the base table directly (no GSI).
+  async listResourcesByThread(accountId: string, threadId: string): Promise<Result<Resource[], DbError>> {
+    try {
+      const res = await dynamo.send(new QueryCommand({
+        TableName: RESOURCES_TABLE,
+        KeyConditionExpression: "pk = :pk",
+        ExpressionAttributeValues: { ":pk": threadPk(accountId, threadId) },
+      }));
+      return ok((res.Items ?? []) as Resource[]);
+    } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
   // Scoped by accountId+status only — spans every resource workflow in one query. Callers
   // that want a single workflow (or a fixed set, e.g. "today across package/travel/events")
   // filter the (small) result set themselves rather than paying for a narrower GSI key.

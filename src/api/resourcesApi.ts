@@ -74,6 +74,27 @@ export class ResourcesApi {
     });
 
     // -------------------------------------------------------------------------
+    // 1b. GET /accounts/{accountId}/threads/{threadId}/resources — all resources for a thread
+    // -------------------------------------------------------------------------
+    app.openapi(route({
+      method: "get",
+      path: "/accounts/{accountId}/threads/{threadId}/resources",
+      tags: ["Resources"],
+      request: { params: z.object({ accountId: z.string(), threadId: z.string() }) },
+      middleware: [authz("resources:read", c => `accounts/${c.req.param("accountId")!}/threads/${c.req.param("threadId")!}/resources`)] as const,
+      responses: { 200: { content: { "application/json": { schema: ListResourcesResponse } }, description: "List resources for thread" } },
+    }), async (c) => {
+      const accountId = c.req.param("accountId")!;
+      const threadId = c.req.param("threadId")!;
+      const result = await resourceDb.listResourcesByThread(accountId, threadId);
+      if (result.isErr()) {
+        logger.error("Failed to list resources by thread.", { code: "api.resources.list_by_thread_failed", error: result.error });
+        return err(c, 500, "Internal Server Error");
+      }
+      return c.json(page("resources", result.value.map(r => toApiResource(r, contentCdnBaseUrl))), 200);
+    });
+
+    // -------------------------------------------------------------------------
     // 2. GET /accounts/{accountId}/resources/{resourceId} — get one resource
     // -------------------------------------------------------------------------
     app.openapi(route({
