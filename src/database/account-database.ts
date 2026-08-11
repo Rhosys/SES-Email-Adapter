@@ -6,6 +6,7 @@ import type { Result, DbError, NotFoundError } from "../errors.js";
 import { generateId } from "../utils/id.js";
 import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, UnknownSenderPolicy, ForwardingTarget, EmailTemplate, WsConnection, IUserConfiguration, ExternalMailExchange } from "../types/index.js";
 import { USER_CONFIGURATION_DEFAULTS } from "../types/index.js";
+import { DEFAULT_TIMEZONE } from "../api/timezone-allowlist.js";
 import { SYSTEM_RULES } from "../processor/system-rules.js";
 import { SystemAccountDb, isSystemAccount } from "./system-account-db.js";
 import type { CreateViewRequest, UpdateViewRequest, CreateLabelRequest, UpdateLabelRequest, CreateRuleRequest, UpdateRuleRequest } from "../api/app.js";
@@ -66,7 +67,10 @@ export class AccountDatabase {
         TableName: ACCOUNTS_TABLE,
         Key: { pk: pk(accountId), sk: "META" },
       }));
-      return ok(res.Item ? (res.Item as Account) : null);
+      if (!res.Item) return ok(null);
+      const account = res.Item as Account;
+      if (!account.timezone) { account.timezone = DEFAULT_TIMEZONE; }
+      return ok(account);
     } catch (e) {
       return err(dbError(e));
     }
@@ -85,7 +89,7 @@ export class AccountDatabase {
     }
   }
 
-  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingTargetId">>): Promise<Result<Account, DbError>> {
+  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingTargetId" | "timezone">>): Promise<Result<Account, DbError>> {
     const now = DateTime.utc().toISO()!;
     const setParts: string[] = ["updatedAt = :now", "gsi1pk = :g1pk", "gsi1sk = :g1sk"];
     const exprValues: Record<string, unknown> = { ":now": now, ":g1pk": "META", ":g1sk": `ACCT#${accountId}` };
@@ -100,6 +104,7 @@ export class AccountDatabase {
     if (update.onboarding !== undefined) { setParts.push("onboarding = :onboarding"); exprValues[":onboarding"] = update.onboarding; }
     if (update.defaultCalendarInviteForwardingTargetId === null) { removeParts.push("defaultCalendarInviteForwardingTargetId"); }
     else if (update.defaultCalendarInviteForwardingTargetId !== undefined) { setParts.push("defaultCalendarInviteForwardingTargetId = :dcifa"); exprValues[":dcifa"] = update.defaultCalendarInviteForwardingTargetId; }
+    if (update.timezone !== undefined) { setParts.push("timezone = :tz"); exprValues[":tz"] = update.timezone; }
 
     let updateExpression = `SET ${setParts.join(", ")}`;
     if (removeParts.length > 0) { updateExpression += ` REMOVE ${removeParts.join(", ")}`; }

@@ -34,6 +34,7 @@ export class SystemAccountDb {
     return ok({
       id: SYSTEM_ACCOUNT_ID,
       name: "System",
+      timezone: "Europe/London",
       retentionDuration: "P7D" as const,
       filtering: { defaultUnknownSenderPolicy: "allow_all" as const },
       digest: null,

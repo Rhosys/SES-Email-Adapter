@@ -19,6 +19,7 @@ function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
     id: "acc-test",
     name: "Test Account",
+    timezone: "Europe/London",
     digest: { frequency: "monthly", forwardingTargetId: "test@example.com" },
     defaultCalendarInviteForwardingTargetId: "test@example.com",
     createdAt: "2025-01-01T00:00:00Z",
@@ -76,7 +77,7 @@ describe("OnboardingTaskHandler.handleSetupDefaults", () => {
 
   it("auto-creates a verified forwarding target from the signup email and sets it as the digest/calendar default", async () => {
     const accountWithNoDefaults: Account = {
-      id: "acc-test", name: "Test Account", createdAt: "2025-01-01T00:00:00Z", updatedAt: "2025-01-01T00:00:00Z",
+      id: "acc-test", name: "Test Account", timezone: "Europe/London", createdAt: "2025-01-01T00:00:00Z", updatedAt: "2025-01-01T00:00:00Z",
     };
     const store = createMockStore({
       getAccount: vi.fn().mockResolvedValue(ok(accountWithNoDefaults)),

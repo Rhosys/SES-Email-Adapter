@@ -809,6 +809,7 @@ export interface AccountOnboarding {
 export interface Account {
   id: string;
   name: string;
+  timezone: string;
   retentionDuration?: import("../processor/retention.js").RetentionDuration;
   digest?: { frequency: "daily" | "weekly" | "monthly"; forwardingTargetId: string } | null;
   filtering?: AccountFilteringConfig;

@@ -117,6 +117,7 @@ export class AccountsApi {
         const candidate: Account = {
           id: generateAccountId(),
           name: "",
+          timezone: "Europe/London",
           retentionDuration: "P3M",
           billingPlan: "Trial",
           onboarding: { completed: false },
