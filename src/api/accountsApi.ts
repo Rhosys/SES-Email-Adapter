@@ -83,6 +83,7 @@ export class AccountsApi {
       tags: ["Accounts"],
       responses: { 200: { content: { "application/json": { schema: z.object({ accounts: z.array(AccountSchema) }) } }, description: "List accounts" } },
     }), async (c) => {
+      c.set("authorizationVerified", true);
       const { userId } = c.get("auth");
       if (!access) { logger.error("Service dependency not available.", { code: "api.accounts.list.not_configured" }); return err(c, 501, "Not implemented"); }
       const usersResult = await access.listAccountsForUser(userId);
@@ -103,6 +104,7 @@ export class AccountsApi {
       tags: ["Accounts"],
       responses: { 201: { content: { "application/json": { schema: AccountSchema } }, description: "Account created" } },
     }), async (c) => {
+      c.set("authorizationVerified", true);
       const { userId } = c.get("auth");
       if (!access) { logger.error("Service dependency not available.", { code: "api.accounts.create.not_configured" }); return err(c, 501, "Not implemented"); }
       logger.info("Creating account", { code: "api.accounts.create", userId });

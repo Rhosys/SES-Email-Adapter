@@ -162,6 +162,14 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
 
   const helpers = { authz, err, route };
 
+  // Public routes — no authorization required (discoverable metadata)
+  app.use("/healthcheck", async (c, next) => { c.set("authorizationVerified", true); await next(); });
+  app.use("/.well-known/*", async (c, next) => { c.set("authorizationVerified", true); await next(); });
+  app.use("/", async (c, next) => {
+    if (c.req.method === "GET") c.set("authorizationVerified", true);
+    await next();
+  });
+
   // Well-known routes (before auth middleware)
   new WellKnownApi().register(app, helpers);
 
@@ -287,6 +295,7 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
   // -------------------------------------------------------------------------
   if (gmailProvider && outlookProvider) {
     app.post("/external-exchanges/:platform/target", async (c) => {
+      c.set("authorizationVerified", true);
       const platform = c.req.param("platform");
       if (platform === "gmail") return gmailProvider.handle(c);
       if (platform === "outlook") return outlookProvider.handle(c);
@@ -295,6 +304,7 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
     });
   } else {
     app.post("/external-exchanges/:platform/target", async (c) => {
+      c.set("authorizationVerified", true);
       const platform = c.req.param("platform");
       if (platform === "jmap") return handleJmapWebhook(c);
       return c.json({ title: "Not Found" }, 404);

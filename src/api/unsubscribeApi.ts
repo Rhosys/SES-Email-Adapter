@@ -9,7 +9,6 @@ import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 // UnsubscribeApi — public RFC 8058 one-click unsubscribe endpoint
 //
 // No authz middleware: the signed token carried in `code` is the credential.
-// The authorization guard has an explicit exception for this route.
 // ---------------------------------------------------------------------------
 
 export class UnsubscribeApi {
@@ -37,6 +36,7 @@ export class UnsubscribeApi {
         },
       },
     }), async (c) => {
+      c.set("authorizationVerified", true);
       const accountId = c.req.param("accountId")!;
       const code = c.req.query("code");
       if (!code) return err(c, 400, "Missing unsubscribe code");
