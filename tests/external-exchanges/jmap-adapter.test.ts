@@ -142,12 +142,8 @@ describe("JmapAdapter.activate", () => {
     // Read off jmapConfig.username directly — JMAP has no separate identity to verify against.
     expect(value.emailAddress).toBe("user@example.com");
 
-    // expiresAt should be approximately 15 minutes from now (polling interval)
-    const expiresAt = new Date(value.expiresAt).getTime();
-    const now = Date.now();
-    const fifteenMinMs = 15 * 60 * 1000;
-    expect(expiresAt).toBeGreaterThan(now + fifteenMinMs - 5000);
-    expect(expiresAt).toBeLessThan(now + fifteenMinMs + 5000);
+    // expiresAt should be pinned time + 15min polling interval
+    expect(value.expiresAt).toBe("2026-06-15T12:15:00.000Z");
 
     // Session metadata stored on emx
     expect(emx.jmapConfig!.apiUrl).toBe("https://jmap.example.com/api");

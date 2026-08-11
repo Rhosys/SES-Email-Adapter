@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok } from "neverthrow";
-import { DateTime } from "luxon";
 import type { ExternalMailExchange } from "../../src/types/index.js";
 import type { Logger } from "../../src/logger.js";
 
@@ -111,7 +110,6 @@ describe("ImapAdapter.activate", () => {
     vi.useFakeTimers({ now: new Date("2026-06-15T12:00:00.000Z") });
     const adapter = createAdapter();
     const emx = makeEmx();
-    const before = DateTime.utc();
 
     const result = await adapter.activate(emx);
 
@@ -122,11 +120,8 @@ describe("ImapAdapter.activate", () => {
     expect(value.providerSubscriptionId).toBe("poll");
     // Read off imapConfig.username directly — IMAP has no separate identity to verify against.
     expect(value.emailAddress).toBe("user@example.com");
-    // expiresAt should be ~15min from now (polling interval)
-    const expiresAt = DateTime.fromISO(value.expiresAt);
-    const diffMinutes = expiresAt.diff(before, "minutes").minutes;
-    expect(diffMinutes).toBeGreaterThan(13);
-    expect(diffMinutes).toBeLessThan(17);
+    // expiresAt should be pinned time + 15min polling interval
+    expect(value.expiresAt).toBe("2026-06-15T12:15:00.000Z");
     vi.useRealTimers();
   });
 
