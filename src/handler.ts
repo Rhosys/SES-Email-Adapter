@@ -13,11 +13,11 @@ import type { DraftSendPayload } from "./processor/draft-send-dispatcher.js";
 import { DateTime } from "luxon";
 import { CompositeRoot } from "./composite-root.js";
 
-const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND, MSG_TYPE_SIGNAL_FOLLOWUP, MSG_TYPE_RSVP_REMINDER, MSG_TYPE_DIGEST_DISPATCH, MSG_TYPE_DIGEST_SEND, MSG_TYPE_EMX_INBOUND, MSG_TYPE_EMX_DISPATCH] = SQS_MESSAGE_TYPES;
+const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND, MSG_TYPE_SIGNAL_FOLLOWUP, MSG_TYPE_RSVP_REMINDER, MSG_TYPE_DIGEST_DISPATCH, MSG_TYPE_DIGEST_SEND, MSG_TYPE_EMX_INBOUND, MSG_TYPE_EMX_DISPATCH, MSG_TYPE_EMX_IDLE] = SQS_MESSAGE_TYPES;
 const RETRY_TRACK_THRESHOLD = 30;
 
 const root = new CompositeRoot();
-const { logger, processor, onboardingHandler, domainHealthJob, healthcheckJob, reindexWorker, draftSendWorker, followupHandler, rsvpReminderHandler, digestDispatcher, digestWorker, sesFeedbackProcessor, authService, deviceStore, emxInboundWorker, emxDispatchWorker, app } = root;
+const { logger, processor, onboardingHandler, domainHealthJob, healthcheckJob, reindexWorker, draftSendWorker, followupHandler, rsvpReminderHandler, digestDispatcher, digestWorker, sesFeedbackProcessor, authService, deviceStore, emxInboundWorker, emxDispatchWorker, emxIdleWorker, app } = root;
 // ---------------------------------------------------------------------------
 // Wiring lives in CompositeRoot (see composite-root.ts).
 // ---------------------------------------------------------------------------
@@ -219,6 +219,15 @@ async function processSqsRecord(
 
   if (messageType === MSG_TYPE_EMX_DISPATCH) {
     return emxDispatchWorker.dispatch(body as import("./external-exchanges/emx-dispatch-worker.js").EmxDispatchPayload);
+  }
+
+  if (messageType === MSG_TYPE_EMX_IDLE) {
+    const payload = body as import("./external-exchanges/emx-idle-worker.js").EmxIdlePayload;
+    if (!payload.accountId) {
+      logger.error("Malformed emx_idle payload — missing accountId. Dropping.", { code: "handler.sqs.malformed_emx_idle", sqsMessageId });
+      return ok(undefined);
+    }
+    return emxIdleWorker.process(payload);
   }
 
   // SNS envelope — validate + unwrap. Two SNS topics land on this same queue (see deploy/storage.tf):

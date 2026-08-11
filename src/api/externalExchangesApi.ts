@@ -324,7 +324,7 @@ export class ExternalExchangesApi {
         ? listResult.value.find((e) => e.platform === body.platform && e.emailAddress === emailAddress)
         : undefined;
       if (existing) {
-        const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "active", syncCursor, expiresAt, providerSubscriptionId, userId, connectionUserId, connectionId, errorReason: undefined, consecutiveFailures: 0 });
+        const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "active", syncCursor, expiresAt, providerSubscriptionId, userId, connectionUserId, connectionId, consecutiveFailures: 0 }, ["errorReason"]);
         if (updateResult.isErr()) { logger.error("Failed to update exchange record", { code: "api.emx.create_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
         const reactivateEnsureResult = await accountDb.ensureAlias(accountId, emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined, existing.id);
         if (reactivateEnsureResult.isErr()) { logger.warn("Failed to ensure alias for reactivated exchange", { code: "api.emx.oauth.reactivate_ensure_alias_failed", accountId, error: reactivateEnsureResult.error }); }
@@ -443,7 +443,7 @@ export class ExternalExchangesApi {
 
         // Re-activate if previously failed — connection test just proved creds work
         if (emx.status === "activation_failed") {
-          const reactivateResult = await accountDb.updateExternalExchange(accountId, emxId, { status: "active", nextSyncTime: newExpiresAt, errorReason: undefined, consecutiveFailures: 0 });
+          const reactivateResult = await accountDb.updateExternalExchange(accountId, emxId, { status: "active", nextSyncTime: newExpiresAt, consecutiveFailures: 0 }, ["errorReason"]);
           if (reactivateResult.isErr()) { logger.error("Failed to reactivate JMAP exchange", { code: "api.emx.patch.jmap.reactivate_failed", accountId, emxId, error: reactivateResult.error }); return err(c, 500, "Internal Server Error"); }
         }
 
@@ -514,7 +514,7 @@ export class ExternalExchangesApi {
 
       // Re-activate if previously failed — connection test just proved creds work
       if (emx.status === "activation_failed") {
-        const imapReactivateResult = await accountDb.updateExternalExchange(accountId, emxId, { status: "active", nextSyncTime: newExpiresAt, errorReason: undefined, consecutiveFailures: 0 });
+        const imapReactivateResult = await accountDb.updateExternalExchange(accountId, emxId, { status: "active", nextSyncTime: newExpiresAt, consecutiveFailures: 0 }, ["errorReason"]);
         if (imapReactivateResult.isErr()) { logger.error("Failed to reactivate IMAP exchange", { code: "api.emx.patch.imap.reactivate_failed", accountId, emxId, error: imapReactivateResult.error }); return err(c, 500, "Internal Server Error"); }
       }
 

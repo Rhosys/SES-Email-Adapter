@@ -383,6 +383,36 @@ export class ImapAdapter implements ProviderAdapter {
     return ok(undefined);
   }
 
+  // ---------------------------------------------------------------------------
+  // Public: IMAP IDLE — connect, idle, logout (moved from emx-idle-worker)
+  // ---------------------------------------------------------------------------
+
+  async idle(emx: ExternalMailExchange, timeoutMs: number): Promise<Result<"new_mail" | "timeout", ImapError>> {
+    const config = emx.imapConfig;
+    if (!config) {
+      return err({ kind: "imap_error", reason: "missing imapConfig", cause: undefined });
+    }
+
+    let password: string;
+    try {
+      password = this.encryptionManager.decrypt(config.encryptedPassword);
+    } catch (e) {
+      return err({ kind: "imap_error", reason: "decryption failed", cause: e });
+    }
+
+    const conn = new ImapConnection({ host: config.host, tlsConfig: config.tlsConfig, username: config.username, password, timeout: 30_000 });
+
+    const connectResult = await conn.connect();
+    if (connectResult.isErr()) {
+      return err(connectResult.error);
+    }
+
+    const idleResult = await conn.idle(timeoutMs);
+    await conn.logout();
+
+    return idleResult;
+  }
+
   async fetchMessage(providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>> {
     const imapConfig = emx.imapConfig;
     if (!imapConfig) {

@@ -1646,7 +1646,7 @@ export class AccountDatabase {
     }
   }
 
-  async updateExternalExchange(accountId: string, emxId: string, fields: Partial<Pick<ExternalMailExchange, "status" | "syncCursor" | "expiresAt" | "lastSyncAt" | "nextSyncTime" | "userId" | "connectionUserId" | "connectionId" | "consecutiveFailures">> & { errorReason?: string | undefined; pushSubscriptionId?: string | undefined; providerSubscriptionId?: string | undefined; encryptionCertificateId?: string | undefined }): Promise<Result<ExternalMailExchange, DbError>> {
+  async updateExternalExchange(accountId: string, emxId: string, fields: Partial<Pick<ExternalMailExchange, "status" | "syncCursor" | "expiresAt" | "lastSyncAt" | "nextSyncTime" | "userId" | "connectionUserId" | "connectionId" | "consecutiveFailures">> & { errorReason?: string; pushSubscriptionId?: string; providerSubscriptionId?: string; encryptionCertificateId?: string }, clearFields?: Array<"errorReason" | "providerSubscriptionId" | "pushSubscriptionId" | "encryptionCertificateId">): Promise<Result<ExternalMailExchange, DbError>> {
     const now = DateTime.utc().toISO()!;
     const names: Record<string, string> = { "#updatedAt": "updatedAt" };
     const values: Record<string, unknown> = { ":updatedAt": now };
@@ -1655,16 +1655,19 @@ export class AccountDatabase {
 
     for (const [key, value] of Object.entries(fields)) {
       if (value === undefined) {
-        // Explicitly remove optional fields when passed as undefined (e.g. clearing errorReason on re-activation)
-        if (key === "errorReason" || key === "providerSubscriptionId" || key === "pushSubscriptionId" || key === "encryptionCertificateId") {
-          names[`#${key}`] = key;
-          removeParts.push(`#${key}`);
-        }
         continue;
       }
       names[`#${key}`] = key;
       values[`:${key}`] = value;
       setParts.push(`#${key} = :${key}`);
+    }
+
+    // Explicit field removal via clearFields
+    if (clearFields) {
+      for (const key of clearFields) {
+        names[`#${key}`] = key;
+        removeParts.push(`#${key}`);
+      }
     }
 
     // GSI1 management: populate when active, remove otherwise

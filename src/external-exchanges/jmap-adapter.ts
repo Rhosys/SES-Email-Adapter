@@ -1,4 +1,5 @@
 import { DateTime } from "luxon";
+import { timingSafeEqual } from "node:crypto";
 import { ok, err } from "../errors.js";
 import type { Result } from "../errors.js";
 import type { ExternalMailExchange } from "../types/index.js";
@@ -307,6 +308,106 @@ export class JmapAdapter implements ProviderAdapter {
     return ok(undefined);
   }
 
+  // ---------------------------------------------------------------------------
+  // Public: JMAP push webhook handler (moved from app.ts)
+  // ---------------------------------------------------------------------------
+
+  async handleWebhook(body: Record<string, unknown>, token: string): Promise<Result<void, { kind: "malformed_body" }>> {
+    const type = body["@type"] as string | undefined;
+    const deviceClientId = body["deviceClientId"] as string | undefined;
+
+    if (!deviceClientId || !token) {
+      this.logger.track("JMAP webhook: missing deviceClientId or token", { code: "emx.jmap.webhook.missing_params" });
+      return ok(undefined);
+    }
+
+    // Parse compound deviceClientId → [accountId, emxId]
+    const colonIdx = deviceClientId.indexOf(":");
+    if (colonIdx < 1) {
+      this.logger.track("JMAP webhook: malformed deviceClientId", { code: "emx.jmap.webhook.unknown_device", deviceClientId });
+      return ok(undefined);
+    }
+    const accountId = deviceClientId.slice(0, colonIdx);
+    const emxId = deviceClientId.slice(colonIdx + 1);
+
+    // Validate HMAC — timing-safe comparison
+    const expectedToken = this.encryptionManager.hash(deviceClientId);
+    const tokenBuf = Buffer.from(token);
+    const expectedBuf = Buffer.from(expectedToken);
+    if (tokenBuf.length !== expectedBuf.length || !timingSafeEqual(tokenBuf, expectedBuf)) {
+      this.logger.track("JMAP webhook: invalid HMAC token", { code: "emx.jmap.webhook.invalid_hmac", deviceClientId });
+      return ok(undefined);
+    }
+
+    // Direct lookup by accountId + emxId
+    const emxResult = await this.db.getExternalExchange(accountId, emxId);
+    if (emxResult.isErr()) {
+      this.logger.error("JMAP webhook: DB lookup failed", { code: "emx.jmap.webhook.db_error", error: emxResult.error });
+      return ok(undefined);
+    }
+
+    const emx = emxResult.value;
+    if (!emx || emx.platform !== "jmap") {
+      this.logger.track("JMAP webhook: unknown deviceClientId", { code: "emx.jmap.webhook.unknown_device", deviceClientId });
+      return ok(undefined);
+    }
+
+    if (emx.status !== "active") {
+      this.logger.track("JMAP webhook: exchange no longer active", { code: "emx.jmap.webhook.inactive_exchange", emxId: emx.id, status: emx.status });
+      return ok(undefined);
+    }
+
+    if (type === "PushVerification") {
+      const verificationCode = body["verificationCode"] as string | undefined;
+      if (!verificationCode || !emx.pushSubscriptionId) {
+        return ok(undefined);
+      }
+
+      const jmapConfig = emx.jmapConfig;
+      if (!jmapConfig) {
+        return ok(undefined);
+      }
+
+      let password: string;
+      try {
+        password = this.encryptionManager.decrypt(jmapConfig.encryptedPassword);
+      } catch (e) {
+        this.logger.error("JMAP webhook: failed to decrypt password for verification", { code: "emx.jmap.webhook.decrypt_failed", emxId: emx.id, error: e });
+        return ok(undefined);
+      }
+
+      const auth = buildBasicAuth(jmapConfig.username, password);
+      const sessionResult = await fetchSession(jmapConfig.sessionUrl, auth, 30_000);
+      if (sessionResult.isErr()) {
+        this.logger.warn("JMAP webhook: failed to fetch session for verification", { code: "emx.jmap.webhook.session_failed", emxId: emx.id, cause: sessionResult.error.cause });
+        return ok(undefined);
+      }
+
+      const confirmResult = await jmapCall(sessionResult.value.apiUrl, auth, JMAP_USING, [
+        ["PushSubscription/set", {
+          update: { [emx.pushSubscriptionId]: { verificationCode } },
+        }, "pv0"],
+      ], 30_000);
+
+      if (confirmResult.isErr()) {
+        this.logger.warn("JMAP webhook: PushSubscription/set verification failed", { code: "emx.jmap.webhook.verify_failed", emxId: emx.id, cause: confirmResult.error.cause });
+      }
+
+      return ok(undefined);
+    }
+
+    if (type === "StateChange") {
+      const enqueueResult = await this.signalQueue.send("emx_dispatch", { emxId: emx.id, accountId: emx.accountId });
+      if (enqueueResult.isErr()) {
+        this.logger.error("JMAP webhook: failed to enqueue emx_dispatch", { code: "emx.jmap.webhook.enqueue_failed", emxId: emx.id, error: enqueueResult.error });
+      }
+      return ok(undefined);
+    }
+
+    // Unknown @type — accept silently
+    return ok(undefined);
+  }
+
   async fetchMessage(providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>> {
     const jmapConfig = emx.jmapConfig;
     if (!jmapConfig) {
@@ -378,6 +479,89 @@ export class JmapAdapter implements ProviderAdapter {
   }
 
   // ---------------------------------------------------------------------------
+  // Public: JMAP polling — queryChanges loop (moved from emx-idle-worker)
+  // ---------------------------------------------------------------------------
+
+  async poll(emx: ExternalMailExchange, iterations: number, intervalMs: number): Promise<Result<"new_mail" | "timeout", ProviderRenewalError>> {
+    const config = emx.jmapConfig;
+    if (!config) {
+      return err({ kind: "provider_renewal_failed", cause: "Missing jmapConfig" });
+    }
+
+    let password: string;
+    try {
+      password = this.encryptionManager.decrypt(config.encryptedPassword);
+    } catch (e) {
+      return err({ kind: "provider_renewal_failed", cause: e });
+    }
+
+    const auth = buildBasicAuth(config.username, password);
+
+    const sessionResult = await fetchSession(config.sessionUrl, auth, 30_000);
+    if (sessionResult.isErr()) {
+      return err({ kind: "provider_renewal_failed", cause: sessionResult.error.cause });
+    }
+
+    const session = sessionResult.value;
+    const jmapAccountId = session.primaryAccounts[MAIL_CAPABILITY]!;
+    const sinceQueryState = emx.syncCursor;
+
+    if (!sinceQueryState) {
+      return err({ kind: "provider_renewal_failed", cause: "no syncCursor" });
+    }
+
+    for (let i = 0; i < iterations; i++) {
+      const changesResult = await jmapCall(session.apiUrl, auth, JMAP_USING, [
+        ["Email/queryChanges", {
+          accountId: jmapAccountId,
+          filter: { inMailbox: config.inboxId },
+          sort: [{ property: "receivedAt", isAscending: false }],
+          sinceQueryState,
+          maxChanges: 1,
+        }, "qc0"],
+      ], 30_000);
+
+      if (changesResult.isErr()) {
+        const cause = changesResult.error.cause;
+        if (cause === "invalid credentials") {
+          return err({ kind: "provider_renewal_failed", cause: "invalid credentials" });
+        }
+        // Transient failure — continue to next iteration
+        if (i < iterations - 1) {
+          await new Promise(r => setTimeout(r, intervalMs));
+        }
+        continue;
+      }
+
+      const response = changesResult.value[0] as [string, Record<string, unknown>, string] | undefined;
+
+      // cannotCalculateChanges — treat as new mail (state diverged)
+      if (response && response[0] === "error") {
+        const errorType = (response[1] as { type?: string }).type;
+        if (errorType === "cannotCalculateChanges") {
+          return ok("new_mail" as const);
+        }
+        return err({ kind: "provider_renewal_failed", cause: `JMAP error: ${errorType}` });
+      }
+
+      if (response) {
+        const data = response[1] as { added?: unknown[] };
+        const addedCount = data.added?.length ?? 0;
+        if (addedCount > 0) {
+          return ok("new_mail" as const);
+        }
+      }
+
+      // Sleep between iterations (not after the last one)
+      if (i < iterations - 1) {
+        await new Promise(r => setTimeout(r, intervalMs));
+      }
+    }
+
+    return ok("timeout" as const);
+  }
+
+  // ---------------------------------------------------------------------------
   // Private: JMAP Push Subscription registration and verification (R5)
   // ---------------------------------------------------------------------------
 
@@ -387,14 +571,15 @@ export class JmapAdapter implements ProviderAdapter {
 
     // Case 1: Server supports push and no existing subscription — attempt registration
     if (supportsPush && !emx.pushSubscriptionId) {
-      const token = this.encryptionManager.hash(emx.id);
+      const deviceClientId = `${emx.accountId}:${emx.id}`;
+      const token = this.encryptionManager.hash(deviceClientId);
       const webhookUrl = `${JMAP_PUSH_WEBHOOK_BASE}?token=${token}`;
 
       const registerResult = await jmapCall(session.apiUrl, auth, JMAP_USING, [
         ["PushSubscription/set", {
           create: {
             push0: {
-              deviceClientId: emx.id,
+              deviceClientId,
               url: webhookUrl,
               types: ["Email"],
             },
@@ -444,7 +629,7 @@ export class JmapAdapter implements ProviderAdapter {
 
       if (verifyResult.isErr()) {
         // Cannot verify — clear subscription, fall through to polling
-        await this.db.updateExternalExchange(emx.accountId, emx.id, { pushSubscriptionId: undefined });
+        await this.db.updateExternalExchange(emx.accountId, emx.id, {}, ["pushSubscriptionId"]);
         return "fallthrough";
       }
 
@@ -453,7 +638,7 @@ export class JmapAdapter implements ProviderAdapter {
 
       if (pgResponse && pgResponse[0] === "error" || (notFound && notFound.includes(emx.pushSubscriptionId))) {
         // Subscription gone — clear and fall through
-        await this.db.updateExternalExchange(emx.accountId, emx.id, { pushSubscriptionId: undefined });
+        await this.db.updateExternalExchange(emx.accountId, emx.id, {}, ["pushSubscriptionId"]);
         return "fallthrough";
       }
 

@@ -21,7 +21,7 @@ resource "aws_sqs_queue" "long_poller" {
 resource "aws_lambda_function" "long_poller" {
   function_name = "${var.service_name}-long-poller"
   role          = aws_iam_role.lambda.arn
-  handler       = "long-poller.handler"
+  handler       = "handler.handler"
   runtime       = "nodejs24.x"
   memory_size   = 128
   timeout       = 900 # 15 minutes (maximum Lambda timeout)

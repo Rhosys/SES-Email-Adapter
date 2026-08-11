@@ -68,8 +68,8 @@ export function authorizationGuard(logger?: Logger): MiddlewareHandler {
       return;
     }
 
-    // Exception 6: External exchange webhooks — verified at application layer (HMAC, OIDC JWT)
-    if (method === "POST" && path.startsWith("/external-exchanges/")) {
+    // Exception 6: JMAP push webhook — verified by HMAC token
+    if (method === "POST" && path === "/external-exchanges/jmap/target") {
       return;
     }
 

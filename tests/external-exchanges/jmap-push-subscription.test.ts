@@ -308,7 +308,8 @@ describe("JMAP push subscription registration", () => {
 
     // First db call clears pushSubscriptionId
     const clearCall = db.updateExternalExchange.mock.calls[0]!;
-    expect(clearCall[2]).toMatchObject({ pushSubscriptionId: undefined });
+    expect(clearCall[2]).toMatchObject({});
+    expect(clearCall[3]).toEqual(["pushSubscriptionId"]);
 
     // Second db call is normal polling sync with 15-min nextSyncTime
     const pollingCall = db.updateExternalExchange.mock.calls[1]!;
