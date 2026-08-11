@@ -212,7 +212,7 @@ export class SignalClassifier {
       signalId: input.signalId,
       accountId: input.accountId,
       workflow: raw.workflow,
-    });
+    }, input.receivedAt);
 
     // Extract and validate actions
     const actions: SignalAction[] = [];

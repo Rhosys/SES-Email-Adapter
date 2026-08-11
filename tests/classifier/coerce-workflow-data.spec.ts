@@ -114,6 +114,7 @@ describe("coerceString", () => {
 describe("coerceWorkflowData", () => {
   let logger: ReturnType<typeof createMockLogger>;
   const ctx = { signalId: "sgn-test", accountId: "acc-test", workflow: "payments" };
+  const receivedAt = "2025-01-15T12:00:00Z";
 
   beforeEach(() => {
     logger = createMockLogger();
@@ -126,37 +127,37 @@ describe("coerceWorkflowData", () => {
   describe("number fields (stored as string)", () => {
     it("coerces numeric amount to string — payments.amount", () => {
       const data: Record<string, unknown> = { workflow: "payments", paymentType: "receipt", vendor: "Stripe", amount: 149.99, currency: "USD" };
-      coerceWorkflowData(data, "payments", logger, ctx);
+      coerceWorkflowData(data, "payments", logger, ctx, receivedAt);
       expect(data.amount).toBe("149.99");
     });
 
     it("coerces string numeric amount to string — payments.amount", () => {
       const data: Record<string, unknown> = { workflow: "payments", paymentType: "receipt", vendor: "Stripe", amount: "49.00", currency: "USD" };
-      coerceWorkflowData(data, "payments", logger, ctx);
+      coerceWorkflowData(data, "payments", logger, ctx, receivedAt);
       expect(data.amount).toBe("49");
     });
 
     it("coerces zero to '0' — events.totalAmount", () => {
       const data: Record<string, unknown> = { workflow: "events", eventType: "ticket_confirmation", eventName: "CHNUG", totalAmount: 0, currency: "CHF" };
-      coerceWorkflowData(data, "events", logger, { ...ctx, workflow: "events" });
+      coerceWorkflowData(data, "events", logger, { ...ctx, workflow: "events" }, receivedAt);
       expect(data.totalAmount).toBe("0");
     });
 
     it("coerces string zero to '0' — events.totalAmount", () => {
       const data: Record<string, unknown> = { workflow: "events", eventType: "ticket_confirmation", eventName: "CHNUG", totalAmount: "0", currency: "CHF" };
-      coerceWorkflowData(data, "events", logger, { ...ctx, workflow: "events" });
+      coerceWorkflowData(data, "events", logger, { ...ctx, workflow: "events" }, receivedAt);
       expect(data.totalAmount).toBe("0");
     });
 
     it("coerces comma-separated string — package.totalAmount", () => {
       const data: Record<string, unknown> = { workflow: "package", packageType: "confirmation", retailer: "Amazon", totalAmount: "1,234.56" };
-      coerceWorkflowData(data, "package", logger, { ...ctx, workflow: "package" });
+      coerceWorkflowData(data, "package", logger, { ...ctx, workflow: "package" }, receivedAt);
       expect(data.totalAmount).toBe("1234.56");
     });
 
     it("nullifies non-numeric string and logs TRACK — package.totalAmount", () => {
       const data: Record<string, unknown> = { workflow: "package", packageType: "confirmation", retailer: "Amazon", totalAmount: "free" };
-      coerceWorkflowData(data, "package", logger, { ...ctx, workflow: "package" });
+      coerceWorkflowData(data, "package", logger, { ...ctx, workflow: "package" }, receivedAt);
       expect(data.totalAmount).toBeNull();
       expect(logger.calls).toContainEqual(expect.objectContaining({
         method: "track",
@@ -166,32 +167,32 @@ describe("coerceWorkflowData", () => {
 
     it("nullifies currency-prefixed amount — travel.totalAmount", () => {
       const data: Record<string, unknown> = { workflow: "travel", travelType: "flight", provider: "Swiss", totalAmount: "CHF 250" };
-      coerceWorkflowData(data, "travel", logger, { ...ctx, workflow: "travel" });
+      coerceWorkflowData(data, "travel", logger, { ...ctx, workflow: "travel" }, receivedAt);
       expect(data.totalAmount).toBeNull();
       expect(logger.calls.some(c => c.method === "track" && c.context?.field === "totalAmount")).toBe(true);
     });
 
     it("coerces auth.expiresInMinutes number to string", () => {
       const data: Record<string, unknown> = { workflow: "auth", authType: "verification", service: "GitHub", code: "123456", expiresInMinutes: 15 };
-      coerceWorkflowData(data, "auth", logger, { ...ctx, workflow: "auth" });
+      coerceWorkflowData(data, "auth", logger, { ...ctx, workflow: "auth" }, receivedAt);
       expect(data.expiresInMinutes).toBe("15");
     });
 
     it("coerces events.ticketCount number to string", () => {
       const data: Record<string, unknown> = { workflow: "events", eventType: "ticket_confirmation", eventName: "Concert", ticketCount: 2 };
-      coerceWorkflowData(data, "events", logger, { ...ctx, workflow: "events" });
+      coerceWorkflowData(data, "events", logger, { ...ctx, workflow: "events" }, receivedAt);
       expect(data.ticketCount).toBe("2");
     });
 
     it("coerces events.ticketCount string '3' to string", () => {
       const data: Record<string, unknown> = { workflow: "events", eventType: "ticket_confirmation", eventName: "Concert", ticketCount: "3" };
-      coerceWorkflowData(data, "events", logger, { ...ctx, workflow: "events" });
+      coerceWorkflowData(data, "events", logger, { ...ctx, workflow: "events" }, receivedAt);
       expect(data.ticketCount).toBe("3");
     });
 
     it("nullifies word-number ticketCount", () => {
       const data: Record<string, unknown> = { workflow: "events", eventType: "ticket_confirmation", eventName: "Concert", ticketCount: "two" };
-      coerceWorkflowData(data, "events", logger, { ...ctx, workflow: "events" });
+      coerceWorkflowData(data, "events", logger, { ...ctx, workflow: "events" }, receivedAt);
       expect(data.ticketCount).toBeNull();
     });
   });
@@ -203,43 +204,43 @@ describe("coerceWorkflowData", () => {
   describe("boolean fields", () => {
     it("preserves native boolean true — conversation.requiresReply", () => {
       const data: Record<string, unknown> = { workflow: "conversation", sentiment: "neutral", requiresReply: true };
-      coerceWorkflowData(data, "conversation", logger, { ...ctx, workflow: "conversation" });
+      coerceWorkflowData(data, "conversation", logger, { ...ctx, workflow: "conversation" }, receivedAt);
       expect(data.requiresReply).toBe(true);
     });
 
     it("preserves native boolean false — alert.requiresAction", () => {
       const data: Record<string, unknown> = { workflow: "alert", alertType: "ci_failure", service: "GitLab", requiresAction: false };
-      coerceWorkflowData(data, "alert", logger, { ...ctx, workflow: "alert" });
+      coerceWorkflowData(data, "alert", logger, { ...ctx, workflow: "alert" }, receivedAt);
       expect(data.requiresAction).toBe(false);
     });
 
     it("coerces string 'true' to boolean — conversation.requiresReply", () => {
       const data: Record<string, unknown> = { workflow: "conversation", sentiment: "neutral", requiresReply: "true" };
-      coerceWorkflowData(data, "conversation", logger, { ...ctx, workflow: "conversation" });
+      coerceWorkflowData(data, "conversation", logger, { ...ctx, workflow: "conversation" }, receivedAt);
       expect(data.requiresReply).toBe(true);
     });
 
     it("coerces string 'yes' to boolean — healthcare.requiresAction", () => {
       const data: Record<string, unknown> = { workflow: "healthcare", eventType: "appointment_reminder", requiresAction: "yes", provider: "Dr. Smith" };
-      coerceWorkflowData(data, "healthcare", logger, { ...ctx, workflow: "healthcare" });
+      coerceWorkflowData(data, "healthcare", logger, { ...ctx, workflow: "healthcare" }, receivedAt);
       expect(data.requiresAction).toBe(true);
     });
 
     it("coerces number 1 to boolean true — alert.requiresAction", () => {
       const data: Record<string, unknown> = { workflow: "alert", alertType: "fraud_alert", service: "Bank", requiresAction: 1 };
-      coerceWorkflowData(data, "alert", logger, { ...ctx, workflow: "alert" });
+      coerceWorkflowData(data, "alert", logger, { ...ctx, workflow: "alert" }, receivedAt);
       expect(data.requiresAction).toBe(true);
     });
 
     it("coerces number 0 to boolean false — conversation.requiresReply", () => {
       const data: Record<string, unknown> = { workflow: "conversation", sentiment: "positive", requiresReply: 0 };
-      coerceWorkflowData(data, "conversation", logger, { ...ctx, workflow: "conversation" });
+      coerceWorkflowData(data, "conversation", logger, { ...ctx, workflow: "conversation" }, receivedAt);
       expect(data.requiresReply).toBe(false);
     });
 
     it("nullifies ambiguous boolean-like string and logs TRACK", () => {
       const data: Record<string, unknown> = { workflow: "conversation", sentiment: "neutral", requiresReply: "maybe" };
-      coerceWorkflowData(data, "conversation", logger, { ...ctx, workflow: "conversation" });
+      coerceWorkflowData(data, "conversation", logger, { ...ctx, workflow: "conversation" }, receivedAt);
       expect(data.requiresReply).toBeNull();
       expect(logger.calls).toContainEqual(expect.objectContaining({
         method: "track",
@@ -255,19 +256,19 @@ describe("coerceWorkflowData", () => {
   describe("enum fields", () => {
     it("preserves valid enum value — payments.paymentType", () => {
       const data: Record<string, unknown> = { workflow: "payments", paymentType: "receipt", vendor: "Stripe", amount: "10" };
-      coerceWorkflowData(data, "payments", logger, ctx);
+      coerceWorkflowData(data, "payments", logger, ctx, receivedAt);
       expect(data.paymentType).toBe("receipt");
     });
 
     it("normalizes case-insensitive enum match — travel.travelType", () => {
       const data: Record<string, unknown> = { workflow: "travel", travelType: "FLIGHT", provider: "Lufthansa" };
-      coerceWorkflowData(data, "travel", logger, { ...ctx, workflow: "travel" });
+      coerceWorkflowData(data, "travel", logger, { ...ctx, workflow: "travel" }, receivedAt);
       expect(data.travelType).toBe("flight");
     });
 
     it("nullifies invalid enum value and logs TRACK", () => {
       const data: Record<string, unknown> = { workflow: "payments", paymentType: "barter", vendor: "Local Shop" };
-      coerceWorkflowData(data, "payments", logger, ctx);
+      coerceWorkflowData(data, "payments", logger, ctx, receivedAt);
       expect(data.paymentType).toBeNull();
       expect(logger.calls).toContainEqual(expect.objectContaining({
         method: "track",
@@ -277,7 +278,7 @@ describe("coerceWorkflowData", () => {
 
     it("nullifies non-string enum value", () => {
       const data: Record<string, unknown> = { workflow: "payments", paymentType: 42, vendor: "Fake" };
-      coerceWorkflowData(data, "payments", logger, ctx);
+      coerceWorkflowData(data, "payments", logger, ctx, receivedAt);
       expect(data.paymentType).toBeNull();
     });
   });
@@ -289,19 +290,19 @@ describe("coerceWorkflowData", () => {
   describe("string fields", () => {
     it("preserves valid string — payments.vendor", () => {
       const data: Record<string, unknown> = { workflow: "payments", paymentType: "receipt", vendor: "Stripe" };
-      coerceWorkflowData(data, "payments", logger, ctx);
+      coerceWorkflowData(data, "payments", logger, ctx, receivedAt);
       expect(data.vendor).toBe("Stripe");
     });
 
     it("coerces number to string for free-text field — auth.service", () => {
       const data: Record<string, unknown> = { workflow: "auth", authType: "verification", service: 12345, code: "ABC" };
-      coerceWorkflowData(data, "auth", logger, { ...ctx, workflow: "auth" });
+      coerceWorkflowData(data, "auth", logger, { ...ctx, workflow: "auth" }, receivedAt);
       expect(data.service).toBe("12345");
     });
 
     it("nullifies object value for string field", () => {
       const data: Record<string, unknown> = { workflow: "payments", paymentType: "receipt", vendor: { name: "Stripe" } };
-      coerceWorkflowData(data, "payments", logger, ctx);
+      coerceWorkflowData(data, "payments", logger, ctx, receivedAt);
       expect(data.vendor).toBeNull();
       expect(logger.calls).toContainEqual(expect.objectContaining({
         method: "track",
@@ -311,7 +312,7 @@ describe("coerceWorkflowData", () => {
 
     it("nullifies array value for string field", () => {
       const data: Record<string, unknown> = { workflow: "crm", senderCompany: ["Acme", "Corp"] };
-      coerceWorkflowData(data, "crm", logger, { ...ctx, workflow: "crm" });
+      coerceWorkflowData(data, "crm", logger, { ...ctx, workflow: "crm" }, receivedAt);
       expect(data.senderCompany).toBeNull();
     });
   });
@@ -324,13 +325,13 @@ describe("coerceWorkflowData", () => {
     it("preserves valid array — package.items", () => {
       const items = [{ name: "Widget", quantity: 1 }];
       const data: Record<string, unknown> = { workflow: "package", packageType: "confirmation", retailer: "Amazon", items };
-      coerceWorkflowData(data, "package", logger, { ...ctx, workflow: "package" });
+      coerceWorkflowData(data, "package", logger, { ...ctx, workflow: "package" }, receivedAt);
       expect(data.items).toBe(items);
     });
 
     it("nullifies non-array value for array field", () => {
       const data: Record<string, unknown> = { workflow: "package", packageType: "confirmation", retailer: "Amazon", items: "Widget x2" };
-      coerceWorkflowData(data, "package", logger, { ...ctx, workflow: "package" });
+      coerceWorkflowData(data, "package", logger, { ...ctx, workflow: "package" }, receivedAt);
       expect(data.items).toBeNull();
       expect(logger.calls).toContainEqual(expect.objectContaining({
         method: "track",
@@ -340,7 +341,7 @@ describe("coerceWorkflowData", () => {
 
     it("preserves empty array — content.topics", () => {
       const data: Record<string, unknown> = { workflow: "content", contentType: "newsletter", publisher: "Substack", topics: [] };
-      coerceWorkflowData(data, "content", logger, { ...ctx, workflow: "content" });
+      coerceWorkflowData(data, "content", logger, { ...ctx, workflow: "content" }, receivedAt);
       expect(data.topics).toEqual([]);
     });
   });
@@ -352,35 +353,35 @@ describe("coerceWorkflowData", () => {
   describe("edge cases", () => {
     it("skips fields not present in workflowData", () => {
       const data: Record<string, unknown> = { workflow: "payments", paymentType: "receipt", vendor: "Stripe" };
-      coerceWorkflowData(data, "payments", logger, ctx);
+      coerceWorkflowData(data, "payments", logger, ctx, receivedAt);
       expect(data.amount).toBeUndefined();
       expect(logger.calls).toHaveLength(0);
     });
 
     it("skips null values without logging", () => {
       const data: Record<string, unknown> = { workflow: "payments", paymentType: "receipt", vendor: "Stripe", amount: null };
-      coerceWorkflowData(data, "payments", logger, ctx);
+      coerceWorkflowData(data, "payments", logger, ctx, receivedAt);
       expect(data.amount).toBeNull();
       expect(logger.calls).toHaveLength(0);
     });
 
     it("skips undefined values without logging", () => {
       const data: Record<string, unknown> = { workflow: "payments", paymentType: "receipt", vendor: "Stripe", amount: undefined };
-      coerceWorkflowData(data, "payments", logger, ctx);
+      coerceWorkflowData(data, "payments", logger, ctx, receivedAt);
       expect(data.amount).toBeUndefined();
       expect(logger.calls).toHaveLength(0);
     });
 
     it("does nothing for unknown workflow", () => {
       const data: Record<string, unknown> = { workflow: "unknown", someField: "value" };
-      coerceWorkflowData(data, "unknown", logger, { ...ctx, workflow: "unknown" });
+      coerceWorkflowData(data, "unknown", logger, { ...ctx, workflow: "unknown" }, receivedAt);
       expect(data.someField).toBe("value");
       expect(logger.calls).toHaveLength(0);
     });
 
     it("does not touch extra fields not in the registry", () => {
       const data: Record<string, unknown> = { workflow: "payments", paymentType: "receipt", vendor: "Stripe", extraGarbage: { nested: true } };
-      coerceWorkflowData(data, "payments", logger, ctx);
+      coerceWorkflowData(data, "payments", logger, ctx, receivedAt);
       expect(data.extraGarbage).toEqual({ nested: true });
     });
   });
@@ -400,7 +401,7 @@ describe("coerceWorkflowData", () => {
         currency: "CHF",
         eventStartDatetime: "2026-08-26T17:00:00Z",
       };
-      coerceWorkflowData(data, "events", logger, { ...ctx, workflow: "events" });
+      coerceWorkflowData(data, "events", logger, { ...ctx, workflow: "events" }, receivedAt);
       expect(data.totalAmount).toBe("0");
       expect(data.ticketReference).toBe("O-UGWRW9Q");
       expect(data.eventType).toBe("ticket_confirmation");
@@ -417,7 +418,7 @@ describe("coerceWorkflowData", () => {
         invoiceNumber: "INV-2024-5678",
         dueDate: "2024-02-15",
       };
-      coerceWorkflowData(data, "payments", logger, ctx);
+      coerceWorkflowData(data, "payments", logger, ctx, receivedAt);
       expect(data.amount).toBe("12");
       expect(data.paymentType).toBe("invoice");
     });
@@ -432,7 +433,7 @@ describe("coerceWorkflowData", () => {
         currency: "CHF",
         departureDate: "2024-03-15T08:30:00Z",
       };
-      coerceWorkflowData(data, "travel", logger, { ...ctx, workflow: "travel" });
+      coerceWorkflowData(data, "travel", logger, { ...ctx, workflow: "travel" }, receivedAt);
       expect(data.totalAmount).toBe("199");
     });
 
@@ -445,7 +446,7 @@ describe("coerceWorkflowData", () => {
         totalAmount: 89.9,
         items: [{ name: "USB-C Cable", quantity: 2, price: 12.95 }],
       };
-      coerceWorkflowData(data, "package", logger, { ...ctx, workflow: "package" });
+      coerceWorkflowData(data, "package", logger, { ...ctx, workflow: "package" }, receivedAt);
       expect(data.totalAmount).toBe("89.9");
     });
 
@@ -457,7 +458,7 @@ describe("coerceWorkflowData", () => {
         code: "483921",
         expiresInMinutes: "10",
       };
-      coerceWorkflowData(data, "auth", logger, { ...ctx, workflow: "auth" });
+      coerceWorkflowData(data, "auth", logger, { ...ctx, workflow: "auth" }, receivedAt);
       expect(data.expiresInMinutes).toBe("10");
     });
   });

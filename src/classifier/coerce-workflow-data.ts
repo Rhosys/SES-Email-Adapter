@@ -106,6 +106,7 @@ export function coerceWorkflowData(
   workflow: string,
   logger: Logger,
   ctx: CoercionContext,
+  receivedAt: string,
 ): void {
   const fields = WORKFLOW_FIELDS.get(workflow);
   if (!fields) return;
@@ -199,6 +200,20 @@ export function coerceWorkflowData(
         } else {
           workflowData[field.name] = coerced;
         }
+        break;
+      }
+
+      case "date": {
+        const coerced = coerceDate(raw, receivedAt);
+        if (coerced === null && typeof raw === "string" && raw.trim() !== "") {
+          logger.track("Classifier returned unparseable date value — nullified.", {
+            code: "classifier.date_parse_failed",
+            field: field.name,
+            value: raw,
+            ...ctx,
+          });
+        }
+        workflowData[field.name] = coerced;
         break;
       }
 
