@@ -521,6 +521,7 @@ export const Resource = z.object({
   workflow: Workflow,
   status: ResourceStatus,
   expectedResolutionDate: z.string(),
+  displayDate: z.string().optional(),
   resolvedAt: z.string().optional().readonly(),
   assets: z.array(ResourceAsset),
   createdAt: z.string().readonly(),

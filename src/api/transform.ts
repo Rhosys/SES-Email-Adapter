@@ -76,6 +76,7 @@ export function toApiResource(resource: DbResource, contentCdnBaseUrl: string): 
     workflow: resource.workflow as Api.Resource["workflow"],
     status: resource.status as Api.Resource["status"],
     expectedResolutionDate: resource.expectedResolutionDate,
+    ...(resource.displayDate ? { displayDate: resource.displayDate } : {}),
     ...(resource.resolvedAt ? { resolvedAt: resource.resolvedAt } : {}),
     assets: (resource.assets ?? []).map(a => ({
       type: a.type as Api.ResourceAsset["type"],

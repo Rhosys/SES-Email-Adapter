@@ -1409,7 +1409,7 @@ export class SignalProcessor {
 
     // Resource upsert — best-effort, derived read-model only. A failure here must not
     // fail the signal ingest or trigger an SQS retry (unlike the thread/signal saves above).
-    const resourceInfo = deriveResourceInfo(signal.data.workflow, signal.data.workflowData);
+    const resourceInfo = deriveResourceInfo(signal.data.workflow, signal.data.workflowData, account?.timezone ?? "Europe/London");
     if (resourceInfo) {
       const extractedAssets: import("../types/index.js").ResourceAsset[] = sanitizerAssets.map(a => ({
         type: a.type, label: a.label, rawValue: a.rawValue, sourceSignalId: signal.id,
@@ -1428,6 +1428,7 @@ export class SignalProcessor {
         workflow: signal.data.workflow,
         resourceKey: resourceInfo.resourceKey,
         expectedResolutionDate: resourceInfo.expectedResolutionDate,
+        displayDate: resourceInfo.displayDate,
         ttl: resourceTtl,
         ...(allAssets.length > 0 ? { assets: allAssets } : {}),
       });
