@@ -1,3 +1,5 @@
+import { DateTime } from "luxon";
+
 import type { Logger } from "../logger.js";
 import { CLASSIFIER_WORKFLOW_REGISTRY } from "../types/workflow-registry.js";
 
@@ -229,6 +231,144 @@ function coerceEnumValue(raw: unknown, enumValues: Array<{ value: string }>): st
     if (ev.value.toLowerCase() === trimmed) return ev.value;
   }
   return null;
+}
+
+/**
+ * Formats for human-readable date parsing (first match wins after ISO).
+ * Slash-separated numeric formats are explicitly excluded — they are ambiguous.
+ */
+const DATE_FORMATS_WITH_YEAR = [
+  "d MMMM yyyy",
+  "MMMM d, yyyy",
+  "d MMM yyyy",
+  "MMM d, yyyy",
+  "dd.MM.yyyy",
+];
+
+const DATE_FORMATS_YEARFREE = [
+  "d MMMM",
+  "MMMM d",
+  "d MMM",
+  "MMM d",
+];
+
+const TIME_SUFFIXES = ["", " HH:mm", " h:mm a"];
+
+/** Pattern to detect slash-separated numeric dates (e.g. 01/02/2025, 1/2/25). */
+const SLASH_DATE_PATTERN = /\d+\/\d+/;
+
+/**
+ * Resolves a year-free date to the next occurrence strictly after receivedAt.
+ * If the candidate (in the receivedAt year) is after receivedAt, use it.
+ * Otherwise advance to the next year.
+ */
+function resolveYearFree(month: number, day: number, receivedAt: DateTime): DateTime {
+  const candidate = DateTime.fromObject({ year: receivedAt.year, month, day });
+  if (candidate > receivedAt) return candidate;
+  return DateTime.fromObject({ year: receivedAt.year + 1, month, day });
+}
+
+/**
+ * Coerces a raw date value into a Display_Date string.
+ *
+ * Parse order:
+ * 1. ISO 8601 (with or without offset)
+ * 2. Human-readable formats (day MMMM yyyy, MMMM d yyyy, dot-separated, year-free, with/without time)
+ * 3. null on failure
+ *
+ * Slash-separated numeric dates are rejected as ambiguous.
+ *
+ * Output format:
+ * - date+time+offset → "YYYY-MM-DDTHH:mm±HH:mm"
+ * - date+time, no offset → "YYYY-MM-DDTHH:mm"
+ * - date only → "YYYY-MM-DD"
+ */
+export function coerceDate(value: unknown, receivedAt: string): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+
+  // Reject slash-separated numeric dates (ambiguous dd/MM vs MM/dd)
+  if (SLASH_DATE_PATTERN.test(trimmed)) return null;
+
+  const receivedAtDt = DateTime.fromISO(receivedAt, { zone: "utc" });
+
+  // 1. Try ISO 8601
+  const iso = DateTime.fromISO(trimmed, { setZone: true });
+  if (iso.isValid) {
+    return formatDisplayDate(iso, trimmed);
+  }
+
+  // 2. Try human-readable formats with year + time variants
+  for (const fmt of DATE_FORMATS_WITH_YEAR) {
+    for (const timeSuffix of TIME_SUFFIXES) {
+      const fullFmt = fmt + timeSuffix;
+      const parsed = DateTime.fromFormat(trimmed, fullFmt);
+      if (parsed.isValid) {
+        return formatDisplayDate(parsed, trimmed, timeSuffix !== "");
+      }
+    }
+  }
+
+  // 3. Try year-free formats + time variants
+  for (const fmt of DATE_FORMATS_YEARFREE) {
+    for (const timeSuffix of TIME_SUFFIXES) {
+      const fullFmt = fmt + timeSuffix;
+      const parsed = DateTime.fromFormat(trimmed, fullFmt);
+      if (parsed.isValid) {
+        const resolved = resolveYearFree(parsed.month, parsed.day, receivedAtDt);
+        if (timeSuffix !== "") {
+          const withTime = resolved.set({ hour: parsed.hour, minute: parsed.minute });
+          return formatDisplayDate(withTime, trimmed, true);
+        }
+        return resolved.toFormat("yyyy-MM-dd");
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Formats a parsed DateTime into the Display_Date output format.
+ * - Has offset in original input → preserve as YYYY-MM-DDTHH:mm±HH:mm
+ * - Has time but no offset → YYYY-MM-DDTHH:mm
+ * - Date only → YYYY-MM-DD
+ */
+function formatDisplayDate(dt: DateTime, originalInput: string, hasTime?: boolean): string {
+  const inputHasOffset = hasExplicitOffset(originalInput);
+  const inputHasTime = hasTime ?? hasTimeComponent(originalInput);
+
+  if (inputHasTime && inputHasOffset) {
+    // Preserve the offset — format as YYYY-MM-DDTHH:mm±HH:mm
+    const offset = dt.toFormat("ZZ");
+    return `${dt.toFormat("yyyy-MM-dd")}T${dt.toFormat("HH:mm")}${offset}`;
+  }
+  if (inputHasTime) {
+    return `${dt.toFormat("yyyy-MM-dd")}T${dt.toFormat("HH:mm")}`;
+  }
+  return dt.toFormat("yyyy-MM-dd");
+}
+
+/** Checks if the original string has an explicit timezone offset (Z, +HH:mm, -HH:mm). */
+function hasExplicitOffset(input: string): boolean {
+  // Z at end after a T separator (ISO style)
+  if (/T.+Z$/i.test(input)) return true;
+  // +HH:mm or -HH:mm at end
+  if (/[+-]\d{2}:\d{2}$/.test(input)) return true;
+  // +HHmm or -HHmm at end (compact offset)
+  if (/[+-]\d{4}$/.test(input)) return true;
+  return false;
+}
+
+/** Checks if the original string contains a time component. */
+function hasTimeComponent(input: string): boolean {
+  // ISO with T separator followed by time
+  if (/T\d{2}:\d{2}/.test(input)) return true;
+  // Human time pattern: digits:digits, possibly followed by AM/PM
+  // Only matches if the colon-separated digits appear after a space (not standalone)
+  if (/\s\d{1,2}:\d{2}/.test(input)) return true;
+  return false;
 }
 
 // Exported for testing
