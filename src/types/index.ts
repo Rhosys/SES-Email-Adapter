@@ -618,6 +618,7 @@ export interface Resource {
   resourceKey: string;
   status: ResourceStatus;
   expectedResolutionDate: string;
+  displayDate?: string;
   resolvedAt?: string;
   assets: ResourceAsset[];
   createdAt: string;
