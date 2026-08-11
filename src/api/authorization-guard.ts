@@ -1,4 +1,5 @@
-import type { Context, MiddlewareHandler } from "hono";
+import type { MiddlewareHandler } from "hono";
+import { routePath } from "hono/route";
 import type { Logger } from "../logger.js";
 
 /**
@@ -68,8 +69,8 @@ export function authorizationGuard(logger?: Logger): MiddlewareHandler {
       return;
     }
 
-    // Exception 6: JMAP push webhook — verified by HMAC token
-    if (method === "POST" && path === "/external-exchanges/jmap/target") {
+    // Exception 6: External exchange webhooks — verified at application layer (HMAC, OIDC JWT)
+    if (method === "POST" && routePath(c, -1) === "/external-exchanges/:platform/target") {
       return;
     }
 
