@@ -96,6 +96,7 @@ describe("JmapAdapter.activate", () => {
   });
 
   it("returns syncCursor, expiresAt ~1hr, and extracts session metadata on success", async () => {
+    vi.useFakeTimers({ now: new Date("2026-06-15T12:00:00.000Z") });
     const fetchMock = vi.fn<typeof fetch>();
 
     // 1st call: session fetch
@@ -141,18 +142,19 @@ describe("JmapAdapter.activate", () => {
     // Read off jmapConfig.username directly — JMAP has no separate identity to verify against.
     expect(value.emailAddress).toBe("user@example.com");
 
-    // expiresAt should be approximately 1 hour from now
+    // expiresAt should be approximately 15 minutes from now (polling interval)
     const expiresAt = new Date(value.expiresAt).getTime();
     const now = Date.now();
-    const oneHourMs = 60 * 60 * 1000;
-    expect(expiresAt).toBeGreaterThan(now + oneHourMs - 5000);
-    expect(expiresAt).toBeLessThan(now + oneHourMs + 5000);
+    const fifteenMinMs = 15 * 60 * 1000;
+    expect(expiresAt).toBeGreaterThan(now + fifteenMinMs - 5000);
+    expect(expiresAt).toBeLessThan(now + fifteenMinMs + 5000);
 
     // Session metadata stored on emx
     expect(emx.jmapConfig!.apiUrl).toBe("https://jmap.example.com/api");
     expect(emx.jmapConfig!.downloadUrl).toBe("https://jmap.example.com/download/{accountId}/{blobId}/{name}");
     expect(emx.jmapConfig!.jmapAccountId).toBe("acct-jmap-001");
     expect(emx.jmapConfig!.inboxId).toBe("inbox-001");
+    vi.useRealTimers();
   });
 
   it("returns activation_failed 'invalid credentials' on HTTP 401", async () => {

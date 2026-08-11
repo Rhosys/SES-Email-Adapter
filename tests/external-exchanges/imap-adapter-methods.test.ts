@@ -108,6 +108,7 @@ beforeEach(() => {
 
 describe("ImapAdapter.activate", () => {
   it("returns syncCursor, expiresAt ~1hr ahead, providerSubscriptionId='poll' on success", async () => {
+    vi.useFakeTimers({ now: new Date("2026-06-15T12:00:00.000Z") });
     const adapter = createAdapter();
     const emx = makeEmx();
     const before = DateTime.utc();
@@ -121,11 +122,12 @@ describe("ImapAdapter.activate", () => {
     expect(value.providerSubscriptionId).toBe("poll");
     // Read off imapConfig.username directly — IMAP has no separate identity to verify against.
     expect(value.emailAddress).toBe("user@example.com");
-    // expiresAt should be ~1hr from now
+    // expiresAt should be ~15min from now (polling interval)
     const expiresAt = DateTime.fromISO(value.expiresAt);
     const diffMinutes = expiresAt.diff(before, "minutes").minutes;
-    expect(diffMinutes).toBeGreaterThan(55);
-    expect(diffMinutes).toBeLessThan(65);
+    expect(diffMinutes).toBeGreaterThan(13);
+    expect(diffMinutes).toBeLessThan(17);
+    vi.useRealTimers();
   });
 
   it("returns activation_failed with 'host unreachable' on timeout", async () => {
