@@ -34,6 +34,8 @@ export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
     encryptionManager: { encrypt: () => "encrypted", decrypt: () => "decrypted" } as never,
     getProviderToken: async () => "",
     signalQueue: { send: async () => ok(undefined), sendBatch: async () => ok(undefined) } as never,
+    gmailProvider: { handle: async () => new Response("{}", { status: 200 }) } as never,
+    outlookProvider: { handle: async () => new Response("{}", { status: 200 }) } as never,
     jmapAdapter: { handleWebhook: async () => ok(undefined) } as never,
     ...overrides,
   } as AppDeps;

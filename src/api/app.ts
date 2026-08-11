@@ -106,8 +106,8 @@ export interface AppDeps {
   embeddingGenerator: EmbeddingGenerator;
   threadMatcher: ThreadMatcher;
   unsubscribeTokenGenerator: UnsubscribeTokenGenerator;
-  gmailProvider?: GmailProvider;
-  outlookProvider?: OutlookProvider;
+  gmailProvider: GmailProvider;
+  outlookProvider: OutlookProvider;
   adapters: Record<string, ProviderAdapter>;
   encryptionManager: EncryptionManager;
   getProviderToken: (userId: string, connectionId: string, connectionUserId: string) => Promise<string>;
@@ -293,23 +293,29 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
   // -------------------------------------------------------------------------
   // Webhook routes (public — provider-verified at application layer)
   // -------------------------------------------------------------------------
-  if (gmailProvider && outlookProvider) {
-    app.post("/external-exchanges/:platform/target", async (c) => {
+  app.post("/external-exchanges/:platform/target", async (c) => {
+    const platform = c.req.param("platform");
+
+    if (platform === "gmail") {
+      const response = await gmailProvider.handle(c);
       c.set("authorizationVerified", true);
-      const platform = c.req.param("platform");
-      if (platform === "gmail") return gmailProvider.handle(c);
-      if (platform === "outlook") return outlookProvider.handle(c);
-      if (platform === "jmap") return handleJmapWebhook(c);
-      return c.json({ title: "Not Found" }, 404);
-    });
-  } else {
-    app.post("/external-exchanges/:platform/target", async (c) => {
+      return response;
+    }
+
+    if (platform === "outlook") {
+      const response = await outlookProvider.handle(c);
       c.set("authorizationVerified", true);
-      const platform = c.req.param("platform");
-      if (platform === "jmap") return handleJmapWebhook(c);
-      return c.json({ title: "Not Found" }, 404);
-    });
-  }
+      return response;
+    }
+
+    if (platform === "jmap") {
+      const response = await handleJmapWebhook(c);
+      c.set("authorizationVerified", true);
+      return response;
+    }
+
+    return c.json({ title: "Not Found" }, 404);
+  });
 
   // -------------------------------------------------------------------------
   // Route registrations
