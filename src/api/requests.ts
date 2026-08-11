@@ -245,6 +245,7 @@ const DigestSchema = z.object({
 
 export const UpdateAccountRequest = z.object({
   name: z.string().optional(),
+  timezone: z.string().optional(),
   retentionDuration: RetentionDuration.optional(),
   digest: DigestSchema,
   filtering: AccountFilteringConfigSchema.optional(),

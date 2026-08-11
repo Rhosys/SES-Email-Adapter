@@ -346,6 +346,7 @@ export function toApiAccount(account: DbAccount): Api.Account {
   return {
     accountId: account.id,
     name: account.name,
+    timezone: account.timezone,
     ...(account.retentionDuration ? { retentionDuration: account.retentionDuration as Api.Account["retentionDuration"] } : {}),
     ...(account.digest !== undefined ? { digest: account.digest } : {}),
     // Always populated — accounts that never explicitly saved a filtering preference fall back to the

@@ -663,6 +663,7 @@ export const AccountOnboarding = z.object({
 export const Account = z.object({
   accountId: z.string().readonly(),
   name: z.string(),
+  timezone: z.string(),
   retentionDuration: RetentionDuration.optional(),
   digest: z.object({ frequency: z.enum(["daily", "weekly", "monthly"]), forwardingTargetId: z.string() }).nullable().optional(),
   filtering: AccountFilteringConfig,

@@ -10,6 +10,7 @@ import { renderTemplate } from "../email/template-renderer.js";
 import { buildEmailTags } from "../email/tag-sanitizer.js";
 import { UpdateAccountRequest, InviteUserRequest, UpdateUserRequest } from "./requests.js";
 import { Account as AccountSchema, ErrorCode, Pagination as PaginationSchema } from "./schemas.js";
+import { TIMEZONE_ALLOWLIST } from "./timezone-allowlist.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import type { Account, Pagination } from "../types/index.js";
@@ -170,6 +171,9 @@ export class AccountsApi {
       const accountId = c.req.param("accountId")!;
       logger.info("Updating account", { code: "api.accounts.update", accountId });
       const body = await zParse(UpdateAccountRequest, c.req.raw);
+      if (body.timezone !== undefined && !TIMEZONE_ALLOWLIST.has(body.timezone)) {
+        return err(c, 400, "Not a recognized IANA timezone");
+      }
       if (body.digest) {
         const targetResult = await accountDb.getForwardingTarget(accountId, body.digest.forwardingTargetId);
         if (targetResult.isErr()) { logger.error("Failed to get forwarding target for digest.", { code: "api.accounts.patch.get_target_failed", accountId, error: targetResult.error }); return err(c, 500, "Internal Server Error"); }
@@ -200,7 +204,7 @@ export class AccountsApi {
         const existing = existingResult.value;
         body.onboarding = { ...existing?.onboarding, ...body.onboarding };
       }
-      const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingTargetId">>);
+      const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingTargetId" | "timezone">>);
       if (updateResult.isErr()) { logger.error("Failed to update account.", { code: "api.accounts.patch.update_failed", accountId, error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
 
       // Trigger immediate digest only on frequency increase or target change
