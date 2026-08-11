@@ -162,6 +162,70 @@ describe("deriveResourceInfo", () => {
     });
   });
 
+  describe("UTC conversion per Display_Date variant", () => {
+    it("date with offset → UTC (instant preserved)", () => {
+      const info = deriveResourceInfo("package", {
+        workflow: "package", packageType: "shipping", retailer: "Amazon",
+        orderNumber: "ORD-1", estimatedDelivery: "2027-03-15T14:00+02:00",
+      }, "Europe/London");
+      expect(info).not.toBeNull();
+      expect(info!.expectedResolutionDate).toBe("2027-03-15T12:00:00.000Z");
+      expect(info!.displayDate).toBe("2027-03-15T14:00+02:00");
+    });
+
+    it("date without offset → account timezone applied → UTC", () => {
+      const info = deriveResourceInfo("package", {
+        workflow: "package", packageType: "shipping", retailer: "Amazon",
+        orderNumber: "ORD-2", estimatedDelivery: "2027-03-15T14:00",
+      }, "Europe/Zurich");
+      expect(info).not.toBeNull();
+      // March 15 Zurich is CET (+01:00), so 14:00 CET → 13:00 UTC
+      expect(info!.expectedResolutionDate).toBe("2027-03-15T13:00:00.000Z");
+      expect(info!.displayDate).toBe("2027-03-15T14:00");
+    });
+
+    it("date-only → midnight in account timezone → UTC", () => {
+      const info = deriveResourceInfo("package", {
+        workflow: "package", packageType: "shipping", retailer: "Amazon",
+        orderNumber: "ORD-3", estimatedDelivery: "2027-03-15",
+      }, "Europe/Zurich");
+      expect(info).not.toBeNull();
+      // March 15 Zurich is CET (+01:00), midnight → 23:00 previous day UTC
+      expect(info!.expectedResolutionDate).toBe("2027-03-14T23:00:00.000Z");
+      expect(info!.displayDate).toBe("2027-03-15");
+    });
+
+    it("date with Z offset → converts directly to UTC", () => {
+      const info = deriveResourceInfo("travel", {
+        workflow: "travel", travelType: "flight", provider: "United",
+        departureDate: "2027-06-01T08:00+00:00", flightNumber: "UA100",
+      }, "America/New_York");
+      expect(info).not.toBeNull();
+      expect(info!.expectedResolutionDate).toBe("2027-06-01T08:00:00.000Z");
+    });
+
+    it("date without offset uses default timezone when accountTimezone omitted", () => {
+      // deriveResourceInfo defaults to "Europe/London" when no tz passed
+      const info = deriveResourceInfo("payments", {
+        workflow: "payments", paymentType: "invoice", vendor: "AWS",
+        dueDate: "2027-01-15T09:00", invoiceNumber: "INV-99",
+      });
+      expect(info).not.toBeNull();
+      // January in London is GMT (+00:00), so 09:00 → 09:00 UTC
+      expect(info!.expectedResolutionDate).toBe("2027-01-15T09:00:00.000Z");
+    });
+
+    it("date-only with summer timezone (DST offset)", () => {
+      const info = deriveResourceInfo("healthcare", {
+        workflow: "healthcare", eventType: "appointment_reminder", provider: "Dr. Smith",
+        appointmentDate: "2027-07-01", requiresAction: false,
+      }, "Europe/Zurich");
+      expect(info).not.toBeNull();
+      // July in Zurich is CEST (+02:00), midnight → 22:00 previous day UTC
+      expect(info!.expectedResolutionDate).toBe("2027-06-30T22:00:00.000Z");
+    });
+  });
+
   describe("non-resource workflows", () => {
     it.each(["auth", "conversation", "crm", "alert", "content", "onboarding", "notice", "support", "healthcheck", "test", "unspecified"] as const)(
       "returns null for workflow %s",

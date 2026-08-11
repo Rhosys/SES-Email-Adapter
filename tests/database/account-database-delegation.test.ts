@@ -135,6 +135,24 @@ describe("AccountDatabase — SYSTEM delegation (Property 5)", () => {
       expect(ddbMock.commandCalls(GetCommand)).toHaveLength(1);
     });
 
+    it("getAccount defaults timezone to Europe/London when DynamoDB record has no timezone", async () => {
+      ddbMock.on(GetCommand).resolves({ Item: { id: "acct-legacy", name: "Legacy" } });
+
+      const result = await db.getAccount("acct-legacy");
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()!.timezone).toBe("Europe/London");
+    });
+
+    it("getAccount preserves timezone when DynamoDB record has one", async () => {
+      ddbMock.on(GetCommand).resolves({ Item: { id: "acct-tz", name: "Zurich User", timezone: "Europe/Zurich" } });
+
+      const result = await db.getAccount("acct-tz");
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap()!.timezone).toBe("Europe/Zurich");
+    });
+
     it("listEnabledRules with regular accountId queries DynamoDB", async () => {
       ddbMock.on(QueryCommand).resolves({ Items: [{ id: "rule-1", status: "enabled", priorityOrder: 1 }] });
 

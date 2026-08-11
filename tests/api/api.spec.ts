@@ -1156,6 +1156,27 @@ describe("API", () => {
       );
     });
 
+    it("accepts valid timezone from allowlist", async () => {
+      const res = await req(app, "PATCH", `${A}`, { body: { timezone: "Europe/Zurich" } });
+      expect(res.status).toBe(200);
+      expect(accountDb.updateAccount).toHaveBeenCalledWith(
+        TEST_ACCOUNT_ID,
+        expect.objectContaining({ timezone: "Europe/Zurich" }),
+      );
+    });
+
+    it("rejects invalid timezone with 400", async () => {
+      const res = await req(app, "PATCH", `${A}`, { body: { timezone: "Not/A_Timezone" } });
+      expect(res.status).toBe(400);
+      expect(accountDb.updateAccount).not.toHaveBeenCalled();
+    });
+
+    it("rejects timezone with wrong casing (case-sensitive)", async () => {
+      const res = await req(app, "PATCH", `${A}`, { body: { timezone: "europe/london" } });
+      expect(res.status).toBe(400);
+      expect(accountDb.updateAccount).not.toHaveBeenCalled();
+    });
+
   });
 
   // -------------------------------------------------------------------------
