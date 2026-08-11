@@ -35,7 +35,7 @@ function extractInterfaceBody(interfaceName: string): string {
 interface ParsedField {
   name: string;
   required: boolean;
-  type: "string" | "number" | "boolean" | "enum" | "array";
+  type: "string" | "number" | "boolean" | "enum" | "array" | "date";
   enumValues?: string[];
 }
 
@@ -206,6 +206,12 @@ describe("workflow registry ↔ TypeScript type alignment", () => {
           // the LLM is asked for numbers to encourage numeric output, but coercion
           // converts them to strings at the classifier boundary before storage.
           if (registryField.type === "number" && tsField.type === "string") {
+            continue;
+          }
+
+          // Date fields in the registry are stored as string in TypeScript —
+          // the coercion module parses them into Display_Date strings.
+          if (registryField.type === "date" && tsField.type === "string") {
             continue;
           }
 
