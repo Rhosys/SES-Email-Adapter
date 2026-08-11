@@ -586,7 +586,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(call).toMatchObject({
         workflow: "package",
         resourceKey: "123-456-789",
-        expectedResolutionDate: "2024-01-20T00:00:00Z",
+        expectedResolutionDate: "2024-01-20T00:00:00.000Z",
       });
       expect(call).not.toHaveProperty("terminal");
 
@@ -617,7 +617,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(resourceDb.saveResource).toHaveBeenCalledOnce();
       expect(resourceDb.saveResource.mock.calls[0]![0]).toMatchObject({
         resourceKey: "123-456-789",
-        expectedResolutionDate: "2024-01-20T00:00:00Z",
+        expectedResolutionDate: "2024-01-20T00:00:00.000Z",
       });
     });
 
