@@ -1,4 +1,5 @@
 import { simpleParser } from "mailparser";
+import { Window } from "happy-dom";
 import { sanitizeHtml } from "./html-sanitizer.js";
 import { extractAssets, type ExtractedAsset } from "./asset-extractor.js";
 
@@ -31,6 +32,11 @@ interface ContentSanitizeRequest {
   invocationId?: string;
 }
 
+interface ExtractedLink {
+  url: string;
+  text: string | null;
+}
+
 interface ContentSanitizeResponse {
   success: true;
   parsed: {
@@ -45,6 +51,7 @@ interface ContentSanitizeResponse {
     headers: Record<string, string>;
     sentAt?: string;
     assets?: ExtractedAsset[];
+    links?: ExtractedLink[];
   };
 }
 
@@ -226,11 +233,47 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
 
   // 6. Sanitize HTML and inline CID images
   let htmlBody: string | undefined;
+  let extractedLinks: Array<{ url: string; text: string | null }> = [];
 
   if (parsed.html) {
     const htmlInput = typeof parsed.html === "string" ? parsed.html : "";
     const sanitized = sanitizeHtml(htmlInput);
     htmlBody = sanitized.html.replace(/cid:([^"'\s>]+)/g, (_, id: string) => cidMap[id] ?? "");
+
+    // Extract links from raw HTML using a DOM parser (before sanitization strips tracking pixels etc.)
+    const linkDoc = new Window({ url: "about:blank" }).document;
+    linkDoc.body.innerHTML = htmlInput;
+    const seenUrls = new Set<string>();
+    for (const anchor of linkDoc.querySelectorAll("a[href]")) {
+      const href = anchor.getAttribute("href");
+      if (!href) continue;
+      try {
+        const url = new URL(href);
+        if (url.protocol !== "http:" && url.protocol !== "https:") continue;
+      } catch {
+        continue;
+      }
+      if (seenUrls.has(href)) continue;
+      seenUrls.add(href);
+      const anchorText = (anchor.textContent ?? "").trim();
+      const text = anchorText && anchorText !== href ? anchorText : null;
+      extractedLinks.push({ url: href, text });
+    }
+  }
+
+  // Fallback: extract bare URLs from text body ONLY when no HTML part exists.
+  // When HTML is present, it is the rendered view — text/plain may contain attacker-injected
+  // URLs invisible to the user's mail client. Never trust text-body links if HTML exists.
+  if (!parsed.html && parsed.text) {
+    const urlRegex = /https?:\/\/[^\s<>"')\]]+/gi;
+    const seenUrls = new Set<string>();
+    let match: RegExpExecArray | null;
+    while ((match = urlRegex.exec(parsed.text)) !== null) {
+      const href = match[0];
+      if (seenUrls.has(href)) continue;
+      seenUrls.add(href);
+      extractedLinks.push({ url: href, text: null });
+    }
   }
 
   // 9. Build response
@@ -286,6 +329,9 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
   }
   if (extractedAssets.length > 0) {
     result.parsed.assets = extractedAssets;
+  }
+  if (extractedLinks.length > 0) {
+    result.parsed.links = extractedLinks;
   }
 
   return result;

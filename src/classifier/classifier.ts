@@ -28,6 +28,7 @@ export interface ClassificationInput {
   headers: Record<string, string>;
   allowedLabels: string[];
   labelInstructions: Record<string, string>;
+  extractedLinks?: Array<{ url: string; text: string | null }>;
   signalId?: string;
   accountId?: string;
 }
@@ -200,7 +201,7 @@ export class SignalClassifier {
       if (field in workflowData && typeof workflowData[field] === "string") {
         const value = workflowData[field] as string;
         if (!isValidUrl(value)) {
-          this.logger.track("Classifier returned non-URL value for URL field — nullified.", { code: "classifier.invalid_url_field", field, value, signalId: input.signalId, accountId: input.accountId, workflow: raw.workflow });
+          this.logger.track("Classifier returned non-URL value for URL field — nullified.", { code: "classifier.invalid_url_field", field, value, input, rawResponse: jsonText });
           workflowData[field] = null;
         }
       }

@@ -990,6 +990,7 @@ export class SignalProcessor {
     for (const [k, v] of Object.entries(parsed.headers)) {
       if (RELEVANT_HEADERS.has(k.toLowerCase())) classificationHeaders[k] = v;
     }
+    const extractedLinks = sanitizedParsed.links ?? [];
     const classification = await this.classifier.classify({
       from: parsed.from.address,
       to: parsed.to.map((a) => a.address),
@@ -999,6 +1000,7 @@ export class SignalProcessor {
       receivedAt: timestamp,
       allowedLabels,
       labelInstructions,
+      extractedLinks,
       signalId: msg.compositeMailMessageId,
       accountId,
     });

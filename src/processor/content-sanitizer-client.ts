@@ -40,6 +40,11 @@ interface ExtractedAsset {
   s3Key?: string;
 }
 
+export interface ExtractedLink {
+  url: string;
+  text: string | null;
+}
+
 export interface ContentSanitizeResponse {
   parsed: {
     from: EmailAddress;
@@ -53,6 +58,7 @@ export interface ContentSanitizeResponse {
     headers: Record<string, string>;
     sentAt?: string;
     assets?: ExtractedAsset[];
+    links?: ExtractedLink[];
   };
 }
 
