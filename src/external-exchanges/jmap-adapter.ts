@@ -562,6 +562,41 @@ export class JmapAdapter implements ProviderAdapter {
   }
 
   // ---------------------------------------------------------------------------
+  // Public: Poll + dispatch (used by EmxIdleWorker)
+  // ---------------------------------------------------------------------------
+  // INVARIANT: This method is STATELESS — it must NEVER write to the database (no
+  // cursor updates, no lastSyncAt, no exchange mutations). The sync cursor (JMAP
+  // state string) is owned exclusively by the dispatch/renew path. Poll detects
+  // change → enqueues emx_dispatch → renew() does the cursor-aware catch-up.
+  // ---------------------------------------------------------------------------
+
+  async pollAndDispatch(emx: ExternalMailExchange, iterations: number, intervalMs: number): Promise<Result<void, never>> {
+    const result = await this.poll(emx, iterations, intervalMs);
+    if (result.isErr()) {
+      const cause = typeof result.error.cause === "string" ? result.error.cause : String(result.error.cause);
+      if (cause === "invalid credentials") {
+        this.logger.warn("emx_idle: JMAP authentication failed", { code: "emx.idle.jmap_auth_failed", emxId: emx.id });
+      } else {
+        this.logger.warn("emx_idle: JMAP polling failed", { code: "emx.idle.jmap_session_failed", emxId: emx.id, cause });
+      }
+      return ok(undefined);
+    }
+
+    if (result.value === "timeout") {
+      this.logger.info("emx_idle: JMAP polling complete, no new mail", { code: "emx.idle.jmap_timeout", emxId: emx.id });
+      return ok(undefined);
+    }
+
+    this.logger.info("emx_idle: JMAP new mail detected", { code: "emx.idle.jmap_new_mail", emxId: emx.id });
+    const sendResult = await this.signalQueue.send("emx_dispatch", { emxId: emx.id, accountId: emx.accountId });
+    if (sendResult.isErr()) {
+      this.logger.error("emx_idle: failed to enqueue emx_dispatch after detecting changes", { code: "emx.idle.enqueue_failed", emxId: emx.id, error: sendResult.error });
+    }
+
+    return ok(undefined);
+  }
+
+  // ---------------------------------------------------------------------------
   // Private: JMAP Push Subscription registration and verification (R5)
   // ---------------------------------------------------------------------------
 

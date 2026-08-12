@@ -3,7 +3,6 @@ import { ok } from "../errors.js";
 import type { Result } from "../errors.js";
 import type { ExternalMailExchange } from "../types/index.js";
 import type { AccountDatabase } from "../database/account-database.js";
-import type { SignalQueue } from "../messaging/signal-queue.js";
 import type { Logger } from "../logger.js";
 import type { ImapAdapter } from "./imap-adapter.js";
 import type { JmapAdapter } from "./jmap-adapter.js";
@@ -30,7 +29,6 @@ interface EmxIdleWorkerDeps {
   db: AccountDatabase;
   imapAdapter: ImapAdapter;
   jmapAdapter: JmapAdapter;
-  signalQueue: SignalQueue;
 }
 
 export class EmxIdleWorker {
@@ -38,14 +36,12 @@ export class EmxIdleWorker {
   private readonly db: AccountDatabase;
   private readonly imapAdapter: ImapAdapter;
   private readonly jmapAdapter: JmapAdapter;
-  private readonly signalQueue: SignalQueue;
 
   constructor(deps: EmxIdleWorkerDeps) {
     this.logger = deps.logger;
     this.db = deps.db;
     this.imapAdapter = deps.imapAdapter;
     this.jmapAdapter = deps.jmapAdapter;
-    this.signalQueue = deps.signalQueue;
   }
 
   async process(payload: EmxIdlePayload): Promise<Result<void, never>> {
@@ -69,7 +65,7 @@ export class EmxIdleWorker {
     }
 
     const now = DateTime.utc();
-    const tasks: Array<Promise<{ emxId: string; outcome: string }>> = [];
+    const tasks: Array<Promise<Result<void, never>>> = [];
 
     for (const emx of exchanges) {
       // Dedup: skip if synced recently (R4.12)
@@ -90,9 +86,9 @@ export class EmxIdleWorker {
       }
 
       if (emx.platform === "imap") {
-        tasks.push(this.processImap(emx));
+        tasks.push(this.imapAdapter.idleAndDispatch(emx, IDLE_TIMEOUT_MS));
       } else {
-        tasks.push(this.processJmap(emx));
+        tasks.push(this.jmapAdapter.pollAndDispatch(emx, JMAP_POLL_ITERATIONS, JMAP_POLL_INTERVAL_MS));
       }
     }
 
@@ -102,77 +98,9 @@ export class EmxIdleWorker {
     }
 
     // Run all concurrently (R1.2)
-    const results = await Promise.allSettled(tasks);
+    await Promise.allSettled(tasks);
 
-    const outcomes: Array<{ emxId: string; outcome: string }> = [];
-    for (const result of results) {
-      if (result.status === "fulfilled") {
-        outcomes.push(result.value);
-      } else {
-        outcomes.push({ emxId: "unknown", outcome: `rejected: ${String(result.reason)}` });
-      }
-    }
-
-    this.logger.info("emx_idle: completed", { code: "emx.idle.done", accountId, outcomes });
+    this.logger.info("emx_idle: completed", { code: "emx.idle.done", accountId, exchangeCount: tasks.length });
     return ok(undefined);
-  }
-
-  // ---------------------------------------------------------------------------
-  // IMAP path
-  // ---------------------------------------------------------------------------
-
-  private async processImap(emx: ExternalMailExchange): Promise<{ emxId: string; outcome: string }> {
-    const result = await this.imapAdapter.idle(emx, IDLE_TIMEOUT_MS);
-    if (result.isErr()) {
-      this.logger.warn("emx_idle: IMAP connection failed or dropped", { code: "emx.idle.imap_connect_failed", emxId: emx.id, error: result.error });
-      return { emxId: emx.id, outcome: `error: ${result.error.reason}` };
-    }
-
-    if (result.value === "timeout") {
-      this.logger.info("emx_idle: IMAP IDLE timed out, no new mail", { code: "emx.idle.imap_timeout", emxId: emx.id });
-      return { emxId: emx.id, outcome: "idle-timeout" };
-    }
-
-    // New mail detected — enqueue targeted emx_dispatch
-    this.logger.info("emx_idle: IMAP new mail detected", { code: "emx.idle.imap_new_mail", emxId: emx.id });
-    const sendResult = await this.signalQueue.send("emx_dispatch", { emxId: emx.id, accountId: emx.accountId });
-    if (sendResult.isErr()) {
-      this.logger.error("emx_idle: failed to enqueue emx_dispatch after detecting new mail", { code: "emx.idle.enqueue_failed", emxId: emx.id, error: sendResult.error });
-      return { emxId: emx.id, outcome: "error: enqueue failed" };
-    }
-
-    return { emxId: emx.id, outcome: "new-mail-detected" };
-  }
-
-  // ---------------------------------------------------------------------------
-  // JMAP path
-  // ---------------------------------------------------------------------------
-
-  private async processJmap(emx: ExternalMailExchange): Promise<{ emxId: string; outcome: string }> {
-    const result = await this.jmapAdapter.poll(emx, JMAP_POLL_ITERATIONS, JMAP_POLL_INTERVAL_MS);
-    if (result.isErr()) {
-      const cause = typeof result.error.cause === "string" ? result.error.cause : String(result.error.cause);
-      if (cause === "invalid credentials") {
-        this.logger.warn("emx_idle: JMAP authentication failed", { code: "emx.idle.jmap_auth_failed", emxId: emx.id });
-      } else {
-        this.logger.warn("emx_idle: JMAP polling failed", { code: "emx.idle.jmap_session_failed", emxId: emx.id, cause });
-      }
-      return { emxId: emx.id, outcome: `error: ${cause}` };
-    }
-
-    if (result.value === "timeout") {
-      this.logger.info("emx_idle: JMAP polling complete, no new mail", { code: "emx.idle.jmap_timeout", emxId: emx.id });
-      return { emxId: emx.id, outcome: "idle-timeout" };
-    }
-
-    // New mail detected — enqueue targeted emx_dispatch
-    this.logger.info("emx_idle: JMAP new mail detected", { code: "emx.idle.jmap_new_mail", emxId: emx.id });
-    const sendResult = await this.signalQueue.send("emx_dispatch", { emxId: emx.id, accountId: emx.accountId });
-    if (sendResult.isErr()) {
-      this.logger.error("emx_idle: failed to enqueue emx_dispatch after detecting changes", { code: "emx.idle.enqueue_failed", emxId: emx.id, error: sendResult.error });
-      return { emxId: emx.id, outcome: "error: enqueue failed" };
-    }
-
-    return { emxId: emx.id, outcome: "new-mail-detected" };
   }
 }

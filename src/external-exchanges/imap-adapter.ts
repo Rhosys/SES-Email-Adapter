@@ -413,6 +413,38 @@ export class ImapAdapter implements ProviderAdapter {
     return idleResult;
   }
 
+  // ---------------------------------------------------------------------------
+  // Public: IDLE + dispatch (used by EmxIdleWorker)
+  // ---------------------------------------------------------------------------
+  // INVARIANT: This method is STATELESS — it must NEVER write to the database (no
+  // cursor updates, no lastSyncAt, no exchange mutations). The sync cursor is
+  // owned exclusively by the dispatch/renew path. If IDLE advanced the cursor,
+  // pre-existing unfetched emails between the old cursor and the new mail event
+  // would be permanently skipped. IDLE's only job: detect change → enqueue
+  // emx_dispatch → let renew() do the cursor-aware catch-up from lastUid-10.
+  // ---------------------------------------------------------------------------
+
+  async idleAndDispatch(emx: ExternalMailExchange, timeoutMs: number): Promise<Result<void, never>> {
+    const result = await this.idle(emx, timeoutMs);
+    if (result.isErr()) {
+      this.logger.warn("emx_idle: IMAP connection failed or dropped", { code: "emx.idle.imap_connect_failed", emxId: emx.id, error: result.error });
+      return ok(undefined);
+    }
+
+    if (result.value === "timeout") {
+      this.logger.info("emx_idle: IMAP IDLE timed out, no new mail", { code: "emx.idle.imap_timeout", emxId: emx.id });
+      return ok(undefined);
+    }
+
+    this.logger.info("emx_idle: IMAP new mail detected", { code: "emx.idle.imap_new_mail", emxId: emx.id });
+    const sendResult = await this.signalQueue.send("emx_dispatch", { emxId: emx.id, accountId: emx.accountId });
+    if (sendResult.isErr()) {
+      this.logger.error("emx_idle: failed to enqueue emx_dispatch after detecting new mail", { code: "emx.idle.enqueue_failed", emxId: emx.id, error: sendResult.error });
+    }
+
+    return ok(undefined);
+  }
+
   async fetchMessage(providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>> {
     const imapConfig = emx.imapConfig;
     if (!imapConfig) {

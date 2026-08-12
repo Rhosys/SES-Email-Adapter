@@ -389,7 +389,6 @@ export class CompositeRoot {
       db: accountDb,
       imapAdapter,
       jmapAdapter,
-      signalQueue,
     });
 
     // -----------------------------------------------------------------------

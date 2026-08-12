@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ok, err } from "neverthrow";
+import { ok } from "neverthrow";
 import { EmxIdleWorker } from "../../src/external-exchanges/emx-idle-worker.js";
 import type { ExternalMailExchange } from "../../src/types/index.js";
 import type { Logger } from "../../src/logger.js";
@@ -24,17 +24,11 @@ const mockDb = {
 };
 
 const mockImapAdapter = {
-  idle: vi.fn(),
+  idleAndDispatch: vi.fn(),
 };
 
 const mockJmapAdapter = {
-  poll: vi.fn(),
-};
-
-const mockSignalQueue = {
-  send: vi.fn(),
-  sendToLongPoller: vi.fn(),
-  sendBatch: vi.fn(),
+  pollAndDispatch: vi.fn(),
 };
 
 function createWorker(): EmxIdleWorker {
@@ -43,7 +37,6 @@ function createWorker(): EmxIdleWorker {
     db: mockDb as never,
     imapAdapter: mockImapAdapter as never,
     jmapAdapter: mockJmapAdapter as never,
-    signalQueue: mockSignalQueue as never,
   });
 }
 
@@ -93,79 +86,60 @@ afterEach(() => {
 // ===========================================================================
 
 describe("EmxIdleWorker — IMAP", () => {
-  it("happy path: IDLE detects new mail → emx_dispatch enqueued", async () => {
+  it("happy path: IDLE detects new mail → adapter handles dispatch", async () => {
     mockDb.listExternalExchanges.mockResolvedValue(ok([imapExchange]));
-    mockImapAdapter.idle.mockResolvedValue(ok("new_mail" as const));
-    mockSignalQueue.send.mockResolvedValue(ok(undefined));
+    mockImapAdapter.idleAndDispatch.mockResolvedValue(ok(undefined));
 
     const worker = createWorker();
     const result = await worker.process({ accountId: "acc-1" });
 
     expect(result.isOk()).toBe(true);
-    expect(mockImapAdapter.idle).toHaveBeenCalledWith(imapExchange, 5 * 60 * 1000);
-    expect(mockSignalQueue.send).toHaveBeenCalledWith("emx_dispatch", { emxId: "emx-imap-1", accountId: "acc-1" });
+    expect(mockImapAdapter.idleAndDispatch).toHaveBeenCalledWith(imapExchange, 5 * 60 * 1000);
   });
 
-  it("timeout: IDLE times out → clean exit, no enqueue", async () => {
+  it("timeout: IDLE times out → clean exit", async () => {
     mockDb.listExternalExchanges.mockResolvedValue(ok([imapExchange]));
-    mockImapAdapter.idle.mockResolvedValue(ok("timeout" as const));
-    mockSignalQueue.send.mockResolvedValue(ok(undefined));
+    mockImapAdapter.idleAndDispatch.mockResolvedValue(ok(undefined));
 
     const worker = createWorker();
     const result = await worker.process({ accountId: "acc-1" });
 
     expect(result.isOk()).toBe(true);
-    expect(mockSignalQueue.send).not.toHaveBeenCalled();
   });
 
-  it("connection failure → WARN logged, exchange skipped, others continue", async () => {
+  it("connection failure → adapter absorbs error, others continue", async () => {
     const imapExchange2 = { ...imapExchange, id: "emx-imap-2" };
     mockDb.listExternalExchanges.mockResolvedValue(ok([imapExchange, imapExchange2]));
 
-    mockImapAdapter.idle
-      .mockResolvedValueOnce(err({ kind: "imap_error", reason: "Authentication failed", cause: new Error("AUTH") }))
-      .mockResolvedValueOnce(ok("new_mail" as const));
-    mockSignalQueue.send.mockResolvedValue(ok(undefined));
+    mockImapAdapter.idleAndDispatch
+      .mockResolvedValueOnce(ok(undefined))
+      .mockResolvedValueOnce(ok(undefined));
 
     const worker = createWorker();
     const result = await worker.process({ accountId: "acc-1" });
 
     expect(result.isOk()).toBe(true);
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      expect.stringContaining("IMAP connection failed"),
-      expect.objectContaining({ emxId: "emx-imap-1" }),
-    );
-    expect(mockSignalQueue.send).toHaveBeenCalledWith("emx_dispatch", { emxId: "emx-imap-2", accountId: "acc-1" });
+    expect(mockImapAdapter.idleAndDispatch).toHaveBeenCalledTimes(2);
   });
 
-  it("network failure → WARN logged, exchange skipped", async () => {
+  it("network failure → adapter absorbs error", async () => {
     mockDb.listExternalExchanges.mockResolvedValue(ok([imapExchange]));
-    mockImapAdapter.idle.mockResolvedValue(err({ kind: "imap_error", reason: "ETIMEDOUT", cause: new Error("ETIMEDOUT") }));
+    mockImapAdapter.idleAndDispatch.mockResolvedValue(ok(undefined));
 
     const worker = createWorker();
     const result = await worker.process({ accountId: "acc-1" });
 
     expect(result.isOk()).toBe(true);
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      expect.stringContaining("IMAP connection failed"),
-      expect.objectContaining({ emxId: "emx-imap-1" }),
-    );
-    expect(mockSignalQueue.send).not.toHaveBeenCalled();
   });
 
-  it("SQS enqueue failure after detecting mail → ERROR logged", async () => {
+  it("SQS enqueue failure after detecting mail → adapter absorbs error", async () => {
     mockDb.listExternalExchanges.mockResolvedValue(ok([imapExchange]));
-    mockImapAdapter.idle.mockResolvedValue(ok("new_mail" as const));
-    mockSignalQueue.send.mockResolvedValue(err({ kind: "db_error", message: "SQS failure", cause: new Error("SQS") }));
+    mockImapAdapter.idleAndDispatch.mockResolvedValue(ok(undefined));
 
     const worker = createWorker();
     const result = await worker.process({ accountId: "acc-1" });
 
     expect(result.isOk()).toBe(true);
-    expect(mockLogger.error).toHaveBeenCalledWith(
-      expect.stringContaining("failed to enqueue emx_dispatch"),
-      expect.objectContaining({ emxId: "emx-imap-1" }),
-    );
   });
 });
 
@@ -174,43 +148,35 @@ describe("EmxIdleWorker — IMAP", () => {
 // ===========================================================================
 
 describe("EmxIdleWorker — JMAP", () => {
-  it("poll finds messages → emx_dispatch enqueued", async () => {
+  it("poll finds messages → adapter handles dispatch", async () => {
     mockDb.listExternalExchanges.mockResolvedValue(ok([jmapExchange]));
-    mockJmapAdapter.poll.mockResolvedValue(ok("new_mail" as const));
-    mockSignalQueue.send.mockResolvedValue(ok(undefined));
+    mockJmapAdapter.pollAndDispatch.mockResolvedValue(ok(undefined));
 
     const worker = createWorker();
     const result = await worker.process({ accountId: "acc-1" });
 
     expect(result.isOk()).toBe(true);
-    expect(mockJmapAdapter.poll).toHaveBeenCalledWith(jmapExchange, 5, 60_000);
-    expect(mockSignalQueue.send).toHaveBeenCalledWith("emx_dispatch", { emxId: "emx-jmap-1", accountId: "acc-1" });
+    expect(mockJmapAdapter.pollAndDispatch).toHaveBeenCalledWith(jmapExchange, 5, 60_000);
   });
 
   it("poll times out → clean exit", async () => {
     mockDb.listExternalExchanges.mockResolvedValue(ok([jmapExchange]));
-    mockJmapAdapter.poll.mockResolvedValue(ok("timeout" as const));
+    mockJmapAdapter.pollAndDispatch.mockResolvedValue(ok(undefined));
 
     const worker = createWorker();
     const result = await worker.process({ accountId: "acc-1" });
 
     expect(result.isOk()).toBe(true);
-    expect(mockSignalQueue.send).not.toHaveBeenCalled();
   });
 
-  it("401 response (credentials rotated) → WARN logged, exchange skipped", async () => {
+  it("401 response (credentials rotated) → adapter absorbs error", async () => {
     mockDb.listExternalExchanges.mockResolvedValue(ok([jmapExchange]));
-    mockJmapAdapter.poll.mockResolvedValue(err({ kind: "provider_renewal_failed", cause: "invalid credentials" }));
+    mockJmapAdapter.pollAndDispatch.mockResolvedValue(ok(undefined));
 
     const worker = createWorker();
     const result = await worker.process({ accountId: "acc-1" });
 
     expect(result.isOk()).toBe(true);
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      expect.stringContaining("JMAP authentication failed"),
-      expect.objectContaining({ emxId: "emx-jmap-1" }),
-    );
-    expect(mockSignalQueue.send).not.toHaveBeenCalled();
   });
 });
 
@@ -223,21 +189,15 @@ describe("EmxIdleWorker — mixed exchanges", () => {
     const imap2 = { ...imapExchange, id: "emx-imap-2" };
     mockDb.listExternalExchanges.mockResolvedValue(ok([imapExchange, imap2, jmapExchange]));
 
-    mockImapAdapter.idle
-      .mockResolvedValueOnce(err({ kind: "imap_error", reason: "DNS failed", cause: new Error("ENOTFOUND") }))
-      .mockResolvedValueOnce(ok("new_mail" as const));
-    mockJmapAdapter.poll.mockResolvedValue(ok("new_mail" as const));
-    mockSignalQueue.send.mockResolvedValue(ok(undefined));
+    mockImapAdapter.idleAndDispatch.mockResolvedValue(ok(undefined));
+    mockJmapAdapter.pollAndDispatch.mockResolvedValue(ok(undefined));
 
     const worker = createWorker();
     const result = await worker.process({ accountId: "acc-1" });
 
     expect(result.isOk()).toBe(true);
-    expect(mockSignalQueue.send).toHaveBeenCalledTimes(2);
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      expect.stringContaining("IMAP connection failed"),
-      expect.objectContaining({ emxId: "emx-imap-1" }),
-    );
+    expect(mockImapAdapter.idleAndDispatch).toHaveBeenCalledTimes(2);
+    expect(mockJmapAdapter.pollAndDispatch).toHaveBeenCalledTimes(1);
     expect(mockLogger.info).toHaveBeenCalledWith(
       expect.stringContaining("completed"),
       expect.objectContaining({ accountId: "acc-1" }),
@@ -262,20 +222,19 @@ describe("EmxIdleWorker — deduplication", () => {
       expect.stringContaining("skipping recently synced"),
       expect.objectContaining({ emxId: "emx-imap-1" }),
     );
-    expect(mockSignalQueue.send).not.toHaveBeenCalled();
+    expect(mockImapAdapter.idleAndDispatch).not.toHaveBeenCalled();
   });
 
   it("lastSyncAt 6 min ago → processed normally", async () => {
     const oldExchange = { ...imapExchange, lastSyncAt: new Date(Date.now() - 6 * 60 * 1000).toISOString() };
     mockDb.listExternalExchanges.mockResolvedValue(ok([oldExchange]));
-    mockImapAdapter.idle.mockResolvedValue(ok("new_mail" as const));
-    mockSignalQueue.send.mockResolvedValue(ok(undefined));
+    mockImapAdapter.idleAndDispatch.mockResolvedValue(ok(undefined));
 
     const worker = createWorker();
     const result = await worker.process({ accountId: "acc-1" });
 
     expect(result.isOk()).toBe(true);
-    expect(mockSignalQueue.send).toHaveBeenCalledWith("emx_dispatch", { emxId: "emx-imap-1", accountId: "acc-1" });
+    expect(mockImapAdapter.idleAndDispatch).toHaveBeenCalledWith(oldExchange, 5 * 60 * 1000);
   });
 });
 
@@ -295,7 +254,8 @@ describe("EmxIdleWorker — edge cases", () => {
       expect.stringContaining("no IMAP/JMAP exchanges"),
       expect.objectContaining({ accountId: "acc-1" }),
     );
-    expect(mockSignalQueue.send).not.toHaveBeenCalled();
+    expect(mockImapAdapter.idleAndDispatch).not.toHaveBeenCalled();
+    expect(mockJmapAdapter.pollAndDispatch).not.toHaveBeenCalled();
   });
 
   it("all exchanges skipped (all recently synced) → immediate clean return", async () => {
@@ -311,6 +271,7 @@ describe("EmxIdleWorker — edge cases", () => {
       expect.stringContaining("all exchanges skipped"),
       expect.objectContaining({ accountId: "acc-1" }),
     );
-    expect(mockSignalQueue.send).not.toHaveBeenCalled();
+    expect(mockImapAdapter.idleAndDispatch).not.toHaveBeenCalled();
+    expect(mockJmapAdapter.pollAndDispatch).not.toHaveBeenCalled();
   });
 });
