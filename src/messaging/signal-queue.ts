@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+
 import { SQSClient, SendMessageCommand, SendMessageBatchCommand } from "@aws-sdk/client-sqs"
 import { ok, err, dbError } from "../errors.js"
 import type { DbError, Result } from "../errors.js"
@@ -62,8 +64,8 @@ export class SignalQueue {
       try {
         const result = await sqs.send(new SendMessageBatchCommand({
           QueueUrl: QUEUE_URL,
-          Entries: chunk.map(e => ({
-            Id: e.id,
+          Entries: chunk.map((e, i) => ({
+            Id: sqsSafeId(e.id, i),
             MessageBody: JSON.stringify(e.payload),
             MessageAttributes: {
               messageType: { DataType: "String", StringValue: messageType },
@@ -84,6 +86,13 @@ export class SignalQueue {
 
     return ok(undefined)
   }
+}
+
+// SQS batch entry ids must be alphanumeric/hyphen/underscore and at most 80 characters, but callers'
+// ids (e.g. notificationId) are not guaranteed to satisfy either constraint, so derive a safe id here.
+// The index prefix keeps it unique within a single SendMessageBatch call even if hashes collide.
+function sqsSafeId(id: string, index: number): string {
+  return `${index}-${createHash("sha256").update(id).digest("base64url")}`
 }
 
 function chunkEntries(messageType: SqsMessageType, entries: Array<{ id: string; payload: unknown }>): Array<Array<{ id: string; payload: unknown }>> {
