@@ -5,21 +5,21 @@
 ---
 
 - [ ] **Unified forwarding targets** — consolidate all forwarding-related work into a single resource: replace separate forwarding-addresses and webhook-URL concepts with a single `ForwardingTarget` resource (`/accounts/:id/targets`), update verification email URL format to deep-link to settings, add calendar forwarding address verification, and include loop detection (setup-time + runtime). **Active spec: `.kiro/specs/unified-forwarding-targets/`**
-- [ ] **Event / QR code extraction and time-based surfacing** — first-class tracking for event tickets, boarding passes, conference badges, restaurant reservations, and parking confirmations. Extract ticket/QR code URLs or base64 images from confirmation emails at processing time, store as structured `workflowData` (e.g. `ticketUrl`, `qrCodeUrl`, `venueAddress`, `eventTime`), and resurface the arc with QR/ticket prominently displayed at event proximity (time-based push or lock-screen widget). Covers: concerts, flights, conferences, restaurants, parking. **Storage layer done** — `ResourceAsset` type + `assets` list on `Resource` + DynamoDB `list_append` accumulation + API surface. **Extraction logic done** — QR code scanning from inline HTML images + image attachments (jsQR + pngjs + jpeg-js), PKPass ZIP parsing (jszip) for barcode data with a stored-file reference for Apple Wallet (surfaced to clients as a CDN `url`), processor integration via `extractResourceAssets` orchestrator. **Cross-workflow date-range query done** — `GET /accounts/:id/resources` now spans every resource workflow in one query (`workflow` is optional; the GSI is keyed by `accountId+status` only, not per-workflow), so "what's due today/this week" is a single `dateFrom`/`dateTo` call instead of one request per workflow. Resource TTL now unconditionally floors at `expectedResolutionDate + 1yr` regardless of the signal's own retention (previously silently unset for unlimited-retention accounts). Next: BCBP decoding for structured boarding pass data, time-based surfacing UI (frontend — see TODO-UI.md).
+- [ ] **Event / QR code extraction and time-based surfacing** — first-class tracking for event tickets, boarding passes, conference badges, restaurant reservations, and parking confirmations. Extract ticket/QR code URLs or base64 images from confirmation emails at processing time, store as structured `workflowData` (e.g. `ticketUrl`, `qrCodeUrl`, `venueAddress`, `eventTime`), and resurface the thread with QR/ticket prominently displayed at event proximity (time-based push or lock-screen widget). Covers: concerts, flights, conferences, restaurants, parking. **Storage layer done** — `ResourceAsset` type + `assets` list on `Resource` + DynamoDB `list_append` accumulation + API surface. **Extraction logic done** — QR code scanning from inline HTML images + image attachments (jsQR + pngjs + jpeg-js), PKPass ZIP parsing (jszip) for barcode data with a stored-file reference for Apple Wallet (surfaced to clients as a CDN `url`), processor integration via `extractResourceAssets` orchestrator. **Cross-workflow date-range query done** — `GET /accounts/:id/resources` now spans every resource workflow in one query (`workflow` is optional; the GSI is keyed by `accountId+status` only, not per-workflow), so "what's due today/this week" is a single `dateFrom`/`dateTo` call instead of one request per workflow. Resource TTL now unconditionally floors at `expectedResolutionDate + 1yr` regardless of the signal's own retention (previously silently unset for unlimited-retention accounts). Next: BCBP decoding for structured boarding pass data, time-based surfacing UI (frontend — see TODO-UI.md).
 - [x] **Resources: UI consumption** — built ResourcesBanner component (today/this-week/upcoming sections with per-workflow grouping), ResourceAssetCard (QR code, barcode, PKPass rendering with OS-aware "Add to Wallet" button — iOS downloads pkpass natively, Android downloads pkpass + logs TRACK for future Google Wallet integration), resources Pinia store, API client methods, asset download endpoint (presigned S3 redirect). Dismiss/complete actions wired to `PATCH /accounts/:id/resources/:resourceId`. Banner integrated into InboxView above the tab bar. Added `events` workflow type to frontend. Stored assets (pkpass) are exposed as a CDN `url` on `ResourceAsset` — the same convention as signal attachments — never as a storage key.
 - [ ] **Set `Content-Disposition` on stored attachment/asset objects** — uploaded content is keyed by upload ordinal (`.../extracted/{msgId}/0`), so a direct download from the CDN url lands as a file literally named `0` with no extension. `Content-Type` is preserved, `Content-Disposition` is not. Clients currently have to supply the name themselves from the `filename` field. Set `Content-Disposition: attachment; filename="…"` at upload time (needs a matching presigned-POST policy condition) so the URL is self-sufficient.
 - [x] **Multiple mailboxes per provider per account** — `@authress/sdk@3.2.280` added a third `connectionUserId` parameter to `getConnectionCredentials(connectionId, userId, connectionUserId)`, which selects a specific linked identity's stored credentials instead of always returning the latest login flow's. Threaded through: `ActivationIdentity`/`exchangeCredentials()` now carry `connectionUserId`; `GmailProvider`/`OutlookProvider`'s `resolveToken`/`activate` and their `getProviderToken` deps take it as a third arg; `composite-root.ts`'s `getProviderToken` forwards it to the SDK call. On the create path, `connectionUserId` is resolved entirely server-side — never named by the client at all: `AccessService.getLinkedIdentity(userId, connectionId)` fetches the caller's linked identities and picks the one with the newest `linkedTime` under the given `connectionId` (a field present on the raw Authress response but absent from the SDK's `LinkedIdentity` type, so it's read via a local type override). Since the OAuth redirect that is mid-flight when this runs is what just updated that identity's `linkedTime`, it is always the most recent match — no client assertion, no validation-and-refuse path, and no first-match-wins ambiguity, because there's nothing left for a client to name incorrectly. This also fully resolves the UI-side disambiguation gap noted here previously: the UI no longer needs to determine or send `connectionUserId` at all.
 - [ ] **Surface "reconnect to enable sending" in the UI** — mailboxes connected before send scopes existed carry read-only grants; OAuth does not widen a grant retroactively. The send path returns `provider_send_scope_missing` and parks the draft with a reconnect message, but nothing proactively flags affected exchanges. Add a badge on the exchange row + a reconnect action that re-runs `linkIdentity` with the send scopes.
 - [ ] **Audit every `ConditionalCheckFailedException` handler in the repo** — conditional writes swallow the exception to mean "the precondition was false", but that mapping is only correct where the condition expresses exactly one thing. Where a write carries several conditions, or where the caller treats the failure as a benign no-op, a genuine conflict can be silently discarded. Go through every `ConditionalCheckFailedException` catch across the data layer and confirm each one distinguishes "precondition legitimately false" from "lost update", and that the caller's handling matches.
-- [ ] **Outbound recipient validation (malicious user)** — prevent a malicious account owner from using the platform to spam arbitrary addresses. When a user composes/sends an email, validate that all To/CC/BCC recipient domains are either: (a) in the alias's approved senders list, or (b) domains the user has previously received email from (existing arc with that sender domain). If not, require explicit confirmation and rate-limit outbound to new domains.
+- [ ] **Outbound recipient validation (malicious user)** — prevent a malicious account owner from using the platform to spam arbitrary addresses. When a user composes/sends an email, validate that all To/CC/BCC recipient domains are either: (a) in the alias's approved senders list, or (b) domains the user has previously received email from (existing thread with that sender domain). If not, require explicit confirmation and rate-limit outbound to new domains.
 - [ ] **Background domain verification via Step Functions** — when a user adds a new domain, kick off a Step Functions state machine that polls DNS records (MX, DKIM, SPF, DMARC) on a schedule (e.g. every 30s for 5 min, then every 5 min for 1 hour, then hourly for 72 hours). Transitions domain status through `pending` → `verified` (or `failed` after timeout). We can also send an email to the account contact emails when this happens.
 - [ ] **Consider what happens when someone already has configured an alias** — do aliases need to be globally unique? Yes. Check on the backend using MX lookup (MX records are the source of truth).
 - [ ] **Review when `TemplateFunction.lastError` is cleared** — need to define when it gets cleared: on next successful execution? On template save?
 - [ ] **Define audit event response schema** — the `GET /accounts/:id/audit` endpoint returns `z.object({})` in the OpenAPI spec. Add a proper zod schema matching the response shape.
 - [ ] **Promotions: extract expiry date and auto-archive when the offer lapses** — classifier extracts `workflowData.offerExpiry` (ISO-8601). Auto-archive only if purely promotional. If mixed content, set `offerExpiry` but do not auto-archive.
-- [ ] **Auto-archive arcs on signal expiry (generic)** — any signal with a time-limited value (auth OTP `expiresInMinutes`, promo `offerExpiry`, password reset link) should auto-archive the arc when the expiry lapses, BUT only if the arc was not already active before this signal arrived. Logic: if the arc was archived/non-existent before the signal elevated or created it, auto-archive at expiry. If the arc was already active (user was interacting with it), do nothing — the user is engaged and manual control takes precedence. Applies to: `auth` (OTP/magic-link), `content` (promo codes with `expiryDate`), `payments` (time-limited offers). Computed from `signal.receivedAt + expiresInMinutes` or `expiryDate` directly. Scheduler or DynamoDB TTL-triggered cleanup.
+- [ ] **Auto-archive threads on signal expiry (generic)** — any signal with a time-limited value (auth OTP `expiresInMinutes`, promo `offerExpiry`, password reset link) should auto-archive the thread when the expiry lapses, BUT only if the thread was not already active before this signal arrived. Logic: if the thread was archived/non-existent before the signal elevated or created it, auto-archive at expiry. If the thread was already active (user was interacting with it), do nothing — the user is engaged and manual control takes precedence. Applies to: `auth` (OTP/magic-link), `content` (promo codes with `expiryDate`), `payments` (time-limited offers). Computed from `signal.receivedAt + expiresInMinutes` or `expiryDate` directly. Scheduler or DynamoDB TTL-triggered cleanup.
 - [ ] **Retry Send for failed outbound messages** — UI must expose a "Retry Send" action on `domain_misconfiguration` or `send_failed` signals. Transient failures auto-retry via SES Feedback SQS loop; permanent failures require user action.
-- [ ] **AI-powered template auto-response** — extend templates with an optional `aiPrompt` field. When a signal matches a rule with `action: "auto_reply"` and the template has `aiPrompt` set, Bedrock generates a reply using the prompt as system instructions, the template body as structure/tone guide, and the inbound signal thread as context. The generated draft is either sent automatically (if the rule is configured for auto-send) or placed in the arc as a draft for user review. Template functions (`{{fn.*}}`) still execute — AI fills the unstructured parts, functions fill the deterministic parts. This also enables a "Draft a reply" button in arc detail that uses the account's default reply template + AI prompt to generate a contextual first draft.
+- [ ] **AI-powered template auto-response** — extend templates with an optional `aiPrompt` field. When a signal matches a rule with `action: "auto_reply"` and the template has `aiPrompt` set, Bedrock generates a reply using the prompt as system instructions, the template body as structure/tone guide, and the inbound signal thread as context. The generated draft is either sent automatically (if the rule is configured for auto-send) or placed in the thread as a draft for user review. Template functions (`{{fn.*}}`) still execute — AI fills the unstructured parts, functions fill the deterministic parts. This also enables a "Draft a reply" button in thread detail that uses the account's default reply template + AI prompt to generate a contextual first draft.
 - [ ] **Audit OpenAPI spec for missing zod constraints** — investigate why `@hono/zod-openapi` isn't propagating `.min()/.max()` to the generated spec.
 - [ ] **Gate `retentionDuration` setting by billing plan + handle downgrades** — when a user sets `retentionDuration` via PATCH /accounts/:id, validate against their current plan using `isWithinPlanLimit()`. Reject with 403 if they request a tier above what their plan allows. On plan downgrade (webhook from billing provider or manual admin action), coerce any existing `retentionDuration` values that exceed the new plan's max tier down to the plan max. Existing signals already stored with longer retention keep their TTL (data already paid for) but new signals get the coerced default.
 - [ ] **Auto-block sender on unsubscribe** — persist `block_hidden` disposition for the sender eTLD+1 on the alias after unsubscribe succeeds.
@@ -38,7 +38,7 @@
 - [ ] **JMAP push (`/jmap/eventsource`)** — deferred out of the initial JMAP support spec. RFC 8620 §7.3 SSE needs new Lambda response-streaming infrastructure; RFC 8887 "JMAP over WebSocket" would reuse the existing WebSocket infra but is a distinct protocol extension. Revisit once there's a concrete target client or usage data.
 - [ ] **External mail ingestion (Gmail, Outlook/Graph, other JMAP servers)** — pull mail in from third-party services via OAuth-connected sync connectors, normalized into the existing Signal/Thread processing pipeline. Deferred, separate effort from JMAP server support above — needs its own spec (new `ExternalMailConnection` entity, KMS-encrypted OAuth tokens, per-provider sync adapters, polling infrastructure).
 - [ ] **On-demand alias generation** — browser extension or API generates unique aliases per-service.
-- [ ] **Snooze / remind me later** — hide an arc until a future time, then resurface it.
+- [ ] **Snooze / remind me later** — hide a thread until a future time, then resurface it. When the thread reappears: (a) show a "Snoozed until today" badge on the thread card in the inbox list, (b) show an inline annotation at the top of the thread detail view: "This thread was snoozed and resurfaced at {time}". Persist `snoozedUntil` timestamp and `reactivationReason` (`snooze_expired | new_signal | manual`) on the thread so the UI can render context.
 - [ ] **Calendar sync** — bidirectional calendar integration (CalDAV, Google Calendar, Outlook).
 - [ ] **Webhook outbound** — user configures a URL; signals POST as JSON.
 - [ ] **Become FedCM identity provider** — meaning other apps log in via our app. Register as a FedCM provider so other apps can use our identity.
@@ -47,9 +47,9 @@
 - [ ] **PGP / end-to-end encryption** — encrypt stored email content at rest with user-held keys.
 - [ ] **Deploy Bedrock guardrail and re-enable in classifier** — create `aws_bedrock_guardrail` resource in infrastructure, uncomment in classifier.
 - [ ] **Strip tracking pixels from HTML email bodies at ingestion** — ADR 007 heuristics. Remove tracker `<img>` elements at processing time.
-- [ ] **Automatically seed sample arcs during onboarding for new users** — new accounts land in an empty inbox until the user's own test email arrives in Step 2. Auto-create a small set of system-generated example arcs (e.g. a sample `package`, `payments`, and `auth` arc with realistic `workflowData`) at account creation so the inbox UI, workflow cards, and smart action buttons aren't demoed against a blank state. Tag these arcs distinctly (e.g. `workflow: "test"` or a dedicated `sample`/`demo` flag) so they're clearly distinguishable from real mail and can be bulk-dismissed or auto-expired once the user has received their first real signal.
+- [ ] **Automatically seed sample threads during onboarding for new users** — new accounts land in an empty inbox until the user's own test email arrives in Step 2. Auto-create a small set of system-generated example threads (e.g. a sample `package`, `payments`, and `auth` thread with realistic `workflowData`) at account creation so the inbox UI, workflow cards, and smart action buttons aren't demoed against a blank state. Tag these threads distinctly (e.g. `workflow: "test"` or a dedicated `sample`/`demo` flag) so they're clearly distinguishable from real mail and can be bulk-dismissed or auto-expired once the user has received their first real signal.
 - [ ] **Move `updateGlobalReputation` into side-effects and make its save idempotent** — currently called inline in `processMessage` (multiple branches) and re-runs on every retry/reprocess, double-counting sender reputation. Move the reputation write into `processSideEffect` (derived from the persisted signal outcome) and make the save idempotent so retries can't inflate the counters.
-- [ ] **Document all data stores exhaustively** — write ADR-style docs (like `docs/adr-stats-metrics.md`) for every data store: DynamoDB accounts table (partition key design, GSI patterns, single-table item types, TTL strategies), DynamoDB arcs table (arc/signal item layout, GSI2 threading index, grouping key lookups), Aurora Serverless (schema, RLS via `SET LOCAL`, pgvector embeddings, connection pooling via Data API), S3 buckets (email storage lifecycle, content extraction prefix layout, retention tagging, presigned URL patterns), and the processing DynamoDB table (global reputation tracking, sender fingerprints). For each: document the access patterns, key design decisions, known limitations, and cost profile.
+- [ ] **Document all data stores exhaustively** — write ADR-style docs (like `docs/adr-stats-metrics.md`) for every data store: DynamoDB accounts table (partition key design, GSI patterns, single-table item types, TTL strategies), DynamoDB threads table (thread/signal item layout, GSI2 threading index, grouping key lookups), Aurora Serverless (schema, RLS via `SET LOCAL`, pgvector embeddings, connection pooling via Data API), S3 buckets (email storage lifecycle, content extraction prefix layout, retention tagging, presigned URL patterns), and the processing DynamoDB table (global reputation tracking, sender fingerprints). For each: document the access patterns, key design decisions, known limitations, and cost profile.
 - [ ] **Email forwarding loop detection and prevention** — covered by the unified forwarding targets spec (setup-time + runtime loop detection). Detailed design: forwarding rules can create infinite loops if account A forwards to address X that routes back. Two layers: (1) **Setup-time**: reject rules whose target address matches any domain registered to the same account. Also check whether any existing rule already forwards to that same target from any label/alias that the new rule would also match. (2) **Runtime**: inspect `References` / `X-Forwarded-To` / custom `X-SES-Loop` headers — if the message has already passed through this account or been forwarded more than N times (e.g. 5), drop with a non-retryable error and emit a `loop_detected` audit event.
 
 ---
@@ -71,7 +71,7 @@ Compared the frontend's expected API surface against the actual backend implemen
 | Templates | GET/POST/PUT/DELETE `/accounts/:id/templates` | Backend supports PUT for full replace |
 | Quarantine signals | GET `?status=quarantine_visible\|quarantine_hidden` | Works |
 | Quarantine response | POST `/:signalId/quarantineResponse` | Backend will support `block_hidden`, `block_reject`, `report_violation` |
-| Draft signals | PUT, POST send, DELETE on `/arcs/:arcId/signals/:id` | Works |
+| Draft signals | PUT, POST send, DELETE on `/threads/:threadId/signals/:id` | Works |
 | Aliases | GET/POST/PATCH/DELETE `/accounts/:id/aliases` | Senders via sub-resource |
 | Account GET/PATCH | `/accounts/:id` | Works |
 
@@ -123,7 +123,7 @@ Built and Secured in Switzerland
 - **Swiss-hosted infrastructure** — all email data stored and processed in Switzerland, subject to Swiss data protection law (nFADP), one of the strongest privacy frameworks globally. No US cloud jurisdiction, no FISA/PRISM exposure.
 - **No advertising, no data mining** — inbox contents are never used for profiling, ad targeting, or sold to third parties. The business model is subscriptions, not surveillance.
 - **Zero-knowledge AI classification** — classification runs against email metadata and content, but the AI model (Bedrock/Claude) processes transiently and does not retain training data from user emails.
-- **End-to-end audit log** — every action on every arc and signal is logged with before/after state. Users can export their full audit trail at any time. Transparency over opacity.
+- **End-to-end audit log** — every action on every thread and signal is logged with before/after state. Users can export their full audit trail at any time. Transparency over opacity.
 
 ---
 
@@ -146,28 +146,28 @@ Built and Secured in Switzerland
 
 ### Auto-Unsubscribe
 
-- **One-tap unsubscribe from any arc row** — unsubscribe link extracted from `List-Unsubscribe` and `List-Unsubscribe-Post` headers (RFC 2369/8058) and surfaced directly in the inbox UI. No digging through the email. No navigating to the sender's site.
+- **One-tap unsubscribe from any thread row** — unsubscribe link extracted from `List-Unsubscribe` and `List-Unsubscribe-Post` headers (RFC 2369/8058) and surfaced directly in the inbox UI. No digging through the email. No navigating to the sender's site.
 - **POST-based unsubscribe** — where the sender supports `List-Unsubscribe-Post` (Gmail-compatible one-click standard), the inbox fires the POST server-side without opening a browser. Instant, no confirmation page, no re-marketing flow.
-- **Post-unsubscribe auto-archive rule** — after unsubscribing, the arc is archived and a label `unsubscribed:{publisher}` is applied. A rule can be auto-created to archive future mail from that sender.
+- **Post-unsubscribe auto-archive rule** — after unsubscribing, the thread is archived and a label `unsubscribed:{publisher}` is applied. A rule can be auto-created to archive future mail from that sender.
 - **Unsubscribe audit** — account-level list of all unsubscriptions: publisher, date, method (POST vs link). Exportable. Useful for compliance and for verifying that unsubscribes actually took effect.
 
 ---
 
 ### DPA Complaint Filing
 
-- **One-click report to Data Protection Authority** — when a sender ignores unsubscribe requests or continues emailing after being blocked, the user can escalate directly to the relevant national DPA from the arc detail UI. No Googling complaint forms, no drafting letters — the system handles it.
+- **One-click report to Data Protection Authority** — when a sender ignores unsubscribe requests or continues emailing after being blocked, the user can escalate directly to the relevant national DPA from the thread detail UI. No Googling complaint forms, no drafting letters — the system handles it.
 - **Jurisdiction-aware DPA routing** — built-in registry of EU/EEA DPAs plus UK ICO, Swiss FDPIC, and Norwegian/Icelandic authorities. The system determines the correct DPA based on the sender's jurisdiction (company country derived from domain/WHOIS) or the user's own country (for cross-border complaints under GDPR Art. 77).
-- **Pre-filled complaint with evidence** — the complaint includes: original unsubscribe request date, `List-Unsubscribe` attempt proof, count and dates of emails received after unsubscribe, sender domain and company identification, and the user's account jurisdiction. All machine-generated from the arc's signal history.
+- **Pre-filled complaint with evidence** — the complaint includes: original unsubscribe request date, `List-Unsubscribe` attempt proof, count and dates of emails received after unsubscribe, sender domain and company identification, and the user's account jurisdiction. All machine-generated from the thread's signal history.
 - **Dual filing paths** — "File via web" deep-links to the DPA's online complaint portal (pre-filling where the form supports URL params). "File via email" generates a structured complaint email to the DPA's contact address, ready to send.
-- **Complaint tracking** — each filed complaint is tracked per arc with status (filed → acknowledged → resolved). The user has a full audit trail of enforcement actions taken. Exportable for legal proceedings if needed.
+- **Complaint tracking** — each filed complaint is tracked per thread with status (filed → acknowledged → resolved). The user has a full audit trail of enforcement actions taken. Exportable for legal proceedings if needed.
 - **Escalation ladder UX** — the UI presents a clear progression: unsubscribe → block → report to DPA. Each step is one tap. The nuclear option is always available but never accidental.
 
 ---
 
 ### Search
 
-- **Full-text search across all arcs and signals** — subject, sender, body, AI summary, labels. Instant results with keyboard shortcut. No waiting for indexing — backed by DynamoDB + a dedicated search index built at signal ingestion time.
-- **Semantic search** — "find emails about my AWS bill from last quarter" finds the right arc even if those words don't appear verbatim. Backed by the same embedding vectors used for arc matching. Optional (heavier query) but powerful for power users.
+- **Full-text search across all threads and signals** — subject, sender, body, AI summary, labels. Instant results with keyboard shortcut. No waiting for indexing — backed by DynamoDB + a dedicated search index built at signal ingestion time.
+- **Semantic search** — "find emails about my AWS bill from last quarter" finds the right thread even if those words don't appear verbatim. Backed by the same embedding vectors used for thread matching. Optional (heavier query) but powerful for power users.
 - **Filter-as-you-type** — chips for `workflow:`, `label:`, `from:`, `before:`, `after:`, `status:` compose into structured queries. The query language is learnable and scriptable for power users.
 - **Saved searches** — any search query can be saved as a View. "All unpaid invoices" becomes a persistent sidebar item, auto-updating as new signals arrive.
 
@@ -199,16 +199,16 @@ Built and Secured in Switzerland
 ### Time-Aware Surfacing — "The right email at the right moment"
 
 - **Knows when you need to act** — every signal is analysed for action deadlines: reply-needed conversations, invoice due dates, meeting RSVPs, expiring discount codes. The inbox surfaces them at the moment they become urgent — not when they arrived. An invoice due in 14 days doesn't interrupt Tuesday morning; it surfaces Wednesday of the due week.
-- **Configurable resurfacing** — users control when action-needed arcs reappear: "Surface unpaid invoices 3 days before due", "Remind me about unanswered conversations after 48 hours", "Show boarding passes 2 hours before departure." Per-workflow defaults with per-arc overrides.
-- **Meeting reminders + event QR codes at the door** — scheduling arcs with `startTime` automatically resurface with the joining link or venue QR code exactly when needed. A Zoom link surfaces 5 minutes before. A concert ticket QR surfaces when you arrive at the venue. The email you received 3 weeks ago becomes useful precisely when it matters.
-- **Bills surface on payday, not arrival day** — invoice and subscription renewal arcs can be snoozed to a user-configured "bill review day" (e.g. 1st of the month). All payment arcs accumulate silently and surface together as a batch for review. One session, all bills handled.
-- **Conversations that need a reply float back** — if a conversation is marked `requiresReply` and the user hasn't responded after a configurable delay, the arc silently re-elevates in the Default view. Not a notification. Not an alarm. Just gentle, persistent visibility until the user acts or dismisses.
+- **Configurable resurfacing** — users control when action-needed threads reappear: "Surface unpaid invoices 3 days before due", "Remind me about unanswered conversations after 48 hours", "Show boarding passes 2 hours before departure." Per-workflow defaults with per-thread overrides.
+- **Meeting reminders + event QR codes at the door** — scheduling threads with `startTime` automatically resurface with the joining link or venue QR code exactly when needed. A Zoom link surfaces 5 minutes before. A concert ticket QR surfaces when you arrive at the venue. The email you received 3 weeks ago becomes useful precisely when it matters.
+- **Bills surface on payday, not arrival day** — invoice and subscription renewal threads can be snoozed to a user-configured "bill review day" (e.g. 1st of the month). All payment threads accumulate silently and surface together as a batch for review. One session, all bills handled.
+- **Conversations that need a reply float back** — if a conversation is marked `requiresReply` and the user hasn't responded after a configurable delay, the thread silently re-elevates in the Default view. Not a notification. Not an alarm. Just gentle, persistent visibility until the user acts or dismisses.
 
 ---
 
 ### Package Intelligence — "Your deliveries, at a glance"
 
-- **Delivery day awareness** — on days when one or more packages are `out_for_delivery`, a subtle banner appears at the top of the inbox: "2 packages arriving today: AirPods Pro, USB-C Cables." Tapping it filters to those arcs. A morning delivery briefing — not an alert, just ambient awareness of what's coming today.
+- **Delivery day awareness** — on days when one or more packages are `out_for_delivery`, a subtle banner appears at the top of the inbox: "2 packages arriving today: AirPods Pro, USB-C Cables." Tapping it filters to those threads. A morning delivery briefing — not an alert, just ambient awareness of what's coming today.
 
 ---
 
@@ -233,15 +233,15 @@ Items from the WORKFLOW_UX_SPEC "Where to innovate" sections. Evaluate for inclu
 - [ ] **Expense extraction post-trip** — one-tap export of all trip costs (flight/hotel/car) as CSV after the trip auto-archives.
 
 #### Scheduling
-- [ ] **Conflict detection** — new invite overlaps existing scheduling arc → inline warning: "Conflict: you already have Q2 Review at 2pm."
-- [ ] **One-tap accept + add-to-calendar** — single tap: accept reply sent + .ics added to OS calendar + arc archived.
-- [ ] **Location intelligence** — physical address → one-tap Directions. Video URL → one-tap Join. On the arc row, not buried in detail.
-- [ ] **Smart decline suggestions** — when declining, suggest free time slots from existing scheduling arcs: "You're free Thursday 4–5pm — propose?"
+- [ ] **Conflict detection** — new invite overlaps existing scheduling thread → inline warning: "Conflict: you already have Q2 Review at 2pm."
+- [ ] **One-tap accept + add-to-calendar** — single tap: accept reply sent + .ics added to OS calendar + thread archived.
+- [ ] **Location intelligence** — physical address → one-tap Directions. Video URL → one-tap Join. On the thread row, not buried in detail.
+- [ ] **Smart decline suggestions** — when declining, suggest free time slots from existing scheduling threads: "You're free Thursday 4–5pm — propose?"
 
 #### Payments
 - [ ] **Vendor spend aggregation** — monthly spend dashboard in Payments view: total + per-vendor breakdown. No spreadsheet, no bank login.
 - [ ] **Overdue invoice escalation** — invoice passes `dueDate` by 3 days with no receipt → escalate + "Have you paid this?" prompt.
-- [ ] **Subscription calendar** — all renewal arcs listed by upcoming date: "Adobe CC — Jan 30, €599 / AWS — Feb 1 / Notion — Feb 15, €96."
+- [ ] **Subscription calendar** — all renewal threads listed by upcoming date: "Adobe CC — Jan 30, €599 / AWS — Feb 1 / Notion — Feb 15, €96."
 - [ ] **One-tap pay confirmation** — after clicking Pay now and returning, prompt: "Did you complete the payment?" → [Yes, paid] archives + labels.
 
 #### Alert
@@ -251,8 +251,8 @@ Items from the WORKFLOW_UX_SPEC "Where to innovate" sections. Evaluate for inclu
 - [ ] **Security playbook** — "This wasn't me" → guided checklist: change password, review sessions, enable 2FA, revoke OAuth apps. Each tappable + trackable.
 
 #### Content
-- [ ] **Reading time estimate** — word count → "7 min read" on the arc row.
-- [ ] **AI digest of newsletters** — weekly briefing across all unread newsletters: 12 issues → 6 sentences, each deep-linking to the source arc.
+- [ ] **Reading time estimate** — word count → "7 min read" on the thread row.
+- [ ] **AI digest of newsletters** — weekly briefing across all unread newsletters: 12 issues → 6 sentences, each deep-linking to the source thread.
 
 ---
 
@@ -260,25 +260,25 @@ Everything the backend already knows that the UI needs to expose. Organised by s
 
 ---
 
-### Inbox (Arc List)
+### Inbox (Thread List)
 
-The primary view. Arcs are the browsing unit — not individual emails.
+The primary view. Threads are the browsing unit — not individual emails.
 
-- Each arc row shows: workflow icon, sender name/domain, AI-generated summary, urgency badge, last signal timestamp, label chips
-- Urgency drives visual prominence: `critical` = red/bold, `high` = orange, `normal` = default, `low` = muted, `silent` arcs are never shown
-- Arcs with `sentMessageIds` (user has replied) should show a "replied" indicator — these carry the `system:replied` label; the UI should visually distinguish them
-- Arc status filter: REST-style `?status=active|archived|snoozed|deleted` query param (four statuses: `active`, `archived`, `snoozed`, `deleted`)
+- Each thread row shows: workflow icon, sender name/domain, AI-generated summary, urgency badge, last signal timestamp, label chips
+- Urgency drives visual prominence: `critical` = red/bold, `high` = orange, `normal` = default, `low` = muted, `silent` threads are never shown
+- Threads with `sentMessageIds` (user has replied) should show a "replied" indicator — these carry the `system:replied` label; the UI should visually distinguish them
+- Thread status filter: REST-style `?status=active|archived|snoozed|deleted` query param (four statuses: `active`, `archived`, `snoozed`, `deleted`)
 - Swipe/hover actions: archive, delete, label
-- Inline "unread" state (client-side or via a future `Arc.readAt` field)
+- Inline "unread" state (client-side or via a future `Thread.readAt` field)
 - Pagination via cursor (`lastEvaluatedKey`) — infinite scroll or Load More
 - Empty states per view/filter with helpful copy
-- `test` workflow arcs are visually distinct: flask/beaker icon, muted colour palette, a small "TEST" badge — clearly not real mail but still browsable; show in the main inbox under a collapsible "Tests" section rather than hiding them entirely
+- `test` workflow threads are visually distinct: flask/beaker icon, muted colour palette, a small "TEST" badge — clearly not real mail but still browsable; show in the main inbox under a collapsible "Tests" section rather than hiding them entirely
 
-### Arc Detail (Signal Thread)
+### Thread Detail (Signal Thread)
 
-Drill-in from inbox. Shows all signals in the arc as a chronological thread.
+Drill-in from inbox. Shows all signals in the thread as a chronological thread.
 
-- Thread header: workflow, sender eTLD+1, recipient address, arc urgency, current labels
+- Thread header: workflow, sender eTLD+1, recipient address, thread urgency, current labels
 - Each signal card shows: from, to, cc, subject, received timestamp, AI summary, spam score (if > 0.3, show warning indicator), body (text or HTML rendered in sandboxed iframe), attachments list
 - `original:john@gmail.com` label (forwarded email detection) appears in the label chips alongside all other labels
 - Workflow-specific structured data panels — each workflow has rich `workflowData` fields the UI should render as a card rather than raw JSON:
@@ -295,33 +295,33 @@ Drill-in from inbox. Shows all signals in the arc as a chronological thread.
 - AI-suggested labels shown with one-click accept
 - User can manually override workflow classification (dropdown)
 - User can manually add/remove labels
-- **Reply composer** — inline compose panel that slides up from the bottom of the arc detail:
+- **Reply composer** — inline compose panel that slides up from the bottom of the thread detail:
   - **From** field: free-text input for the sender email address (local part), with **domain as a separate dropdown** populated from the user's registered Tier-2-complete domains. Typing in the local part + choosing a domain composes the full `from` address.
-  - **Autocomplete**: as the user types the local part, suggest previously-used sender identities (full `local@domain` combos from `arc.sentMessageIds` history across the account), ordered **recommended first** (most recently used → most frequently used → everything else). Recommended entries are shown with a subtle "Recommended" chip.
+  - **Autocomplete**: as the user types the local part, suggest previously-used sender identities (full `local@domain` combos from `thread.sentMessageIds` history across the account), ordered **recommended first** (most recently used → most frequently used → everything else). Recommended entries are shown with a subtle "Recommended" chip.
   - Domain dropdown only shows domains with `senderSetupComplete: true`; domains with Tier 2 incomplete are shown greyed out with an inline "Set up sending →" link.
   - If the user has no Tier-2-complete domain, the From field is replaced with a banner: *"Set up sending to reply from your domain"* with a CTA to the domain sender setup wizard.
   - Standard To/Subject/Body fields below the From selector; To pre-filled with the signal sender, Subject pre-filled with `Re: {original subject}`.
-  - Send button calls the reply API and adds the outbound message ID to `arc.sentMessageIds`.
+  - Send button calls the reply API and adds the outbound message ID to `thread.sentMessageIds`.
 - Signal status badge for blocked/quarantined signals within a thread
-- For `test` workflow arcs: show a dedicated pong reply card in the thread below the original signal — displays the AI-generated reply that was auto-sent back to the sender, so the user can see what the system said. Include a playful framing: *"We replied →"* followed by the reply body.
+- For `test` workflow threads: show a dedicated pong reply card in the thread below the original signal — displays the AI-generated reply that was auto-sent back to the sender, so the user can see what the system said. Include a playful framing: *"We replied →"* followed by the reply body.
 
 ### Quarantine / Blocked Inbox
 
-Separate view for signals that were blocked before reaching an arc.
+Separate view for signals that were blocked before reaching a thread.
 
 - Lists blocked and quarantined signals (GSI: `BLOCKED#{accountId}`)
 - Shows block reason: `new_sender`, `spam`, `sender_mismatch`, `reputation`, `onboarding`
 - For each signal:
   - **Quarantined** (blockDisposition = quarantine): user was notified; shown here for review
   - **Blocked** (blockDisposition = block): silently dropped; shown here for power users
-- Actions: **Allow & Create Arc** (creates arc, auto-approves sender domain), **Dismiss** (confirm block)
+- Actions: **Allow & Create Thread** (creates thread, auto-approves sender domain), **Dismiss** (confirm block)
 - Spam score visible on each row
 - Filter by block reason
 - Bulk-allow by sender domain
 
 ### Views (Custom Tabs / Sidebar)
 
-User-defined filtered lists of arcs. Like Gmail labels but with filter logic baked in.
+User-defined filtered lists of threads. Like Gmail labels but with filter logic baked in.
 
 - Sidebar or top tab bar showing all views in user-defined order (`View.position`)
 - Each view has name, icon (emoji or icon set), color
@@ -331,25 +331,25 @@ User-defined filtered lists of arcs. Like Gmail labels but with filter logic bak
 - View config: workflow filter (single or all), label filters (must-have-all), sort field + direction
 - Default views to seed on first login: All, Action Needed, Finance, Travel, Receipts (mapped to relevant workflows + labels)
 - **System-level permanent nav items** — always present, cannot be deleted or renamed; user-created views sit below these:
-  1. **Default** — the landing view when the app opens. **Fixed — not user-configurable for now.** Always shows: all `active` arcs excluding stale `auth` arcs (OTPs/magic links past validity, auto-archived by processor) and `notice` arcs. `test` arcs appear here. The structural exclusions define what Default *is* — allowing users to remove them creates edge cases where things vanish unexpectedly. Users who want a custom landing experience can create a view and position it first in their sidebar.
-  2. **All** — every arc regardless of `status`, no filter and no exclusions. The escape hatch when Default is too narrow.
-  3. **Quarantine** — blocked and quarantined signals that have not yet become arcs; separate from arc-based views because these signals predate arc creation.
-  - No **Sent** view. Archived, Snoozed, and Deleted arcs are accessible via the `?status=` filter on All, not separate nav items.
-- **`auth` arc auto-expiry**: processor or a scheduled job auto-archives `auth` arcs once the OTP/magic link validity window has passed (typically 10–30 min, extractable from `workflowData`). Keeps Default clean without requiring manual archiving of dead login requests.
-- **Notifications always deep-link directly** to the specific arc or quarantined signal — notification payload must carry the arc ID or signal ID at fire time so the link resolves correctly even for pre-arc quarantined signals.
+  1. **Default** — the landing view when the app opens. **Fixed — not user-configurable for now.** Always shows: all `active` threads excluding stale `auth` threads (OTPs/magic links past validity, auto-archived by processor) and `notice` threads. `test` threads appear here. The structural exclusions define what Default *is* — allowing users to remove them creates edge cases where things vanish unexpectedly. Users who want a custom landing experience can create a view and position it first in their sidebar.
+  2. **All** — every thread regardless of `status`, no filter and no exclusions. The escape hatch when Default is too narrow.
+  3. **Quarantine** — blocked and quarantined signals that have not yet become threads; separate from thread-based views because these signals predate thread creation.
+  - No **Sent** view. Archived, Snoozed, and Deleted threads are accessible via the `?status=` filter on All, not separate nav items.
+- **`auth` thread auto-expiry**: processor or a scheduled job auto-archives `auth` threads once the OTP/magic link validity window has passed (typically 10–30 min, extractable from `workflowData`). Keeps Default clean without requiring manual archiving of dead login requests.
+- **Notifications always deep-link directly** to the specific thread or quarantined signal — notification payload must carry the thread ID or signal ID at fire time so the link resolves correctly even for pre-thread quarantined signals.
 
 ### Labels
 
-Account-scoped tags. The main way users organise arcs beyond workflow grouping.
+Account-scoped tags. The main way users organise threads beyond workflow grouping.
 
 - Label management screen: name, color picker, icon picker
-- **Label names are immutable** — the name is the identity (DynamoDB key). Users can change color and icon but cannot rename a label. To "rename", they must create a new label, re-assign arcs, and delete the old one. The UI should not offer a rename action.
-- Labels appear as chips on arc rows and arc detail
+- **Label names are immutable** — the name is the identity (DynamoDB key). Users can change color and icon but cannot rename a label. To "rename", they must create a new label, re-assign threads, and delete the old one. The UI should not offer a rename action.
+- Labels appear as chips on thread rows and thread detail
 - Click a label anywhere → filters inbox to that label (or opens the label's view if one exists)
-- Quick-add label from arc detail (type to search existing, or create inline)
+- Quick-add label from thread detail (type to search existing, or create inline)
 - Classifier auto-suggests labels on signal receipt — shown as ghost chips with accept/dismiss
 - AI-suggested label examples: `action-needed`, `urgent`, `billing`, `renewal`, `read-later`
-- Delete label: confirm dialog warns how many arcs will be affected
+- Delete label: confirm dialog warns how many threads will be affected
 
 ### Rules (Automation)
 
@@ -359,7 +359,7 @@ JSONLogic-based conditional automation. Runs on every new signal.
 - Each rule shows: name, condition summary, action list, enabled/disabled toggle
 - Rule editor:
   - **Condition builder**: JSONLogic-based; should offer a visual builder (field + operator + value rows with AND/OR nesting) that compiles to JSONLogic, plus a raw JSON fallback for power users
-  - Available condition fields (from signal context): `signal.workflow`, `signal.spamScore`, `signal.workflowData.*`, `signal.from`, `signal.subject`, `arc.labels`, `arc.status`, `arc.urgency`
+  - Available condition fields (from signal context): `signal.workflow`, `signal.spamScore`, `signal.workflowData.*`, `signal.from`, `signal.subject`, `thread.labels`, `thread.status`, `thread.urgency`
   - **Actions** (multiple per rule, each individually enable/disable-able):
     - `assign_label` → label picker
     - `assign_workflow` → workflow picker
@@ -371,17 +371,17 @@ JSONLogic-based conditional automation. Runs on every new signal.
 
 ### Search
 
-Global full-text search on arc summaries + workflow.
+Global full-text search on thread summaries + workflow.
 
 - Search bar in top nav (keyboard shortcut)
-- Results show arc rows identical to inbox (workflow icon, summary, sender, date, labels)
+- Results show thread rows identical to inbox (workflow icon, summary, sender, date, labels)
 - Filter chips alongside results: by workflow, by label, by date range
 - No results state with suggestion to check spelling or broaden filters
 
 ### Settings — Account
 
 - Account name (editable)
-- Deletion retention days (how long deleted arcs are kept before permanent removal; `Arc.TTL`)
+- Deletion retention days (how long deleted threads are kept before permanent removal; `Thread.TTL`)
 - Notification email: address + frequency (`instant` / `hourly` / `daily`)
 - Global filtering defaults:
   - `defaultFilterMode`: `strict` / `sender_match` / `notify_new` / `allow_all`
@@ -446,8 +446,8 @@ Role-based access for multi-user accounts. Backed by Authress access records.
 - Remove user: confirm dialog warning them they will immediately lose access
 - Pending invites section (sent but not yet accepted) with resend / revoke options
 - Role capabilities matrix shown as a comparison table in the UI:
-  - `viewer`: read-only — browse arcs/signals, no mutations
-  - `member`: manage labels, archive/delete arcs, apply rules manually
+  - `viewer`: read-only — browse threads/signals, no mutations
+  - `member`: manage labels, archive/delete threads, apply rules manually
   - `admin`: create/edit rules, manage domains, forwarding addresses, aliases, notification settings
   - `owner`: invite/remove users, change roles, billing, delete account
 - Account switch button: top-level UI affordance (avatar menu or sidebar) to switch between accounts the user belongs to, without logging out — calls Authress to list memberships, then re-authenticates scoped to the selected account
@@ -470,7 +470,7 @@ Top-level account operations, separate from per-resource settings.
 - Account name and slug (editable by owner/admin)
 - Account avatar / logo upload
 - Timezone and locale preference (affects digest timing, date formats)
-- Data export: download all arcs + signals as JSON or CSV (async job, emailed when ready)
+- Data export: download all threads + signals as JSON or CSV (async job, emailed when ready)
 - **Delete account**: two-step confirmation (type account name); warns that all data is permanently deleted after the retention window; owner-only
 - Danger zone section clearly separated at the bottom of the page
 
@@ -491,13 +491,13 @@ Plan selection and subscription management.
 
 Every action taken by any user in the account is logged and browsable.
 
-- **Backend requirement**: all write operations (arc mutations, rule changes, label changes, domain registration, user management, settings changes) must record `{ userId, action, resourceType, resourceId, timestamp, before, after }` — store in DynamoDB with a `AUDIT#` key prefix, GSI by timestamp for account-wide listing
+- **Backend requirement**: all write operations (thread mutations, rule changes, label changes, domain registration, user management, settings changes) must record `{ userId, action, resourceType, resourceId, timestamp, before, after }` — store in DynamoDB with a `AUDIT#` key prefix, GSI by timestamp for account-wide listing
 - **UI**: table view of audit events, newest first
-  - Columns: timestamp, user (name + avatar), action (human-readable: "Archived arc", "Created rule", "Invited user"), resource link (click → navigate to the resource)
+  - Columns: timestamp, user (name + avatar), action (human-readable: "Archived thread", "Created rule", "Invited user"), resource link (click → navigate to the resource)
   - Filter by user, action type, date range
   - Expandable row to see before/after diff for mutations
 - Audit events to capture (at minimum):
-  - Arc: archived, deleted, restored, label added/removed, workflow overridden, urgency overridden
+  - Thread: archived, deleted, restored, label added/removed, workflow overridden, urgency overridden
   - Signal: unblocked/allowed, dismissed from quarantine
   - Rule: created, updated (condition or action changed), deleted, reordered, action disabled (bounce)
   - Label: created, color changed, deleted
@@ -519,7 +519,7 @@ Every action taken by any user in the account is logged and browsable.
 - **Support request form**:
   - Category dropdown: Billing, Technical, Account, Feedback, Other
   - Subject + description fields
-  - Auto-attach: current account ID, user ID, browser/OS, relevant arc/signal ID if the user was on a detail page when they clicked Help
+  - Auto-attach: current account ID, user ID, browser/OS, relevant thread/signal ID if the user was on a detail page when they clicked Help
   - File attachment (screenshots)
   - Submit → creates a ticket in your support system (email, Intercom, Linear, etc.); user sees ticket reference number
 - **Status page link**: separate public page (or third-party e.g. Statuspage.io) showing API / email processing uptime — linked from support panel and from any error states in the app
@@ -574,7 +574,7 @@ Progress bar at top spanning all steps. Every step is resumable — if the user 
 
 - **Step 5 — You're ready**
   - Summary of what was set up (domain, filter mode, sender setup status)
-  - Single CTA: *"Go to my inbox →"* — lands on the arc list, where the email from Step 2 is already waiting
+  - Single CTA: *"Go to my inbox →"* — lands on the thread list, where the email from Step 2 is already waiting
 
 ### Global UX Notes
 
@@ -582,8 +582,8 @@ Progress bar at top spanning all steps. Every step is resumable — if the user 
 - **Workflow icons**: each of the 20 workflows needs a distinct icon (e.g., shield for `auth`, receipt for `invoice`, plane for `travel`, flask/beaker for `test`)
 - **Signal ID prefix** (`SES#`, `SYS#`, `USR#`) indicates origin — could show a subtle badge on signals that were system- or user-created vs inbound email
 - **Spam score** should surface as a warning on signals > 0.3 and a strong warning > 0.7; never shown as a raw number to end users — use labels like "Likely spam" / "Possible spam"
-- **Arc grouping key** is deterministic per workflow (e.g. all Amazon order updates for order #123 thread together) — UI should not expose the key but should make the threading feel natural, like iMessage threads
-- **`notice` workflow** arcs are blocked by default (SR-03) — they never reach the arc inbox; if SR-03 is disabled by the user they will be silent urgency (`priority.ts`) with notification suppressed (SR-07)
+- **Thread grouping key** is deterministic per workflow (e.g. all Amazon order updates for order #123 thread together) — UI should not expose the key but should make the threading feel natural, like iMessage threads
+- **`notice` workflow** threads are blocked by default (SR-03) — they never reach the thread inbox; if SR-03 is disabled by the user they will be silent urgency (`priority.ts`) with notification suppressed (SR-07)
 - **RBAC**: hide destructive actions (delete domain, remove user, edit rules) from `viewer` and `member` roles
 
 ---
@@ -596,9 +596,9 @@ Creative feature ideas not yet committed to. Separate from the confirmed list ab
 
 ### Smart Action Buttons
 
-The classifier already extracts structured `workflowData`. Extend this to surface one-tap CTAs directly on the arc row and signal card, without opening the email:
+The classifier already extracts structured `workflowData`. Extend this to surface one-tap CTAs directly on the thread row and signal card, without opening the email:
 
-- `auth` → **Copy OTP** button on the arc row (code + countdown timer inline); one tap copies to clipboard; auto-detected from `workflowData.code`
+- `auth` → **Copy OTP** button on the thread row (code + countdown timer inline); one tap copies to clipboard; auto-detected from `workflowData.code`
 - `package` → **Track Package** deep-link button; tracking number already in `workflowData`
 - `payments` → **Pay Now** link if `workflowData.managementUrl` is present; **Download** if `workflowData.downloadUrl` is present
 - `travel` → **Add to Calendar** (generates `.ics`); **Check In** link if within 24h of departure
@@ -607,19 +607,19 @@ The classifier already extracts structured `workflowData`. Extend this to surfac
 
 ### Snooze / Remind Me Later
 
-Hide an arc until a future time, then resurface it as if newly arrived.
+Hide a thread until a future time, then resurface it as if newly arrived.
 
 - Snooze options: later today, tomorrow, next week, pick a date
-- Snoozed arcs disappear from inbox and reappear at the chosen time with a `snoozed` badge
+- Snoozed threads disappear from inbox and reappear at the chosen time with a `snoozed` badge
 - Snooze list accessible via sidebar (like Gmail's Snoozed label)
-- For `travel` arcs: offer "remind me 24 hours before departure" auto-snooze using `workflowData.departureDate`
-- For `subscription` arcs: offer "remind me 7 days before renewal" using `workflowData.renewalDate`
+- For `travel` threads: offer "remind me 24 hours before departure" auto-snooze using `workflowData.departureDate`
+- For `subscription` threads: offer "remind me 7 days before renewal" using `workflowData.renewalDate`
 
 ### "Waiting For" Smart List
 
-An auto-generated view of arcs where you've sent a reply but haven't received a response yet.
+An auto-generated view of threads where you've sent a reply but haven't received a response yet.
 
-- Powered by `arc.sentMessageIds` being non-empty + no new inbound signal after the last sent message
+- Powered by `thread.sentMessageIds` being non-empty + no new inbound signal after the last sent message
 - Configurable timeout: show as "waiting" if no reply after N days (default 3)
 - Escalates urgency visually as time passes (e.g., > 7 days → amber "overdue" badge)
 - Dismiss individually ("no reply expected") or snooze
@@ -629,7 +629,7 @@ An auto-generated view of arcs where you've sent a reply but haven't received a 
 A daily digest view (separate from the notification email) surfaced inside the app on first open of the day.
 
 - "Good morning — here's what needs your attention today"
-- Sections: Critical & High urgency arcs → Action-needed arcs → Upcoming travel/appointments → Renewals due soon
+- Sections: Critical & High urgency threads → Action-needed threads → Upcoming travel/appointments → Renewals due soon
 - Dismissible; shows once per day
 - Could double as the email digest if the user prefers to read it in-app
 
@@ -647,29 +647,29 @@ Charts and stats so users understand their email landscape.
 
 ### Bulk Actions
 
-Select multiple arcs in the inbox and act on them together.
+Select multiple threads in the inbox and act on them together.
 
 - Checkbox appears on hover/swipe
 - "Select all" applies to current view
 - Bulk: archive, delete, add label, remove label, change workflow
-- Confirmation for destructive bulk operations with count ("Archive 23 arcs?")
+- Confirmation for destructive bulk operations with count ("Archive 23 threads?")
 
-### Pinned Arcs
+### Pinned Threads
 
-Pin important arcs to the top of the inbox (or a specific view) regardless of sort order.
+Pin important threads to the top of the inbox (or a specific view) regardless of sort order.
 
-- Pin icon on hover; pinned arcs shown in a collapsible "Pinned" section at the top
+- Pin icon on hover; pinned threads shown in a collapsible "Pinned" section at the top
 - Max 5–10 pins per view to avoid overuse
 - Pins are per-user not per-account (stored client-side or as a personal preference)
 
-### Arc Timeline / Calendar View
+### Thread Timeline / Calendar View
 
-A secondary view mode (toggle alongside list) that plots arcs on a calendar.
+A secondary view mode (toggle alongside list) that plots threads on a calendar.
 
 - Relevant for `travel`, `scheduling`, `subscription`, `healthcare` workflows
 - Events plotted using `workflowData` dates (departure, appointment, renewal, due date)
 - Week and month views
-- Click an event → opens the arc detail
+- Click an event → opens the thread detail
 - Integrates with device calendar via CalDAV or ICS export
 
 ### Contact / Sender Profiles
@@ -677,7 +677,7 @@ A secondary view mode (toggle alongside list) that plots arcs on a calendar.
 Auto-built profiles for each eTLD+1 sender domain the user receives mail from.
 
 - Profile card: domain logo, first contact date, total signals, signal breakdown by workflow, spam score history, filter mode for this sender, approved/blocked status
-- Timeline of all arcs from this sender
+- Timeline of all threads from this sender
 - Quick actions: block domain, approve domain, apply a rule scoped to this sender
 - "Similar senders" suggestion (domains that send similar workflow types)
 
@@ -685,11 +685,11 @@ Auto-built profiles for each eTLD+1 sender domain the user receives mail from.
 
 Full keyboard shortcut system, surfaced via a command palette (⌘K / Ctrl+K).
 
-- `j` / `k` to navigate arc list; `Enter` to open; `Esc` to close
+- `j` / `k` to navigate thread list; `Enter` to open; `Esc` to close
 - `e` to archive, `#` to delete, `l` to label, `s` to snooze
 - `/` to focus search
 - `?` to show keyboard shortcut cheat sheet
-- Command palette: fuzzy-search all views, arcs, labels, settings pages, and actions
+- Command palette: fuzzy-search all views, threads, labels, settings pages, and actions
 
 ### Receipt & Expense Tracker
 
@@ -706,10 +706,10 @@ A sub-view within the `invoice` and `order` workflows for expense management.
 An official integrations page listing outbound webhooks and third-party connections.
 
 - **Webhook**: user provides a URL + secret; all new signals (or filtered subset) POST as JSON — useful for feeding into Zapier, Make, n8n, custom apps
-- **Slack**: post a message to a Slack channel when a `critical` or `high` urgency arc arrives
-- **Linear / Jira**: create an issue from a `developer` or `support` arc (one-click or via rule action)
-- **Notion**: save an arc summary as a Notion page
-- **Google / Outlook Calendar**: sync `scheduling` and `travel` arcs as calendar events
+- **Slack**: post a message to a Slack channel when a `critical` or `high` urgency thread arrives
+- **Linear / Jira**: create an issue from a `developer` or `support` thread (one-click or via rule action)
+- **Notion**: save a thread summary as a Notion page
+- **Google / Outlook Calendar**: sync `scheduling` and `travel` threads as calendar events
 - Integration status (connected / disconnected / error) on each card
 
 ### AI Assistant / Natural Language Query
@@ -720,17 +720,17 @@ A chat interface for querying your inbox without navigating manually.
 - "What's the status of my Amazon order?"
 - "Do I have any flights next week?"
 - "Archive everything from newsletters I haven't opened in 30 days"
-- Answers by querying arcs/signals via the existing API, then presents results inline or navigates to a filtered view
-- Powered by Claude; should cite the specific arcs it's referring to (linkable)
+- Answers by querying threads/signals via the existing API, then presents results inline or navigates to a filtered view
+- Powered by Claude; should cite the specific threads it's referring to (linkable)
 
-### Arc Sharing
+### Thread Sharing
 
-Generate a shareable read-only link to a specific arc or signal.
+Generate a shareable read-only link to a specific thread or signal.
 
 - Useful for escalating to a teammate who isn't in the account, or sharing a receipt with an accountant
 - Link expires after a configurable duration (24h, 7 days, never)
 - Optional password protection
-- Shared view is stripped of other account data; shows only the selected arc + signals
+- Shared view is stripped of other account data; shows only the selected thread + signals
 
 ### Public Changelog
 
@@ -743,12 +743,12 @@ A `/changelog` page in the app (and marketing site) showing product updates.
 
 ### Onboarding Email Import
 
-Allow users to bulk-import historical emails from Gmail or Outlook via OAuth, classify them, and seed their arcs.
+Allow users to bulk-import historical emails from Gmail or Outlook via OAuth, classify them, and seed their threads.
 
 - OAuth flow to grant read access to the user's existing inbox
 - Import runs async (background job); shows progress bar
 - Classifier runs on imported emails exactly as it does for live SES emails
-- Resulting arcs are tagged `imported` so users can distinguish from live mail
+- Resulting threads are tagged `imported` so users can distinguish from live mail
 - Useful for users who want to migrate away from Gmail and start with full context
 
 ### Accessibility & Personalisation
@@ -756,7 +756,7 @@ Allow users to bulk-import historical emails from Gmail or Outlook via OAuth, cl
 - Full keyboard navigation (already covered above) + screen reader support (ARIA labels on all interactive elements)
 - High-contrast mode toggle (separate from OS dark mode)
 - Font size preference (small / medium / large)
-- Density toggle: compact list (more arcs visible) vs comfortable (more whitespace)
+- Density toggle: compact list (more threads visible) vs comfortable (more whitespace)
 - Colour-blind safe palette option for urgency colours (not just red/amber/grey — add patterns or icons as secondary indicator)
 
 ---
@@ -767,7 +767,7 @@ Allow users to bulk-import historical emails from Gmail or Outlook via OAuth, cl
 - [ ] **Never subvert TypeScript types in tests** — test code must use valid, real values for every typed field (e.g. `Workflow`, `WorkflowData`, discriminated unions). Casts like `as never`, `as any`, or `as unknown as T` in test stubs hide real problems: they allow tests to compile while masking that the stub doesn't actually conform to the contract the production code expects. When a test stub is hard to construct, that difficulty is a signal — either the type needs a factory/builder helper, or the interface needs to be reconsidered. Use `satisfies T` to verify shape without widening, and use real discriminant values so the processor's switch/case and rule-engine branches exercise the correct code paths.
 - [ ] **Always type HTTP response bodies against the actual schema in tests** — casting `res.json()` to `Record<string, unknown>` (or `any`) in integration tests is the same mistake as an untyped stub: it silently discards the type contract and forces bracket notation (`body['field']`) with manual redundant casts everywhere. TypeScript cannot catch field-name typos (`body['id']` vs `body['accountId']`) or schema renames. The rule: import the zod-inferred type from `src/api/schemas.ts` (e.g. `import type { Account } from '../../src/api/schemas.js'`) and cast the parsed body to that type (`as Account`). Dot notation then works naturally, the compiler enforces field names, and the test doubles as a compile-time contract between the test and the OpenAPI schema. Corollary: `Record<string, unknown>` is a legitimate escape hatch only at real type-erasure boundaries (raw AWS SDK responses, runtime type guards, AST walkers) — never for a JSON payload whose shape is already described by a schema we own.
 - [ ] **Never wrap an error with the same error kind** — each abstraction layer should wrap errors from lower layers using its own error type. `dbError(e)` is correct at the database boundary when `e` is a raw SDK exception, string, or a different error kind. It is wrong when `e` is already a `DbError` — that produces `{kind:db_error, cause:{kind:db_error}}` which is redundant and obscures the real cause. The processor layer uses `processorError(e)` to wrap whatever the inner layers return (`DbError`, `InvalidResponseError`, thrown exceptions). The rule: when you catch or check an error, wrap it with the error type that belongs to the current abstraction layer, not the one that belongs to the layer below.
-- [ ] **Complete `toApiSignal` for the signal list endpoint** — `GET /accounts/:id/arcs/:arcId/signals` currently returns raw DB items instead of going through `toApiSignal`. Two gaps block it: (1) `toApiSource` maps `"signal"` and `"email"` sources to `"system"`, losing the distinction — review `Api.SignalSource` for what is only absolutely required from the DB source values; (2) review`toApiCalendarData` for the drops `method`, `veventUid`, and other calendar fields the frontend depends on, what does the front end actually use, and why, and how is that different from what we return on both accounts. Remember to apply `toApiSignal` in the list endpoint so both arc-list and signal-list go through their respective transforms.
+- [ ] **Complete `toApiSignal` for the signal list endpoint** — `GET /accounts/:id/threads/:threadId/signals` currently returns raw DB items instead of going through `toApiSignal`. Two gaps block it: (1) `toApiSource` maps `"signal"` and `"email"` sources to `"system"`, losing the distinction — review `Api.SignalSource` for what is only absolutely required from the DB source values; (2) review`toApiCalendarData` for the drops `method`, `veventUid`, and other calendar fields the frontend depends on, what does the front end actually use, and why, and how is that different from what we return on both accounts. Remember to apply `toApiSignal` in the list endpoint so both thread-list and signal-list go through their respective transforms.
 
 ---
 
@@ -787,7 +787,7 @@ Competitive analysis vs. Addy.io, SimpleLogin, ForwardEmail, Firefox Relay, Mail
 **Medium priority:**
 - **On-demand alias generation** *(tracked in main list)* — Catch-all + custom domains covers this technically, but there's no UI shortcut for generating `random123@yourdomain.com` at a click. All alias services have this as their primary action.
 - **Snooze / remind me later** *(tracked in main list)* — Differentiates from pure forwarders; HEY and Superhuman both do this.
-- **Calendar sync** *(tracked in main list)* — Export `.ics` or sync via CalDAV for travel/scheduling arcs.
+- **Calendar sync** *(tracked in main list)* — Export `.ics` or sync via CalDAV for travel/scheduling threads.
 
 **Low priority:**
 - **Webhook outbound** *(tracked in main list)* — Power users and devs want to pipe signals into Zapier, Make, or custom apps. ForwardEmail offers this.
@@ -800,7 +800,7 @@ These are genuine moats — most are already built, just not marketed.
 
 1. **AI email intelligence, not just routing** — Every competitor is a dumb pipe: email in → forward or drop. We classify into 14 semantic workflow types, extract structured data (order numbers, flight details, OTP codes, invoice amounts), generate summaries, and calculate urgency. No competitor does this. This is the most defensible moat.
 
-2. **Arc threading by semantic similarity** — Everyone else shows raw email lists. We thread semantically via pgvector — all Amazon order updates for order #123 group together even when sender addresses vary. Closer to what HEY attempted but backed by vector embeddings.
+2. **Thread threading by semantic similarity** — Everyone else shows raw email lists. We thread semantically via pgvector — all Amazon order updates for order #123 group together even when sender addresses vary. Closer to what HEY attempted but backed by vector embeddings.
 
 3. **Smart action extraction at inbox-list level** — `workflowData` structured fields already exist. The "Smart Action Buttons" (copy OTP from inbox row, track package without opening email) is a killer UX feature no privacy or alias service offers. OTP copy is the #1 use case for alias services and nobody does it well today.
 
@@ -830,13 +830,13 @@ Secondary B2B pitch: *"The shared inbox for your domain, with team roles and aud
 | Catch-all on that domain | Competitors charge for catch-all. Core to our model — must be free. |
 | Reply from your domain (Tier 2 DNS) | Competitors charge for this. Giving it free locks in the domain. |
 | 14-workflow AI classification | This is the product. Paywalling AI makes us just another dumb forwarder. |
-| Arc threading + summaries | Same reason — the product, not an upsell. |
+| Thread threading + summaries | Same reason — the product, not an upsell. |
 | JSONLogic rules (up to 5) | Enough to get hooked; limit creates upgrade pressure. |
 | Labels (unlimited) | Zero marginal cost, high stickiness. |
 | All filter modes + spam threshold tuning | Core safety feature — charging for spam protection is tone-deaf. |
 | 1 verified forwarding address | Enough to be useful. |
 | Push + email notifications | Core feature — no paywall. |
-| 90-day arc retention | Sufficient for personal use. |
+| 90-day thread retention | Sufficient for personal use. |
 | 30-day audit log | Free tier gets some audit; longer is a paid signal. |
 | PGP encryption (when built) | Privacy is a trust signal, not a premium feature. |
 | Browser extension (when built) | Free acquisition channel — never monetize directly. |
@@ -849,7 +849,7 @@ Things competitors charge for that we include, plus things only we can offer:
 |---|---|
 | Additional domains (up to 5) | Direct SES identity cost per domain. Competitors charge $3–9/mo for 1 extra domain. |
 | Rules (unlimited, vs 5 free) | Power users need this; casual users don't. |
-| Arc retention (2 years, vs 90 days) | Storage scales with retention. |
+| Thread retention (2 years, vs 90 days) | Storage scales with retention. |
 | 1-year audit log | Compliance expectation for power users. |
 | Email analytics dashboard | High-value, low-urgency — good paid upsell moment. |
 | Snooze / Waiting For | Power user productivity; drives "aha" upgrade moment. |
@@ -885,7 +885,7 @@ Things competitors charge for that we include, plus things only we can offer:
 
 - [ ] **Revalidate embed-text uses HTML body first, not text body** — The current `buildEmbedText` sanitizes `rawTextBody`. But users see the HTML body in the UI. If we classify/embed based on the text body but display the HTML body, a phishing email could have innocent text body content while the HTML body contains malicious links/content that the user actually sees. The embed text builder should prefer the HTML body (stripped of tags) as the source of truth for classification and embedding, falling back to text body only when HTML is absent. This is a security-critical change.
 
-- [ ] **Image handling strategy for email signals** — Decide how to handle images in emails: (a) auto-download and cache images at signal creation time (privacy risk: sender knows you opened the email via tracking pixels), (b) proxy images through our server on-demand (hides user IP but still loads content), (c) block all remote images by default with a user toggle to load (safest, Gmail-style), (d) strip tracking pixels but allow content images. Also decide: should we store image thumbnails for the arc list preview? Should we scan images for phishing (fake login buttons, QR codes to malicious URLs)?
+- [ ] **Image handling strategy for email signals** — Decide how to handle images in emails: (a) auto-download and cache images at signal creation time (privacy risk: sender knows you opened the email via tracking pixels), (b) proxy images through our server on-demand (hides user IP but still loads content), (c) block all remote images by default with a user toggle to load (safest, Gmail-style), (d) strip tracking pixels but allow content images. Also decide: should we store image thumbnails for the thread list preview? Should we scan images for phishing (fake login buttons, QR codes to malicious URLs)?
 
 - [ ] **Secure HTML email rendering** — Email HTML is untrusted content from arbitrary senders. The UI must render it safely without allowing XSS, script injection, CSS exfiltration, or form submission attacks. Options: (a) sandboxed iframe with `srcdoc` + restrictive CSP (`sandbox` attribute, no `allow-scripts`, no `allow-same-origin`), (b) server-side sanitization that strips all scripts, event handlers, forms, and dangerous CSS (e.g. `background-image: url()` for tracking) before storing/serving the HTML, (c) both — sanitize on ingest and sandbox on render. Also consider: should we rewrite all URLs to go through a redirect warning page? Should we strip `target="_blank"` or force all links to open in a new tab with `rel="noopener noreferrer"`? Should we offer a "view original" escape hatch that opens the raw HTML in a fully isolated tab?
 
