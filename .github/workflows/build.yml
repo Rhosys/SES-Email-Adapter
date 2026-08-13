@@ -19,6 +19,7 @@ env:
   STATE_BUCKET: "rhosys-opentofu-${{ secrets.AWS_ACCOUNT_ID }}-eu-central-1"
   STATE_KEY: "${{ github.event.repository.name }}/terraform.tfstate"
   TF_VAR_aws_account_id: "${{ secrets.AWS_ACCOUNT_ID }}"
+  TF_LOG: ERROR
   MINISTACK_VERSION: "1.3.59"
 
 permissions:
