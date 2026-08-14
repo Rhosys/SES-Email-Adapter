@@ -61,6 +61,12 @@ export class FollowupHandler {
       return ok(undefined);
     }
 
+    // 2b. followupAt cleared (new signal already reactivated) → discard
+    if (!thread.followupAt) {
+      this.logger.info("Followup: followupAt cleared, new signal already reactivated — discarding.", { code: "followup.already_reactivated", accountId, threadId });
+      return ok(undefined);
+    }
+
     // 3. Fetch signal for notification payload
     const signalResult = await this.threadDb.getSignalById(accountId, signalId, threadId);
     if (signalResult.isErr()) return err(signalResult.error);

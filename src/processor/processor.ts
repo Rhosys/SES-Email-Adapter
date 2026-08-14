@@ -46,7 +46,6 @@ import { forwardCalendarInvite } from "./calendar/calendar-forwarder.js";
 import type { CalendarForwarderDeps } from "./calendar/calendar-forwarder.js";
 import type { CalendarEventData, CalendarInviteInvalidData } from "../types/calendar.js";
 import type { SchedulerClient } from "../scheduler/scheduler-client.js";
-import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { RSVP_REMINDER_HOURS_BEFORE } from "../scheduler/rsvp-reminder.js";
 import { extractMsgId, buildSignalGsi3pk, extractFirstInReplyTo } from "./message-id.js";
 
@@ -1382,19 +1381,13 @@ export class SignalProcessor {
       if (thread.recipientAddress !== undefined) fields.recipientAddress = thread.recipientAddress;
       if (thread.subject !== undefined) fields.subject = thread.subject;
 
+      // Clear followupAt when reactivating — signals the snooze was cancelled by new mail
+      if (matchedThread.status === "archived" && thread.status === "active" && matchedThread.followupAt) {
+        fields.followupAt = "";
+      }
+
       const updateResult = await this.threadDb.updateThread(accountId, thread.id, thread.status, thread.lastSignalAt, fields);
       if (updateResult.isErr()) return err(updateResult.error);
-
-      // Cancel pending followup schedule when reactivating an archived thread
-      if (matchedThread.status === "archived" && thread.status === "active" && this.schedulerClient) {
-        const signalsResult = await this.threadDb.listSignals(accountId, thread.id, { limit: 1 });
-        const scheduleSignalId = signalsResult.isOk() ? signalsResult.value.items[0]?.id ?? thread.id : thread.id;
-        const scheduleName = buildScheduleName(accountId, scheduleSignalId, "followup");
-        const deleteResult = await this.schedulerClient.deleteFollowup(scheduleName);
-        if (deleteResult.isErr()) {
-          this.logger.warn("Failed to cancel followup schedule on thread reactivation — stale-fire will handle it.", { code: "processor.followup.cancel_failed", signal, thread, scheduleName, error: deleteResult.error });
-        }
-      }
     } else {
       if (outcome.archive) thread.status = "archived";
       const saveThreadResult = await this.threadDb.saveThread(thread);

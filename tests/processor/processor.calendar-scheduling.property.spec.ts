@@ -14,8 +14,6 @@ import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator
 import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
 import type { SchedulerClient } from "../../src/scheduler/scheduler-client.js";
 import type { Alias, AliasSender, Thread } from "../../src/types/index.js";
-import { dbError } from "../../src/errors.js";
-import { buildScheduleName } from "../../src/scheduler/schedule-name.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 
@@ -272,8 +270,8 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
     });
   });
 
-  describe("arc reactivation → deleteFollowup called with correct schedule name", () => {
-    it("calls deleteFollowup when a new signal reactivates an archived arc", async () => {
+  describe("arc reactivation clears followupAt when thread had one set", () => {
+    it("passes followupAt clearing in updateThread fields when archived thread had followupAt", async () => {
       vi.setSystemTime(new Date("2025-01-10T12:00:00Z"));
 
       const schedulerClient = makeSchedulerClientMock();
@@ -281,62 +279,7 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
         id: "arc-existing",
         accountId: TEST_ACCOUNT_ID,
         status: "archived",
-        summary: "Existing arc",
-        labels: [],
-        createdAt: "2024-12-01T00:00:00Z",
-        lastSignalAt: "2024-12-01T00:00:00Z",
-        updatedAt: "2024-12-01T00:00:00Z",
-        workflow: "conversation",
-        sender: { address: "sender@example.com" },
-        recipientAddress: "user@example.com",
-        subject: "Test email",
-      };
-
-      const mostRecentSignalId = "sgn-latest-001";
-
-      const threadDb = {
-        ...makeThreadDbMock(),
-        getSignalByMessageId: vi.fn().mockResolvedValue(ok(null)),
-        saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
-        saveArc: vi.fn().mockResolvedValue(ok(undefined)),
-        getArc: vi.fn().mockResolvedValue(ok(null)),
-        updateArc: vi.fn().mockResolvedValue(ok({ id: existingArc.id })),
-        listSignals: vi.fn().mockResolvedValue(ok({ items: [{ id: mostRecentSignalId }], nextToken: undefined })),
-      } as unknown as ThreadDatabase;
-
-      // ThreadMatcherPort returns the existing archived arc
-      const threadMatcher: ThreadMatcherPort = {
-        findMatch: vi.fn().mockResolvedValue(ok(existingArc)),
-        upsertEmbedding: vi.fn().mockResolvedValue(ok(undefined)),
-        deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)),
-      };
-
-      const processor = buildProcessor({
-        mockLogger,
-        threadDb,
-        schedulerClient,
-        threadMatcher,
-      });
-
-      await processor.processInbound(makeMessage("msg-reactivate"), 1);
-
-      expect(schedulerClient.deleteFollowup).toHaveBeenCalledOnce();
-      const expectedScheduleName = buildScheduleName(TEST_ACCOUNT_ID, mostRecentSignalId, "followup");
-      expect(schedulerClient.deleteFollowup).toHaveBeenCalledWith(expectedScheduleName);
-    });
-  });
-
-  describe("deleteFollowup ResourceNotFoundException → continues without error", () => {
-    it("continues processing when deleteFollowup fails (non-fatal)", async () => {
-      vi.setSystemTime(new Date("2025-01-10T12:00:00Z"));
-
-      const schedulerClient = makeSchedulerClientMock();
-      schedulerClient.deleteFollowup.mockResolvedValue(err(dbError("ResourceNotFoundException")));
-
-      const existingArc: Thread = {
-        id: "arc-existing-2",
-        accountId: TEST_ACCOUNT_ID,
-        status: "archived",
+        followupAt: "2025-01-15T09:00:00Z",
         summary: "Existing arc",
         labels: [],
         createdAt: "2024-12-01T00:00:00Z",
@@ -354,8 +297,8 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
         saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
         saveArc: vi.fn().mockResolvedValue(ok(undefined)),
         getArc: vi.fn().mockResolvedValue(ok(null)),
-        updateArc: vi.fn().mockResolvedValue(ok({ id: existingArc.id })),
-        listSignals: vi.fn().mockResolvedValue(ok({ items: [{ id: "sgn-latest-002" }], nextToken: undefined })),
+        updateThread: vi.fn().mockResolvedValue(ok({ id: existingArc.id })),
+        listSignals: vi.fn().mockResolvedValue(ok({ items: [{ id: "sgn-latest-001" }], nextToken: undefined })),
       } as unknown as ThreadDatabase;
 
       const threadMatcher: ThreadMatcherPort = {
@@ -371,14 +314,14 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
         threadMatcher,
       });
 
-      const result = await processor.processInbound(makeMessage("msg-delete-fail"), 1);
-
-      // Processing should succeed despite schedule deletion failure
+      const result = await processor.processInbound(makeMessage("msg-reactivate"), 1);
       expect(result.isOk()).toBe(true);
 
-      // Should have logged a warning about the failure
-      const warnLogs = mockLogger.calls.filter(c => c.method === "warn" && c.context?.code === "processor.followup.cancel_failed");
-      expect(warnLogs.length).toBe(1);
+      // updateThread should have been called with followupAt cleared
+      const updateCalls = (threadDb.updateThread as ReturnType<typeof vi.fn>).mock.calls;
+      expect(updateCalls.length).toBeGreaterThan(0);
+      const fields = updateCalls[0]![4]; // 5th arg is the fields object
+      expect(fields.followupAt).toBe("");
     });
   });
 });
