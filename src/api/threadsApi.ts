@@ -235,7 +235,7 @@ export class ThreadsApi {
       if (body.followupAt) {
         const followupTime = new Date(body.followupAt).getTime();
         const now = Date.now();
-        if (followupTime <= now) return err(c, 400, "followupAt must be in the future");
+        if (followupTime < now) return err(c, 400, "followupAt must be in the future");
         if (thread.retentionDuration) {
           const retentionSeconds = durationToSeconds(thread.retentionDuration);
           if (retentionSeconds != null) {
@@ -247,16 +247,31 @@ export class ThreadsApi {
 
       const statusChanged = body.status !== undefined && body.status !== thread.status;
 
-      if (body.followupAt && schedulerClient) {
+      if (body.followupAt) {
+        const followupTime = new Date(body.followupAt).getTime();
+        const now = Date.now();
+        const deltaMs = followupTime - now;
         const signalsResult = await threadDb.listSignals(accountId, thread.id, { limit: 1 });
         const signalId = signalsResult.isOk() ? signalsResult.value.items[0]?.id ?? thread.id : thread.id;
-        const scheduleResult = await schedulerClient.createFollowup({
-          accountId, signalId, threadId: thread.id, fireAt: body.followupAt,
-          suffix: "followup", sqsMessageAttributeMessageType: "signal_followup",
-        });
-        if (scheduleResult.isErr()) {
-          logger.error("Failed to create followup schedule.", { code: "api.thread.followup_schedule_failed", error: scheduleResult.error });
-          return err(c, 500, "Failed to create followup schedule");
+
+        // SQS DelaySeconds max is 900s (15 min) — use direct SQS for near-future followups,
+        // EventBridge Scheduler for anything beyond that threshold.
+        if (deltaMs <= 900_000) {
+          const delaySeconds = Math.max(0, Math.ceil(deltaMs / 1000));
+          const sqsResult = await signalQueue.send("signal_followup", { accountId, signalId, threadId: thread.id }, { delaySeconds });
+          if (sqsResult.isErr()) {
+            logger.error("Failed to enqueue near-future followup.", { code: "api.thread.followup_sqs_failed", error: sqsResult.error });
+            return err(c, 500, "Failed to schedule followup");
+          }
+        } else {
+          const scheduleResult = await schedulerClient.createFollowup({
+            accountId, signalId, threadId: thread.id, fireAt: body.followupAt,
+            suffix: "followup", sqsMessageAttributeMessageType: "signal_followup",
+          });
+          if (scheduleResult.isErr()) {
+            logger.error("Failed to create followup schedule.", { code: "api.thread.followup_schedule_failed", error: scheduleResult.error });
+            return err(c, 500, "Failed to create followup schedule");
+          }
         }
       }
 

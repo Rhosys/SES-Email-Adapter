@@ -207,12 +207,14 @@ async function req(
 describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () => {
   let threadDb: ReturnType<typeof makeThreadDb>;
   let schedulerClient: ReturnType<typeof makeSchedulerClient>;
+  let signalQueue: { send: ReturnType<typeof vi.fn>; sendBatch: ReturnType<typeof vi.fn>; sendToLongPoller: ReturnType<typeof vi.fn> };
   let app: ReturnType<typeof createApp>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     threadDb = makeThreadDb();
     schedulerClient = makeSchedulerClient();
+    signalQueue = { send: vi.fn().mockResolvedValue(ok(undefined)), sendBatch: vi.fn().mockResolvedValue(ok(undefined)), sendToLongPoller: vi.fn().mockResolvedValue(ok(undefined)) };
     app = createApp(makeAppDeps({
       threadDb: threadDb as unknown as ThreadDatabase,
       accountDb: makeAccountDb() as unknown as AccountDatabase,
@@ -232,6 +234,7 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
       rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp,
       postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "test.example.com" } as unknown as PostApprovalCalendarHandlerDeps,
       schedulerClient: schedulerClient as unknown as SchedulerClient,
+      signalQueue: signalQueue as never,
     }));
   });
 
@@ -239,7 +242,7 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
   // followupAt alone (no status change) → schedule created, arc unchanged
   // -------------------------------------------------------------------------
 
-  it("followupAt alone → schedule created, arc status unchanged", async () => {
+  it("followupAt alone → schedule created, thread status unchanged", async () => {
     const arc = makeThread({ status: "active" });
     threadDb.getThread.mockResolvedValue(ok(arc));
 
@@ -247,7 +250,7 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
     const res = await req(app, "PATCH", `${A}/threads/${ARC_ID}`, { body: { followupAt: futureDate } });
 
     expect(res.status).toBe(200);
-    // Arc status should remain active (updateArc called with original status)
+    // thread status should remain active (updateArc called with original status)
     expect(threadDb.updateThread).toHaveBeenCalledWith(
       TEST_ACCOUNT_ID, ARC_ID, "active", arc.lastSignalAt, { followupAt: futureDate },
     );
@@ -327,7 +330,7 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
   });
 
   // -------------------------------------------------------------------------
-  // Schedule creation failure → 500, arc status unchanged (rollback)
+  // Schedule creation failure → 500, thread status unchanged (rollback)
   // -------------------------------------------------------------------------
 
   it("schedule creation failure with status change → 500 and arc not mutated", async () => {
@@ -389,8 +392,8 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
     const boundaries: Array<{ label: string; offsetFromNow: number; expectedStatus: number }> = [
       { label: "1 hour in the past", offsetFromNow: -3600_000, expectedStatus: 400 },
       { label: "1 second in the past", offsetFromNow: -1000, expectedStatus: 400 },
-      { label: "exactly now (not future)", offsetFromNow: 0, expectedStatus: 400 },
-      { label: "1 second in the future (valid)", offsetFromNow: 1000, expectedStatus: 200 },
+      { label: "exactly now (SQS delay path)", offsetFromNow: 0, expectedStatus: 200 },
+      { label: "1 second in the future (SQS delay path)", offsetFromNow: 1000, expectedStatus: 200 },
       { label: "1 hour in the future (valid)", offsetFromNow: 3600_000, expectedStatus: 200 },
       { label: "1 day in the future (valid)", offsetFromNow: 86_400_000, expectedStatus: 200 },
       // Within retention boundary (expiry - now ≈ 199 days from pinned NOW)
@@ -419,12 +422,20 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
 
         if (expectedStatus === 400) {
           expect(schedulerClient.createFollowup).not.toHaveBeenCalled();
+          expect(signalQueue.send).not.toHaveBeenCalled();
+        } else if (offsetFromNow <= 900_000) {
+          // Near-future: goes through SQS delay path
+          expect(signalQueue.send).toHaveBeenCalledOnce();
+          expect(schedulerClient.createFollowup).not.toHaveBeenCalled();
         } else {
+          // Far-future: goes through EventBridge Scheduler
           expect(schedulerClient.createFollowup).toHaveBeenCalledOnce();
+          expect(signalQueue.send).not.toHaveBeenCalled();
         }
 
         // Reset mock for next iteration
         schedulerClient.createFollowup.mockClear();
+        signalQueue.send.mockClear();
         threadDb.getThread.mockClear();
         threadDb.updateThread.mockClear();
       },
