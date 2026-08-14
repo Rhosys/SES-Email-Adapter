@@ -14,7 +14,11 @@
 // - Changing action/URL extraction logic
 //
 // RUN: npm run test:llm-bedrock-classifier
-// REQUIRES: Valid AWS credentials with Bedrock InvokeModel permission
+// REQUIRES: AWS SSO authentication via ~/.kiro/skills/lib/aws-cli.ts
+//   npx tsx ~/.kiro/skills/lib/aws-cli.ts "LLM classifier tests" -- \
+//     npm run test:llm-bedrock-classifier
+// The aws-cli wrapper authenticates to account 342695602194 (email-catcher)
+// using the RhosysEngineerContext role and injects ephemeral credentials.
 
 import { describe, it, expect } from "vitest";
 import { SignalClassifier } from "../src/classifier/classifier.js";

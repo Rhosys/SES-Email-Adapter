@@ -99,7 +99,7 @@ interface CoercionContext {
 
 /**
  * Coerces raw workflowData fields based on the workflow registry type declarations.
- * Mutates the input record in place.
+ * Returns a new record with coerced values — does not mutate the input.
  */
 export function coerceWorkflowData(
   workflowData: Record<string, unknown>,
@@ -107,13 +107,14 @@ export function coerceWorkflowData(
   logger: Logger,
   ctx: CoercionContext,
   receivedAt: string,
-): void {
+): Record<string, unknown> {
+  const result = { ...workflowData };
   const fields = WORKFLOW_FIELDS.get(workflow);
-  if (!fields) return;
+  if (!fields) return result;
 
   for (const field of fields) {
-    if (!(field.name in workflowData)) continue;
-    const raw = workflowData[field.name];
+    if (!(field.name in result)) continue;
+    const raw = result[field.name];
     if (raw === null || raw === undefined) {
       // Already null/undefined — leave as-is (will be omitted in output)
       continue;
@@ -132,9 +133,9 @@ export function coerceWorkflowData(
               expectedValues: field.enumValues.map(e => e.value),
               ...ctx,
             });
-            workflowData[field.name] = null;
+            result[field.name] = null;
           } else {
-            workflowData[field.name] = coerced;
+            result[field.name] = coerced;
           }
         } else {
           const coerced = coerceString(raw);
@@ -145,9 +146,9 @@ export function coerceWorkflowData(
               value: raw,
               ...ctx,
             });
-            workflowData[field.name] = null;
+            result[field.name] = null;
           } else {
-            workflowData[field.name] = coerced;
+            result[field.name] = coerced;
           }
         }
         break;
@@ -163,9 +164,9 @@ export function coerceWorkflowData(
             expectedValues: (field.enumValues ?? []).map(e => e.value),
             ...ctx,
           });
-          workflowData[field.name] = null;
+          result[field.name] = null;
         } else {
-          workflowData[field.name] = coerced;
+          result[field.name] = coerced;
         }
         break;
       }
@@ -180,9 +181,9 @@ export function coerceWorkflowData(
             value: raw,
             ...ctx,
           });
-          workflowData[field.name] = null;
+          result[field.name] = null;
         } else {
-          workflowData[field.name] = coerced;
+          result[field.name] = coerced;
         }
         break;
       }
@@ -196,9 +197,9 @@ export function coerceWorkflowData(
             value: raw,
             ...ctx,
           });
-          workflowData[field.name] = null;
+          result[field.name] = null;
         } else {
-          workflowData[field.name] = coerced;
+          result[field.name] = coerced;
         }
         break;
       }
@@ -213,7 +214,7 @@ export function coerceWorkflowData(
             ...ctx,
           });
         }
-        workflowData[field.name] = coerced;
+        result[field.name] = coerced;
         break;
       }
 
@@ -225,7 +226,7 @@ export function coerceWorkflowData(
             value: raw,
             ...ctx,
           });
-          workflowData[field.name] = null;
+          result[field.name] = null;
         }
         // Arrays pass through as-is — inner element coercion is out of scope
         // (items are typed loosely in the registry as notes)
@@ -237,6 +238,8 @@ export function coerceWorkflowData(
         break;
     }
   }
+
+  return result;
 }
 
 function coerceEnumValue(raw: unknown, enumValues: Array<{ value: string }>): string | null {
@@ -267,7 +270,7 @@ const DATE_FORMATS_YEARFREE = [
   "MMM d",
 ];
 
-const TIME_SUFFIXES = ["", " HH:mm", " h:mm a"];
+const TIME_SUFFIXES = ["", " HH:mm", " h:mm a", " 'at' HH:mm", " 'at' h:mm a"];
 
 /** Pattern to detect slash-separated numeric dates (e.g. 01/02/2025, 1/2/25). */
 const SLASH_DATE_PATTERN = /\d+\/\d+/;

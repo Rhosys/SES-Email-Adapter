@@ -144,7 +144,9 @@ export class SignalClassifier {
     const text = result.choices?.[0]?.message?.content ?? "";
 
     // Parse classifier JSON output — strip markdown fences if model wraps output
-    const jsonText = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+    let jsonText = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();
+    // Sanitize bare <UNSPECIFIED> sentinels that break JSON (LLM outputs them for non-string fields)
+    jsonText = jsonText.replace(/<UNSPECIFIED>/g, "null").replace(/"<UNSPECIFIED>"/gi, "null");
     let raw: RawClassificationResponse;
     try {
       raw = JSON.parse(jsonText) as RawClassificationResponse;
@@ -208,11 +210,28 @@ export class SignalClassifier {
     }
 
     // Coerce workflowData field types (numeric → string, boolean normalization)
-    coerceWorkflowData(workflowData, raw.workflow, this.logger, {
+    const rawWorkflowData = { ...workflowData };
+    const coercedWorkflowData = coerceWorkflowData(workflowData, raw.workflow, this.logger, {
       signalId: input.signalId,
       accountId: input.accountId,
       workflow: raw.workflow,
     }, input.receivedAt);
+
+    // Strip sentinel/placeholder values — LLM sometimes outputs these instead of omitting
+    for (const [key, value] of Object.entries(coercedWorkflowData)) {
+      if (typeof value === "string" && isUnspecifiedSentinel(value)) {
+        coercedWorkflowData[key] = null;
+      }
+    }
+
+    this.logger.info("Classifier workflowData coercion complete.", {
+      code: "classifier.coercion_result",
+      signalId: input.signalId,
+      accountId: input.accountId,
+      workflow: raw.workflow,
+      rawWorkflowData,
+      coercedWorkflowData,
+    });
 
     // Extract and validate actions
     const actions: SignalAction[] = [];
@@ -228,7 +247,7 @@ export class SignalClassifier {
 
     return ok({
       workflow: raw.workflow as Workflow,
-      workflowData: workflowData as unknown as WorkflowData,
+      workflowData: coercedWorkflowData as unknown as WorkflowData,
       tags,
       summary: raw.summary,
       labels,
@@ -310,4 +329,11 @@ function isValidUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+const UNSPECIFIED_PATTERNS = ["<unspecified>", "not specified", "unknown", "n/a", "none", "unspecified"];
+
+function isUnspecifiedSentinel(value: string): boolean {
+  const lower = value.trim().toLowerCase();
+  return UNSPECIFIED_PATTERNS.includes(lower);
 }

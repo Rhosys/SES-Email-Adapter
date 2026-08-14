@@ -1014,7 +1014,7 @@ export class SignalProcessor {
 
     // 5. Build embed text from classification output (attacker-free content)
     const senderDomain = parsed.from.address.split("@").pop() ?? "";
-    const embedText = buildEmbedText(senderDomain, classificationOutput);
+    const embedText = buildEmbedText(senderDomain, classificationOutput, parsed.subject);
 
     // Phase 1: Primary embedding (fail-hard) — must succeed for thread matching
     const readCluster = getPrimaryThreadMatcherRegistry();

@@ -89,9 +89,11 @@ Select from the provided list only. The user message includes an "Available labe
   // Confidence rules
   sections.push(`## Confidence
 
-For workflowData fields: extract only what is explicitly present in the email with high confidence. Omit optional fields rather than guess. If a value cannot be determined with certainty, leave it out.
+For workflowData fields: extract only what is explicitly present in the email with high confidence. Omit optional fields entirely rather than guess. If a value cannot be determined with certainty, omit the field from the JSON output. If you absolutely cannot omit the field, use the sentinel string \`<UNSPECIFIED>\` — never use phrases like "not specified", "unknown", "N/A", or "none".
 
-For URL fields in workflowData: select ONLY from the "Extracted links" list provided in the user message. If no link in the list matches the field's purpose, omit the field entirely. Never fabricate a URL, never use placeholder text like "not specified". If the extracted links list is absent or empty, omit all URL fields.`);
+For URL fields in workflowData: select ONLY from the "Extracted links" list provided in the user message. If no link in the list matches the field's purpose, omit the field entirely. Never fabricate a URL. If the extracted links list is absent or empty, omit all URL fields.
+
+For date fields: extract the date and time EXACTLY as written in the email text. Do not convert, reformat, or normalize. If the email says "August 26, 2026 at 5:00 PM" output exactly "August 26, 2026 at 5:00 PM". If the email says "August 26" output exactly "August 26" — do NOT add a time or timezone that is not present. Date and time are separate pieces of information: only include a time if the email explicitly states one. Never fabricate midnight (00:00) or UTC (Z/+00:00) when the email does not specify a time or timezone.`);
 
   // Language rules
   sections.push(`## Language

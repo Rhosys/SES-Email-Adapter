@@ -276,26 +276,24 @@ describe("reduceLink", () => {
 
 describe("buildEmbedText (classification output)", () => {
   describe("line order", () => {
-    it("produces senderDomain, workflow, summary, labels, workflowData lines in order", () => {
+    it("produces recipientAddress, senderDomain, workflow, identity, subject, summary, labels lines in order", () => {
       const classification: ClassificationOutput = {
         workflow: "payments",
         workflowData: { workflow: "payments", paymentType: "invoice", vendor: "Stripe", amount: "29.99", currency: "USD" } as unknown as ClassificationOutput["workflowData"],
         tags: [],
         summary: "Your Stripe invoice for June is ready",
         labels: ["system:workflow:payments", "invoice"],
-      actions: [],
+        actions: [],
       };
-      const result = buildEmbedText("marketing.stripe.com", classification);
+      const result = buildEmbedText("marketing.stripe.com", classification, "Invoice #1234");
       const lines = result.split("\n");
       expect(lines[0]).toBe("marketing.stripe.com");
       expect(lines[1]).toBe("payments");
-      expect(lines[2]).toBe("Your Stripe invoice for June is ready");
-      expect(lines[3]).toBe("system:workflow:payments,invoice");
-      expect(lines[4]).toBe("workflowData.paymentType=invoice");
-      expect(lines[5]).toBe("workflowData.vendor=Stripe");
-      expect(lines[6]).toBe("workflowData.amount=29.99");
-      expect(lines[7]).toBe("workflowData.currency=USD");
-      expect(lines).toHaveLength(8);
+      expect(lines[2]).toBe("Stripe Stripe Stripe");
+      expect(lines[3]).toBe("Invoice #1234");
+      expect(lines[4]).toBe("Your Stripe invoice for June is ready");
+      expect(lines[5]).toBe("system:workflow:payments,invoice");
+      expect(lines).toHaveLength(6);
     });
   });
 
@@ -322,11 +320,12 @@ describe("buildEmbedText (classification output)", () => {
         tags: [],
         summary: "Slack verification code",
         labels: ["action-needed", "system:workflow:auth"],
-      actions: [],
+        actions: [],
       };
       const result = buildEmbedText("slack.com", classification);
       const lines = result.split("\n");
-      expect(lines[3]).toBe("action-needed,system:workflow:auth");
+      // senderDomain, workflow, identity (Slack), summary, labels
+      expect(lines[4]).toBe("action-needed,system:workflow:auth");
     });
 
     it("emits empty string for labels line when labels array is empty", () => {
@@ -340,15 +339,16 @@ describe("buildEmbedText (classification output)", () => {
       };
       const result = buildEmbedText("amazon.com", classification);
       const lines = result.split("\n");
-      expect(lines[3]).toBe("");
+      // senderDomain, workflow, identity (Amazon), summary, labels
+      expect(lines[4]).toBe("");
     });
   });
 
-  describe("workflowData flattening", () => {
-    it("excludes the workflow discriminator field from workflowData", () => {
+  describe("identity fields", () => {
+    it("includes only identity fields from workflowData repeated 3x", () => {
       const classification: ClassificationOutput = {
         workflow: "package",
-        workflowData: { workflow: "package", packageType: "shipping", retailer: "Amazon" },
+        workflowData: { workflow: "package", packageType: "shipping", retailer: "Amazon", orderNumber: "111-222" },
         tags: [],
         summary: "Amazon package shipped",
         labels: [],
@@ -356,12 +356,13 @@ describe("buildEmbedText (classification output)", () => {
       };
       const result = buildEmbedText("amazon.com", classification);
       const lines = result.split("\n");
-      expect(lines.filter((l) => l === "workflowData.workflow=package")).toHaveLength(0);
-      expect(lines).toContain("workflowData.packageType=shipping");
-      expect(lines).toContain("workflowData.retailer=Amazon");
+      // retailer and orderNumber are identity; packageType is not
+      expect(lines).toContain("Amazon 111-222 Amazon 111-222 Amazon 111-222");
+      expect(result).not.toContain("shipping");
+      expect(result).not.toContain("packageType");
     });
 
-    it("includes numeric fields as string values", () => {
+    it("excludes non-identity fields like expiresInMinutes", () => {
       const classification: ClassificationOutput = {
         workflow: "auth",
         workflowData: { workflow: "auth", authType: "verification", service: "Slack", expiresInMinutes: "10" },
@@ -371,10 +372,12 @@ describe("buildEmbedText (classification output)", () => {
         actions: [],
       };
       const result = buildEmbedText("slack.com", classification);
-      expect(result).toContain("workflowData.expiresInMinutes=10");
+      // service is identity — should appear; expiresInMinutes is not
+      expect(result).toContain("Slack Slack Slack");
+      expect(result).not.toContain("expiresInMinutes");
     });
 
-    it("includes boolean fields as string values", () => {
+    it("omits identity line entirely when workflow has no identity fields", () => {
       const classification: ClassificationOutput = {
         workflow: "conversation",
         workflowData: { workflow: "conversation", sentiment: "urgent", requiresReply: true },
@@ -384,11 +387,16 @@ describe("buildEmbedText (classification output)", () => {
         actions: [],
       };
       const result = buildEmbedText("company.com", classification);
-      expect(result).toContain("workflowData.requiresReply=true");
-      expect(result).toContain("workflowData.sentiment=urgent");
+      const lines = result.split("\n");
+      // No identity fields → senderDomain, workflow, summary, labels
+      expect(lines[0]).toBe("company.com");
+      expect(lines[1]).toBe("conversation");
+      expect(lines[2]).toBe("Urgent message requiring reply");
+      expect(lines[3]).toBe("");
+      expect(lines).toHaveLength(4);
     });
 
-    it("omits fields with null values", () => {
+    it("omits identity fields with null values", () => {
       const classification: ClassificationOutput = {
         workflow: "auth",
         workflowData: { workflow: "auth", authType: "verification", code: null as unknown as string, service: "GitHub" },
@@ -399,9 +407,9 @@ describe("buildEmbedText (classification output)", () => {
       };
       const result = buildEmbedText("github.com", classification);
       const lines = result.split("\n");
-      expect(lines.filter((l) => l.startsWith("workflowData.code="))).toHaveLength(0);
-      expect(lines).toContain("workflowData.authType=verification");
-      expect(lines).toContain("workflowData.service=GitHub");
+      // service is identity (GitHub); code is NOT identity so irrelevant
+      expect(lines).toContain("GitHub GitHub GitHub");
+      expect(result).not.toContain("null");
     });
   });
 

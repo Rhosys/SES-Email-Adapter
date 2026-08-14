@@ -5,6 +5,8 @@
 
 import type { ParsedMime } from "../processor/mime.js";
 import type { ClassificationOutput } from "../classifier/classifier.js";
+import type { WorkflowData } from "../types/index.js";
+import { CLASSIFIER_WORKFLOW_REGISTRY } from "../types/workflow-registry.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -189,26 +191,56 @@ export function buildMimeEmbedText(input: EmbedTextInput): string {
 /**
  * Builds embed text from classification output.
  *
- * Line order: senderDomain, workflow, summary, labels (comma-joined or empty string),
- * then flattened workflowData key=value pairs (excluding `workflow` discriminator, skipping nulls).
- * tags are intentionally excluded from embedding text.
+ * Structure (designed for thread-matching similarity):
+ * - senderDomain (once)
+ * - workflow
+ * - identity fields repeated 3x (strong identity signal)
+ * - subject
+ * - summary
+ * - labels (comma-joined)
+ *
+ * Only identity fields from workflowData are included — transient details
+ * (amounts, dates, URLs, enum types) are excluded to avoid diluting the
+ * thread-matching signal. recipientAddress is NOT included because the DB
+ * query already partitions by it (exact WHERE clause filter).
  */
-export function buildEmbedText(senderDomain: string, classification: ClassificationOutput): string {
+export function buildEmbedText(senderDomain: string, classification: ClassificationOutput, subject?: string): string {
   const lines: string[] = [
     senderDomain,
     classification.workflow,
-    classification.summary,
-    classification.labels.join(","),
   ];
 
-  const data = classification.workflowData;
-  for (const [key, value] of Object.entries(data)) {
-    if (key === "workflow") continue;
-    if (value == null) continue;
-    flatten(`workflowData.${key}`, value, lines);
+  // Identity fields from workflowData — repeated 3x for strong signal
+  const identityValues = getIdentityValues(classification.workflow, classification.workflowData);
+  if (identityValues.length > 0) {
+    const identityLine = identityValues.join(" ");
+    lines.push(`${identityLine} ${identityLine} ${identityLine}`);
   }
 
+  if (subject) {
+    lines.push(subject);
+  }
+
+  lines.push(classification.summary);
+  lines.push(classification.labels.join(","));
+
   return lines.join("\n");
+}
+
+function getIdentityValues(workflow: string, workflowData: WorkflowData): string[] {
+  const definition = CLASSIFIER_WORKFLOW_REGISTRY.find(w => w.name === workflow);
+  if (!definition) return [];
+
+  const values: string[] = [];
+  const data = workflowData as unknown as Record<string, unknown>;
+  for (const field of definition.fields) {
+    if (!field.identity) continue;
+    const value = data[field.name];
+    if (value != null && typeof value === "string" && value.trim() !== "") {
+      values.push(value);
+    }
+  }
+  return values;
 }
 
 function flatten(path: string, value: unknown, lines: string[]): void {
