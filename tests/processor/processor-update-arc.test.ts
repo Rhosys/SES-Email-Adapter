@@ -323,7 +323,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     expect(threadDb.updateThread).not.toHaveBeenCalled();
   });
 
-  it("delete rule action type is not recognized — does not set arc status to deleted", async () => {
+  it("delete rule action type is not recognized — does not set thread status to deleted", async () => {
     // Verify that even if a rule somehow has type "delete", deriveOutcome ignores it
     // (the action type was removed from RuleActionType, but we test the processor's resilience)
     const existing = makeThread({ id: "arc-no-delete", workflow: "conversation", summary: "A test email.", labels: ["system:workflow:conversation"] });

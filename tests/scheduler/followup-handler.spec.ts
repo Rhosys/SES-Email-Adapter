@@ -109,7 +109,7 @@ describe("FollowupHandler", () => {
   });
 
   describe("arc state: deleted → discard", () => {
-    it("discards message when arc status is deleted", async () => {
+    it("discards message when thread status is deleted", async () => {
       const { handler, threadDb, notifier } = setup();
       threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "deleted" })));
 
@@ -133,7 +133,7 @@ describe("FollowupHandler", () => {
   });
 
   describe("arc state: active → notify only", () => {
-    it("sends notification without changing arc status", async () => {
+    it("sends notification without changing thread status", async () => {
       const { handler, threadDb, notifier } = setup();
       const arc = makeThread({ status: "active", urgency: "high" });
       threadDb.getThread.mockResolvedValue(ok(arc));
@@ -166,7 +166,7 @@ describe("FollowupHandler", () => {
   });
 
   describe("arc state: archived → reactivate + notify", () => {
-    it("updates arc status to active and sends notification", async () => {
+    it("updates thread status to active and sends notification", async () => {
       const { handler, threadDb, notifier } = setup();
       threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "archived" })));
       threadDb.getSignalById.mockResolvedValue(ok(makeSignal()));

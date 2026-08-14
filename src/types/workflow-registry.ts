@@ -355,7 +355,6 @@ export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
     name: "test",
     description: "Emails sent by the account owner to their own domain — triggers pong",
     fields: [],
-    classifierAssignable: false,
   },
   {
     name: "unspecified",

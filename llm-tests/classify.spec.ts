@@ -435,4 +435,122 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(output.actions).toHaveLength(0);
     });
   });
+
+  describe("actionUrl extraction — auth workflow", () => {
+    it("extracts verification link from a magic-link email", async () => {
+      const verifyUrl = "https://auth.example.com/verify?token=abc123def456";
+      const input = makeInput({
+        from: "noreply@example.com",
+        subject: "Verify your email address",
+        body: `Hi Warren,\n\nPlease verify your email address by clicking the link below:\n\nVerify your email: ${verifyUrl}\n\nThis link expires in 24 hours.\n\nIf you did not create an account, please ignore this email.`,
+        headers: { "authentication-results": "spf=pass dkim=pass dmarc=pass" },
+        extractedLinks: [{ url: verifyUrl, text: "Verify your email" }],
+      });
+      const result = await classifier.classify(input);
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("auth");
+      expect((output.workflowData as { actionUrl?: string }).actionUrl).toBe(verifyUrl);
+      assertCommonOutput(output);
+    });
+
+    it("extracts actionUrl from a password reset email", async () => {
+      const resetUrl = "https://accounts.stripe.com/reset-password?token=rst_9x8y7z";
+      const input = makeInput({
+        from: "noreply@stripe.com",
+        subject: "Reset your Stripe password",
+        body: `Hi there,\n\nWe received a request to reset the password for your Stripe account.\n\nReset your password: ${resetUrl}\n\nThis link will expire in 60 minutes. If you didn't request a password reset, you can safely ignore this email.\n\nThanks,\nThe Stripe team`,
+        headers: { "authentication-results": "spf=pass dkim=pass dmarc=pass" },
+        extractedLinks: [{ url: resetUrl, text: "Reset your password" }],
+      });
+      const result = await classifier.classify(input);
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("auth");
+      expect((output.workflowData as { authType: string }).authType).toBe("password_reset");
+      expect((output.workflowData as { actionUrl?: string }).actionUrl).toBe(resetUrl);
+      assertCommonOutput(output);
+    });
+
+    it("extracts actionUrl when email has multiple links — picks the verification one", async () => {
+      const verifyUrl = "https://id.heroku.com/confirm/abc-def-123";
+      const helpUrl = "https://help.heroku.com/account-verification";
+      const input = makeInput({
+        from: "noreply@heroku.com",
+        subject: "Confirm your Heroku account",
+        body: `Welcome to Heroku!\n\nTo complete your registration, please confirm your email address:\n\nConfirm email: ${verifyUrl}\n\nIf you're having trouble, visit our help center: ${helpUrl}\n\nThis link expires in 48 hours.`,
+        headers: { "authentication-results": "spf=pass dkim=pass dmarc=pass" },
+        extractedLinks: [
+          { url: verifyUrl, text: "Confirm email" },
+          { url: helpUrl, text: "help center" },
+        ],
+      });
+      const result = await classifier.classify(input);
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("auth");
+      expect((output.workflowData as { actionUrl?: string }).actionUrl).toBe(verifyUrl);
+      assertCommonOutput(output);
+    });
+
+    it("extracts actionUrl from an OTP email that also has a verification link", async () => {
+      const loginUrl = "https://login.microsoftonline.com/verify?otc=847291&session=s_abc";
+      const input = makeInput({
+        from: "account-security-noreply@accountprotection.microsoft.com",
+        subject: "Microsoft account security code",
+        body: `Security code: 847291\n\nUse this code to sign in to your Microsoft account. If you didn't request this code, someone else might be trying to access your account.\n\nAlternatively, click here to verify: ${loginUrl}\n\nThis code expires in 10 minutes.`,
+        headers: { "authentication-results": "spf=pass dkim=pass dmarc=pass" },
+        extractedLinks: [{ url: loginUrl, text: "click here to verify" }],
+      });
+      const result = await classifier.classify(input);
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("auth");
+      expect((output.workflowData as { code?: string }).code).toBe("847291");
+      expect((output.workflowData as { actionUrl?: string }).actionUrl).toBe(loginUrl);
+      assertCommonOutput(output);
+    });
+
+    it("does NOT fabricate actionUrl when email has no verification link", async () => {
+      const input = makeInput({
+        from: "noreply@github.com",
+        subject: "Your GitHub verification code",
+        body: "Your verification code is 392847. This code expires in 10 minutes.\n\nIf you didn't request this code, you can safely ignore this email.",
+        headers: { "authentication-results": "spf=pass dkim=pass dmarc=pass" },
+        extractedLinks: [],
+      });
+      const result = await classifier.classify(input);
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("auth");
+      expect((output.workflowData as { code?: string }).code).toBe("392847");
+      // No link provided → actionUrl must be absent or null
+      const actionUrl = (output.workflowData as { actionUrl?: string | null }).actionUrl;
+      expect(actionUrl == null).toBe(true);
+      assertCommonOutput(output);
+    });
+
+    it("extracts actionUrl from email with opaque tracking redirect URL", async () => {
+      // The real verification URL is an opaque redirect — the LLM should still select it
+      // because it's the only link with verification-related anchor text
+      const opaqueUrl = "https://click.email.example.com/CL0/https:%2F%2Fexample.com%2Fverify%3Ftoken=xyz/1/01000190/aHR0c";
+      const unsubUrl = "https://click.email.example.com/CL0/https:%2F%2Fexample.com%2Funsubscribe/2/01000190/aHR0c";
+      const input = makeInput({
+        from: "noreply@example.com",
+        subject: "Verify your email for ExampleApp",
+        body: `Hi Warren,\n\nThanks for signing up! Please verify your email to get started.\n\nVerify my email: ${opaqueUrl}\n\nIf you didn't sign up, you can unsubscribe: ${unsubUrl}`,
+        headers: { "authentication-results": "spf=pass dkim=pass dmarc=pass" },
+        extractedLinks: [
+          { url: opaqueUrl, text: "Verify my email" },
+          { url: unsubUrl, text: "unsubscribe" },
+        ],
+      });
+      const result = await classifier.classify(input);
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("auth");
+      expect((output.workflowData as { actionUrl?: string }).actionUrl).toBe(opaqueUrl);
+      assertCommonOutput(output);
+    });
+  });
 });

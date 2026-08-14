@@ -4,7 +4,7 @@ import { ok, err } from "neverthrow";
 import type { Workflow, WorkflowData, SignalAction } from "../types/index.js";
 import { WORKFLOWS } from "../types/index.js";
 import type { Logger } from "../logger.js";
-import { buildSystemPrompt, buildUserMessage } from "./prompt-builder.js";
+import { buildSystemPrompt, buildUserMessage, redactUrls } from "./prompt-builder.js";
 import { CLASSIFIER_WORKFLOW_REGISTRY } from "../types/workflow-registry.js";
 import { SPAM_TAGS } from "./tags.js";
 import { coerceWorkflowData } from "./coerce-workflow-data.js";
@@ -196,13 +196,14 @@ export class SignalClassifier {
       ? raw.labels.filter((l) => input.allowedLabels.includes(l))
       : [];
 
-    // Sanitize URL fields in workflowData — nullify non-URL values
-    const urlFields = ["trackingUrl", "downloadUrl", "managementUrl", "paymentUrl", "documentUrl", "portalUrl", "responseUrl", "ticketUrl"] as const;
+    // Sanitize URL fields in workflowData — nullify non-URL values (skip [link-N] references for later resolution)
+    const urlFields = ["trackingUrl", "downloadUrl", "managementUrl", "paymentUrl", "documentUrl", "portalUrl", "responseUrl", "ticketUrl", "actionUrl"] as const;
+    const LINK_REF_PATTERN = /^\[link-\d+\]$/;
     const workflowData = { ...raw.workflowData } as Record<string, unknown>;
     for (const field of urlFields) {
       if (field in workflowData && typeof workflowData[field] === "string") {
         const value = workflowData[field] as string;
-        if (!isValidUrl(value)) {
+        if (!isValidUrl(value) && !LINK_REF_PATTERN.test(value)) {
           this.logger.track("Classifier returned non-URL value for URL field — nullified.", { code: "classifier.invalid_url_field", field, value, input, rawResponse: jsonText });
           workflowData[field] = null;
         }
@@ -239,11 +240,40 @@ export class SignalClassifier {
       for (const entry of raw.actions) {
         if (typeof entry !== "object" || entry === null) continue;
         const candidate = entry as Record<string, unknown>;
-        if (typeof candidate.url !== "string" || !isValidUrl(candidate.url)) continue;
+        if (typeof candidate.url !== "string") continue;
         const text = typeof candidate.text === "string" && candidate.text !== candidate.url ? candidate.text : null;
         actions.push({ url: candidate.url, text });
       }
     }
+
+    // Resolve [link-N] references back to real URLs
+    const { linkIndex } = redactUrls(input.body, input.extractedLinks ?? []);
+    const linkMap = new Map(linkIndex.map((l) => [l.placeholder, l.url]));
+
+    // Resolve URL fields in workflowData
+    for (const field of urlFields) {
+      if (field in coercedWorkflowData && typeof coercedWorkflowData[field] === "string") {
+        const value = coercedWorkflowData[field] as string;
+        const resolved = linkMap.get(value);
+        if (resolved) {
+          coercedWorkflowData[field] = resolved;
+        } else if (LINK_REF_PATTERN.test(value)) {
+          // Unresolved link reference — nullify
+          coercedWorkflowData[field] = null;
+        }
+      }
+    }
+
+    // Resolve [link-N] references in actions
+    for (const action of actions) {
+      const resolved = linkMap.get(action.url);
+      if (resolved) {
+        action.url = resolved;
+      }
+    }
+
+    // Filter actions to valid URLs only (after resolution)
+    const validActions = actions.filter((a) => isValidUrl(a.url));
 
     return ok({
       workflow: raw.workflow as Workflow,
@@ -251,7 +281,7 @@ export class SignalClassifier {
       tags,
       summary: raw.summary,
       labels,
-      actions,
+      actions: validActions,
     });
   }
 
@@ -331,7 +361,7 @@ function isValidUrl(value: string): boolean {
   }
 }
 
-const UNSPECIFIED_PATTERNS = ["<unspecified>", "not specified", "unknown", "n/a", "none", "unspecified"];
+const UNSPECIFIED_PATTERNS = ["<unspecified>", "not specified", "unknown", "n/a", "none", "unspecified", "null"];
 
 function isUnspecifiedSentinel(value: string): boolean {
   const lower = value.trim().toLowerCase();
