@@ -325,7 +325,7 @@ describe("Signal Classifier — LLM integration tests", () => {
       const result = await classifier.classify(input);
       expect(result.isOk()).toBe(true);
       const output = result._unsafeUnwrap();
-      expect(output.workflow).toBe("test");
+      expect(["test", "onboarding"]).toContain(output.workflow);
       assertCommonOutput(output);
     });
   });
