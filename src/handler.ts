@@ -344,8 +344,8 @@ async function handleWsAuthorizer(event: WsAuthorizerEvent): Promise<WsAuthorize
   if (verifyResult.isErr()) return wsDeny(event.methodArn);
   const { userId } = verifyResult.value;
 
-  // Extract accountId from connection path: /api/accounts/{accountId}
-  const pathMatch = /\/api\/accounts\/([^/?]+)/.exec(event.requestContext?.path ?? event.headers?.["x-forwarded-path"] ?? "");
+  // Extract accountId from connection path: /accounts/{accountId}
+  const pathMatch = /\/accounts\/([^/?]+)/.exec(event.requestContext?.path ?? event.headers?.["x-forwarded-path"] ?? "");
   const accountId = pathMatch?.[1] ?? event.queryStringParameters?.["accountId"] ?? "";
   if (!accountId) return wsDeny(event.methodArn);
 

@@ -288,9 +288,10 @@ resource "aws_apigatewayv2_domain_name" "ws" {
 }
 
 resource "aws_apigatewayv2_api_mapping" "ws" {
-  api_id      = aws_apigatewayv2_api.ws.id
-  domain_name = aws_apigatewayv2_domain_name.ws.id
-  stage       = aws_apigatewayv2_stage.ws.id
+  api_id          = aws_apigatewayv2_api.ws.id
+  domain_name     = aws_apigatewayv2_domain_name.ws.id
+  stage           = aws_apigatewayv2_stage.ws.id
+  api_mapping_key = "api"
 }
 
 # ---------------------------------------------------------------------------
