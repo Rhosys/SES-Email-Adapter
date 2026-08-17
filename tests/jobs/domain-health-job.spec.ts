@@ -196,15 +196,15 @@ describe("domain-health-job staleness integration", () => {
     const domain = makeDomain({ accountId: "acct-1" });
     mockScanAllDomains.mockReturnValue(Promise.resolve(ok([{ accountId: "acct-1", domains: [domain] }])));
 
-    // Arc is stale: lastSignalAt is well before the 7-day cutoff
-    const staleArc = makeThread({
-      id: "arc-stale",
+    // 10 stale arcs: lastSignalAt is well before the 7-day cutoff (minimum threshold is 10)
+    const staleArcs = Array.from({ length: 10 }, (_, i) => makeThread({
+      id: `arc-stale-${i}`,
       accountId: "acct-1",
       status: "active",
       urgency: "normal",
       lastSignalAt: "2025-04-01T00:00:00.000Z",
-    });
-    mockListActiveThreadsBefore.mockReturnValue(Promise.resolve(ok([staleArc])));
+    }));
+    mockListActiveThreadsBefore.mockReturnValue(Promise.resolve(ok(staleArcs)));
 
     await job.run();
 
@@ -213,7 +213,7 @@ describe("domain-health-job staleness integration", () => {
     expect(trackCalls).toHaveLength(1);
     expect(trackCalls[0]!.context).toMatchObject({
       accountId: "acct-1",
-      outstandingThreadCount: 1,
+      outstandingThreadCount: 10,
       oldestThreadLastSignalAt: "2025-04-01T00:00:00.000Z",
     });
   });
@@ -275,7 +275,7 @@ describe("domain-health-job staleness integration", () => {
     // First account returns error on staleness query
     mockListActiveThreadsBefore.mockImplementation((accountId: string) => {
       if (accountId === "acct-fail") return Promise.resolve(err(new Error("DynamoDB timeout")));
-      return Promise.resolve(ok([makeThread({ id: "arc-ok", accountId: "acct-ok", status: "active", urgency: "high", lastSignalAt: "2025-04-01T00:00:00.000Z" })]));
+      return Promise.resolve(ok(Array.from({ length: 10 }, (_, i) => makeThread({ id: `arc-ok-${i}`, accountId: "acct-ok", status: "active", urgency: "high", lastSignalAt: "2025-04-01T00:00:00.000Z" }))));
     });
 
     await job.run();
@@ -292,7 +292,7 @@ describe("domain-health-job staleness integration", () => {
     expect(trackCalls).toHaveLength(1);
     expect(trackCalls[0]!.context).toMatchObject({
       accountId: "acct-ok",
-      outstandingThreadCount: 1,
+      outstandingThreadCount: 10,
     });
   });
 
@@ -311,10 +311,13 @@ describe("domain-health-job staleness integration", () => {
 
     mockListActiveThreadsBefore.mockImplementation((accountId: string) => {
       if (accountId === "acct-a") {
-        return Promise.resolve(ok([
-          makeThread({ id: "arc-a1", accountId: "acct-a", status: "active", urgency: "normal", lastSignalAt: "2025-04-01T00:00:00.000Z" }),
-          makeThread({ id: "arc-a2", accountId: "acct-a", status: "active", urgency: "high", lastSignalAt: "2025-04-02T00:00:00.000Z" }),
-        ]));
+        return Promise.resolve(ok(Array.from({ length: 10 }, (_, i) => makeThread({
+          id: `arc-a${i}`,
+          accountId: "acct-a",
+          status: "active",
+          urgency: i === 0 ? "normal" : "high",
+          lastSignalAt: i === 0 ? "2025-04-01T00:00:00.000Z" : "2025-04-02T00:00:00.000Z",
+        }))));
       }
       return Promise.resolve(ok([]));
     });
@@ -326,7 +329,7 @@ describe("domain-health-job staleness integration", () => {
     expect(infoCalls).toHaveLength(1);
     expect(infoCalls[0]!.context).toMatchObject({
       accountsWithOutstandingThreads: 1,
-      totalOutstandingThreads: 2,
+      totalOutstandingThreads: 10,
     });
     // durationMs should be present and non-negative
     expect((infoCalls[0]!.context as any).durationMs).toBeGreaterThanOrEqual(0);

@@ -90,7 +90,7 @@ export class DomainHealthJob {
 
       const staleThreads = staleThreadsResult.value;
       const outstanding = staleThreads.filter(thread => isOutstandingThread(thread, cutoffDate));
-      if (outstanding.length > 0) {
+      if (outstanding.length >= 10) {
         const [report] = buildAccountReports(outstanding.map(thread => ({
           id: thread.id,
           accountId: thread.accountId,
