@@ -176,17 +176,24 @@ export class ResourceDatabase {
     accountId: string, status: ResourceStatus, params: ListResourcesParams,
   ): Promise<Result<Page<Resource>, DbError>> {
     const limit = Math.min(params.limit ?? 20, 100);
-    const hasDateRange = params.dateFrom !== undefined && params.dateTo !== undefined;
+    const hasFrom = params.dateFrom !== undefined;
+    const hasTo = params.dateTo !== undefined;
     try {
+      const keyCondition = hasFrom && hasTo
+        ? "gsi1pk = :pk AND gsi1sk BETWEEN :from AND :to"
+        : hasFrom
+          ? "gsi1pk = :pk AND gsi1sk >= :from"
+          : hasTo
+            ? "gsi1pk = :pk AND gsi1sk <= :to"
+            : "gsi1pk = :pk";
       const res = await dynamo.send(new QueryCommand({
         TableName: RESOURCES_TABLE,
         IndexName: "gsi1",
-        KeyConditionExpression: hasDateRange
-          ? "gsi1pk = :pk AND gsi1sk BETWEEN :from AND :to"
-          : "gsi1pk = :pk",
+        KeyConditionExpression: keyCondition,
         ExpressionAttributeValues: {
           ":pk": buildGsi1pk(accountId, status),
-          ...(hasDateRange ? { ":from": params.dateFrom, ":to": params.dateTo } : {}),
+          ...(hasFrom ? { ":from": params.dateFrom } : {}),
+          ...(hasTo ? { ":to": params.dateTo } : {}),
         },
         Limit: limit + 1,
         ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),

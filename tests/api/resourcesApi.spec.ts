@@ -79,15 +79,17 @@ describe("Resources API", () => {
   });
 
   describe("GET /accounts/:accountId/resources", () => {
-    it("defaults status to active and queries listResources scoped by status only when workflow is omitted", async () => {
+    it("defaults to querying all statuses when no status param is provided", async () => {
       resourceDb.listResources.mockResolvedValue(ok({ items: [makeResource()] }));
 
       const res = await req(app, "GET", `${A}/resources`);
 
       expect(res.status).toBe(200);
       expect(resourceDb.listResources).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "active", {});
+      expect(resourceDb.listResources).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "complete", {});
       const body = await res.json() as { resources: unknown[] };
-      expect(body.resources).toHaveLength(1);
+      // Called for both statuses — each returns 1 item, merged = 2
+      expect(body.resources).toHaveLength(2);
     });
 
     it("spans every resource workflow when workflow is omitted — no application-side filter applied", async () => {
@@ -98,7 +100,8 @@ describe("Resources API", () => {
       const res = await req(app, "GET", `${A}/resources`);
       const body = await res.json() as { resources: Array<{ workflow: string }> };
 
-      expect(body.resources.map(r => r.workflow).sort()).toEqual(["package", "travel"]);
+      // Both statuses queried, each returns package+travel = 4 total (2 per status)
+      expect(body.resources.map(r => r.workflow).sort()).toEqual(["package", "package", "travel", "travel"]);
     });
 
     it("filters the DB result set to the requested workflow (GSI is not workflow-scoped)", async () => {
@@ -109,9 +112,11 @@ describe("Resources API", () => {
       const res = await req(app, "GET", `${A}/resources?workflow=package`);
 
       expect(resourceDb.listResources).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "active", {});
+      expect(resourceDb.listResources).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "complete", {});
       const body = await res.json() as { resources: Array<{ workflow: string }> };
-      expect(body.resources).toHaveLength(1);
-      expect(body.resources[0]!.workflow).toBe("package");
+      // 2 "package" items (1 from each status query)
+      expect(body.resources).toHaveLength(2);
+      expect(body.resources.every(r => r.workflow === "package")).toBe(true);
     });
 
     it("passes an explicit status through", async () => {

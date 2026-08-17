@@ -56,21 +56,33 @@ export class ResourcesApi {
       const query = c.req.query();
       const workflow = query["workflow"];
       if (workflow !== undefined && !RESOURCE_WORKFLOWS.includes(workflow as ResourceWorkflow)) return err(c, 400, "Invalid workflow");
-      const status = (query["status"] ?? "active") as ResourceStatus;
-      if (!RESOURCE_STATUSES.includes(status)) return err(c, 400, "Invalid status");
+      const statusRaw = query["status"];
+      if (statusRaw !== undefined && statusRaw !== "all" && !RESOURCE_STATUSES.includes(statusRaw as ResourceStatus)) return err(c, 400, "Invalid status");
       const params: ListResourcesParams = {
         ...(query["dateFrom"] ? { dateFrom: query["dateFrom"] } : {}),
         ...(query["dateTo"] ? { dateTo: query["dateTo"] } : {}),
         ...(query["cursor"] ? { cursor: query["cursor"] } : {}),
         ...(query["limit"] ? { limit: parseInt(query["limit"], 10) } : {}),
       };
-      const result = await resourceDb.listResources(accountId, status, params);
-      if (result.isErr()) {
-        logger.error("Failed to list resources.", { code: "api.resources.list_failed", error: result.error });
+
+      // When no status is specified (or explicitly "all"), query both partitions in parallel
+      // and merge by expectedResolutionDate. Pagination is not supported for the merged case.
+      const statuses: ResourceStatus[] = (!statusRaw || statusRaw === "all")
+        ? [...RESOURCE_STATUSES]
+        : [statusRaw as ResourceStatus];
+
+      const results = await Promise.all(statuses.map(s => resourceDb.listResources(accountId, s, params)));
+      const firstError = results.find(r => r.isErr());
+      if (firstError?.isErr()) {
+        logger.error("Failed to list resources.", { code: "api.resources.list_failed", error: firstError.error });
         return err(c, 500, "Internal Server Error");
       }
-      const items = workflow ? result.value.items.filter(r => r.workflow === workflow) : result.value.items;
-      return c.json(page("resources", items.map(r => toApiResource(r, contentCdnBaseUrl)), result.value.nextCursor), 200);
+
+      const merged = results.flatMap(r => (r.isOk() ? r.value.items : []));
+      merged.sort((a, b) => a.expectedResolutionDate.localeCompare(b.expectedResolutionDate));
+      const items = workflow ? merged.filter(r => r.workflow === workflow) : merged;
+      const nextCursor = statuses.length === 1 && results[0]!.isOk() ? results[0]!.value.nextCursor : undefined;
+      return c.json(page("resources", items.map(r => toApiResource(r, contentCdnBaseUrl)), nextCursor), 200);
     });
 
     // -------------------------------------------------------------------------
