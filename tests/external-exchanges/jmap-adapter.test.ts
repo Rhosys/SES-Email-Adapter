@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { ok } from "neverthrow";
 import { JmapAdapter, buildBasicAuth } from "../../src/external-exchanges/jmap-adapter.js";
 import type { ExternalMailExchange } from "../../src/types/index.js";
 import type { EncryptionManager } from "../../src/secrets/encryption-manager.js";
@@ -12,8 +13,9 @@ import type { Logger } from "../../src/logger.js";
 
 function mockEncryptionManager(overrides?: Partial<EncryptionManager>): EncryptionManager {
   return {
-    encrypt: vi.fn((plain: string) => `encrypted:${plain}`),
-    decrypt: vi.fn((cipher: string) => cipher.replace("encrypted:", "")),
+    encrypt: vi.fn(async (plain: string) => ok(`encrypted:${plain}`)),
+    decrypt: vi.fn(async (cipher: string) => ok(cipher.replace("encrypted:", ""))),
+    hash: vi.fn(async (data: string) => ok(`hash:${data}`)),
     ...overrides,
   } as unknown as EncryptionManager;
 }

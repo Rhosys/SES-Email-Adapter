@@ -80,8 +80,9 @@ function makeAccountDb() {
 
 function makeEncryptionManager() {
   return {
-    encrypt: vi.fn().mockReturnValue("encrypted-jmap-blob"),
-    decrypt: vi.fn().mockReturnValue("decrypted-password"),
+    encrypt: vi.fn().mockResolvedValue(ok("encrypted-jmap-blob")),
+    decrypt: vi.fn().mockResolvedValue(ok("decrypted-password")),
+    hash: vi.fn().mockResolvedValue(ok("hashed")),
     init: vi.fn().mockResolvedValue(undefined),
   };
 }

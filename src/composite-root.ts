@@ -200,7 +200,7 @@ export class CompositeRoot {
       getProviderToken,
     });
 
-    const encryptionManager = new EncryptionManager(kms);
+    const encryptionManager = new EncryptionManager(kms, logger);
     // Lazy init: KMS decrypt happens on first IMAP request (cold start resolves before traffic)
     void encryptionManager.init();
 

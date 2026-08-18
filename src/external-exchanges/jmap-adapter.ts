@@ -222,12 +222,9 @@ export class JmapAdapter implements ProviderAdapter {
       return err({ kind: "provider_renewal_failed", cause: "Missing jmapConfig" });
     }
 
-    let password: string;
-    try {
-      password = this.encryptionManager.decrypt(jmapConfig.encryptedPassword);
-    } catch (e) {
-      return err({ kind: "provider_renewal_failed", cause: e });
-    }
+    const decryptResult = await this.encryptionManager.decrypt(jmapConfig.encryptedPassword);
+    if (decryptResult.isErr()) return err({ kind: "provider_renewal_failed", cause: "decryption failed" });
+    const password = decryptResult.value;
 
     const auth = buildBasicAuth(jmapConfig.username, password);
 
@@ -331,7 +328,12 @@ export class JmapAdapter implements ProviderAdapter {
     const emxId = deviceClientId.slice(colonIdx + 1);
 
     // Validate HMAC — timing-safe comparison
-    const expectedToken = this.encryptionManager.hash(deviceClientId);
+    const hashResult = await this.encryptionManager.hash(deviceClientId);
+    if (hashResult.isErr()) {
+      this.logger.error("JMAP webhook: hash computation failed", { code: "emx.jmap.webhook.hash_failed", deviceClientId, error: hashResult.error });
+      return ok(undefined);
+    }
+    const expectedToken = hashResult.value;
     const tokenBuf = Buffer.from(token);
     const expectedBuf = Buffer.from(expectedToken);
     if (tokenBuf.length !== expectedBuf.length || !timingSafeEqual(tokenBuf, expectedBuf)) {
@@ -368,13 +370,12 @@ export class JmapAdapter implements ProviderAdapter {
         return ok(undefined);
       }
 
-      let password: string;
-      try {
-        password = this.encryptionManager.decrypt(jmapConfig.encryptedPassword);
-      } catch (e) {
-        this.logger.error("JMAP webhook: failed to decrypt password for verification", { code: "emx.jmap.webhook.decrypt_failed", emxId: emx.id, error: e });
+      const webhookDecryptResult = await this.encryptionManager.decrypt(jmapConfig.encryptedPassword);
+      if (webhookDecryptResult.isErr()) {
+        this.logger.error("JMAP webhook: failed to decrypt password for verification", { code: "emx.jmap.webhook.decrypt_failed", emxId: emx.id, error: webhookDecryptResult.error });
         return ok(undefined);
       }
+      const password = webhookDecryptResult.value;
 
       const auth = buildBasicAuth(jmapConfig.username, password);
       const sessionResult = await fetchSession(jmapConfig.sessionUrl, auth, 30_000);
@@ -414,12 +415,9 @@ export class JmapAdapter implements ProviderAdapter {
       return err({ kind: "provider_fetch_failed", cause: "EMX missing jmapConfig" });
     }
 
-    let password: string;
-    try {
-      password = this.encryptionManager.decrypt(jmapConfig.encryptedPassword);
-    } catch (e) {
-      return err({ kind: "provider_fetch_failed", cause: e });
-    }
+    const decryptResult = await this.encryptionManager.decrypt(jmapConfig.encryptedPassword);
+    if (decryptResult.isErr()) return err({ kind: "provider_fetch_failed", cause: decryptResult.error });
+    const password = decryptResult.value;
 
     const auth = buildBasicAuth(jmapConfig.username, password);
 
@@ -488,12 +486,9 @@ export class JmapAdapter implements ProviderAdapter {
       return err({ kind: "provider_renewal_failed", cause: "Missing jmapConfig" });
     }
 
-    let password: string;
-    try {
-      password = this.encryptionManager.decrypt(config.encryptedPassword);
-    } catch (e) {
-      return err({ kind: "provider_renewal_failed", cause: e });
-    }
+    const decryptResult = await this.encryptionManager.decrypt(config.encryptedPassword);
+    if (decryptResult.isErr()) return err({ kind: "provider_renewal_failed", cause: "decryption failed" });
+    const password = decryptResult.value;
 
     const auth = buildBasicAuth(config.username, password);
 
@@ -607,7 +602,12 @@ export class JmapAdapter implements ProviderAdapter {
     // Case 1: Server supports push and no existing subscription — attempt registration
     if (supportsPush && !emx.pushSubscriptionId) {
       const deviceClientId = `${emx.accountId}:${emx.id}`;
-      const token = this.encryptionManager.hash(deviceClientId);
+      const pushHashResult = await this.encryptionManager.hash(deviceClientId);
+      if (pushHashResult.isErr()) {
+        this.logger.warn("JMAP push: hash computation failed", { code: "jmap.push.hash_failed", emxId: emx.id, error: pushHashResult.error });
+        return "fallthrough";
+      }
+      const token = pushHashResult.value;
       const webhookUrl = `${JMAP_PUSH_WEBHOOK_BASE}?token=${token}`;
 
       const registerResult = await jmapCall(session.apiUrl, auth, JMAP_USING, [

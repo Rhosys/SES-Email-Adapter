@@ -26,8 +26,9 @@ vi.mock("imapflow", () => ({
 // ---------------------------------------------------------------------------
 
 const mockEncryptionManager = {
-  decrypt: vi.fn().mockReturnValue("decrypted-password"),
-  encrypt: vi.fn().mockReturnValue("encrypted"),
+  decrypt: vi.fn().mockResolvedValue(ok("decrypted-password")),
+  encrypt: vi.fn().mockResolvedValue(ok("encrypted")),
+  hash: vi.fn().mockResolvedValue(ok("hashed")),
   init: vi.fn().mockResolvedValue(undefined),
 };
 

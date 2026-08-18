@@ -175,7 +175,9 @@ export class ExternalExchangesApi {
           return err(c, 409, "Email address is already registered to another account");
         }
 
-        const encryptedPassword = encryptionManager.encrypt(imapConfig.password);
+        const encryptResult = await encryptionManager.encrypt(imapConfig.password);
+        if (encryptResult.isErr()) { logger.error("Failed to encrypt IMAP password", { code: "api.emx.imap.encrypt_failed", error: encryptResult.error }); return err(c, 500, "Internal Server Error"); }
+        const encryptedPassword = encryptResult.value;
 
         // Build temp EMX with raw password for activation (adapter tests connection with it)
         const tempEmx: ExternalMailExchange = {
@@ -225,7 +227,9 @@ export class ExternalExchangesApi {
           return err(c, 409, "Email address is already registered to another account");
         }
 
-        const encryptedPassword = encryptionManager.encrypt(jmapConfig.password);
+        const encryptResult = await encryptionManager.encrypt(jmapConfig.password);
+        if (encryptResult.isErr()) { logger.error("Failed to encrypt JMAP password", { code: "api.emx.jmap.encrypt_failed", error: encryptResult.error }); return err(c, 500, "Internal Server Error"); }
+        const encryptedPassword = encryptResult.value;
 
         // Build temp EMX with raw password for activation (adapter tests connection with it)
         const tempEmx: ExternalMailExchange = {
@@ -392,12 +396,12 @@ export class ExternalExchangesApi {
         if (jmapBody.data.jmapConfig.password !== undefined) {
           testPassword = jmapBody.data.jmapConfig.password;
         } else {
-          try {
-            testPassword = encryptionManager.decrypt(emx.jmapConfig.encryptedPassword);
-          } catch (e) {
-            logger.error("Failed to decrypt existing JMAP password for connection test", { code: "api.emx.patch.jmap.decrypt_failed", emxId, error: e });
+          const jmapDecryptResult = await encryptionManager.decrypt(emx.jmapConfig.encryptedPassword);
+          if (jmapDecryptResult.isErr()) {
+            logger.error("Failed to decrypt existing JMAP password for connection test", { code: "api.emx.patch.jmap.decrypt_failed", emxId, error: jmapDecryptResult.error });
             return err(c, 500, "Internal Server Error");
           }
+          testPassword = jmapDecryptResult.value;
         }
 
         // Connection test via adapter.activate — validates session URL, auth, and mailbox discovery
@@ -415,9 +419,14 @@ export class ExternalExchangesApi {
         }
 
         // Connection test passed — persist the full merged config (activate() updates apiUrl, downloadUrl, jmapAccountId, inboxId in-place)
-        const encryptedPassword = jmapBody.data.jmapConfig.password !== undefined
-          ? encryptionManager.encrypt(jmapBody.data.jmapConfig.password)
-          : emx.jmapConfig.encryptedPassword;
+        let encryptedPassword: string;
+        if (jmapBody.data.jmapConfig.password !== undefined) {
+          const jmapEncryptResult = await encryptionManager.encrypt(jmapBody.data.jmapConfig.password);
+          if (jmapEncryptResult.isErr()) { logger.error("Failed to encrypt JMAP password", { code: "api.emx.patch.jmap.encrypt_failed", emxId, error: jmapEncryptResult.error }); return err(c, 500, "Internal Server Error"); }
+          encryptedPassword = jmapEncryptResult.value;
+        } else {
+          encryptedPassword = emx.jmapConfig.encryptedPassword;
+        }
 
         const { syncCursor: newSyncCursor, expiresAt: newExpiresAt } = testResult.value;
         const patchNow = DateTime.utc().toISO()!;
@@ -469,12 +478,12 @@ export class ExternalExchangesApi {
       if (body.imapConfig.password !== undefined) {
         testPassword = body.imapConfig.password;
       } else {
-        try {
-          testPassword = encryptionManager.decrypt(emx.imapConfig.encryptedPassword);
-        } catch (e) {
-          logger.error("Failed to decrypt existing password for connection test", { code: "api.emx.patch.decrypt_failed", emxId, error: e });
+        const imapDecryptResult = await encryptionManager.decrypt(emx.imapConfig.encryptedPassword);
+        if (imapDecryptResult.isErr()) {
+          logger.error("Failed to decrypt existing password for connection test", { code: "api.emx.patch.decrypt_failed", emxId, error: imapDecryptResult.error });
           return err(c, 500, "Internal Server Error");
         }
+        testPassword = imapDecryptResult.value;
       }
 
       // Connection test via adapter.activate — validates host, TLS, auth, and INBOX access
@@ -492,9 +501,14 @@ export class ExternalExchangesApi {
       }
 
       // Connection test passed — persist the full merged config + updated sync state
-      const encryptedPassword = body.imapConfig.password !== undefined
-        ? encryptionManager.encrypt(body.imapConfig.password)
-        : emx.imapConfig.encryptedPassword;
+      let encryptedPassword: string;
+      if (body.imapConfig.password !== undefined) {
+        const imapEncryptResult = await encryptionManager.encrypt(body.imapConfig.password);
+        if (imapEncryptResult.isErr()) { logger.error("Failed to encrypt IMAP password", { code: "api.emx.patch.imap.encrypt_failed", emxId, error: imapEncryptResult.error }); return err(c, 500, "Internal Server Error"); }
+        encryptedPassword = imapEncryptResult.value;
+      } else {
+        encryptedPassword = emx.imapConfig.encryptedPassword;
+      }
 
       const { syncCursor: newSyncCursor, expiresAt: newExpiresAt } = testResult.value;
       const patchNow = DateTime.utc().toISO()!;

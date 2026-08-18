@@ -299,7 +299,9 @@ export class ImapAdapter implements ProviderAdapter {
       return err({ kind: "provider_renewal_failed", cause: "Missing imapConfig" });
     }
 
-    const password = this.encryptionManager.decrypt(imapConfig.encryptedPassword);
+    const decryptResult = await this.encryptionManager.decrypt(imapConfig.encryptedPassword);
+    if (decryptResult.isErr()) return err({ kind: "provider_renewal_failed", cause: "decryption failed" });
+    const password = decryptResult.value;
 
     const conn = new ImapConnection({
       host: imapConfig.host,
@@ -393,12 +395,9 @@ export class ImapAdapter implements ProviderAdapter {
       return err({ kind: "imap_error", reason: "missing imapConfig", cause: undefined });
     }
 
-    let password: string;
-    try {
-      password = this.encryptionManager.decrypt(config.encryptedPassword);
-    } catch (e) {
-      return err({ kind: "imap_error", reason: "decryption failed", cause: e });
-    }
+    const decryptResult = await this.encryptionManager.decrypt(config.encryptedPassword);
+    if (decryptResult.isErr()) return err({ kind: "imap_error", reason: "decryption failed", cause: decryptResult.error });
+    const password = decryptResult.value;
 
     const conn = new ImapConnection({ host: config.host, tlsConfig: config.tlsConfig, username: config.username, password, timeout: 30_000 });
 
@@ -456,12 +455,9 @@ export class ImapAdapter implements ProviderAdapter {
       return err({ kind: "provider_fetch_failed", cause: "Invalid providerMessageId: expected a UID number" });
     }
 
-    let password: string;
-    try {
-      password = this.encryptionManager.decrypt(imapConfig.encryptedPassword);
-    } catch (e) {
-      return err({ kind: "provider_fetch_failed", cause: e });
-    }
+    const decryptResult = await this.encryptionManager.decrypt(imapConfig.encryptedPassword);
+    if (decryptResult.isErr()) return err({ kind: "provider_fetch_failed", cause: decryptResult.error });
+    const password = decryptResult.value;
 
     const conn = new ImapConnection({
       host: imapConfig.host,

@@ -1,108 +1,200 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { randomBytes } from "node:crypto";
 import { EncryptionManager } from "../../src/secrets/encryption-manager.js";
 import { KMSClient } from "@aws-sdk/client-kms";
+import type { Logger } from "../../src/logger.js";
+
+const noopLogger: Logger = {
+  startInvocation: () => {},
+  getInvocationId: () => "",
+  trackPoint: () => {},
+  info: () => {},
+  track: () => {},
+  warn: () => {},
+  error: () => {},
+  critical: () => {},
+};
 
 // Inject a known 32-byte key directly, bypassing KMS init()
 function createTestManager(): EncryptionManager {
-  const manager = new EncryptionManager(new KMSClient({}));
+  const manager = new EncryptionManager(new KMSClient({}), noopLogger);
   (manager as unknown as { key: Buffer }).key = randomBytes(32);
   return manager;
 }
 
+function createMockKms(options?: { fail?: boolean; failTimes?: number }): KMSClient {
+  let failCount = 0;
+  const maxFails = options?.failTimes ?? (options?.fail ? Infinity : 0);
+  const key = randomBytes(32);
+
+  const client = new KMSClient({});
+  client.send = vi.fn(async () => {
+    if (failCount < maxFails) {
+      failCount++;
+      const error = new Error("InvalidCiphertextException: UnknownError");
+      (error as unknown as { name: string }).name = "InvalidCiphertextException";
+      throw error;
+    }
+    return { Plaintext: key };
+  }) as unknown as typeof client.send;
+
+  return client;
+}
+
 // ---------------------------------------------------------------------------
 // Encrypt/Decrypt round-trip
-// Validates: Requirements 2.1, 2.3, 2.4
 // ---------------------------------------------------------------------------
 
 describe("EncryptionManager encrypt/decrypt round-trip", () => {
-  it("decrypts back to the original plaintext", () => {
+  it("decrypts back to the original plaintext", async () => {
     const manager = createTestManager();
-    const plaintext = "hello world";
-    const encrypted = manager.encrypt(plaintext);
-    expect(manager.decrypt(encrypted)).toBe(plaintext);
+    const encrypted = (await manager.encrypt("hello world"))._unsafeUnwrap();
+    expect((await manager.decrypt(encrypted))._unsafeUnwrap()).toBe("hello world");
   });
 
-  it("handles empty string", () => {
+  it("handles empty string", async () => {
     const manager = createTestManager();
-    const encrypted = manager.encrypt("");
-    expect(manager.decrypt(encrypted)).toBe("");
+    const encrypted = (await manager.encrypt(""))._unsafeUnwrap();
+    expect((await manager.decrypt(encrypted))._unsafeUnwrap()).toBe("");
   });
 
-  it("handles unicode content", () => {
+  it("handles unicode content", async () => {
     const manager = createTestManager();
     const plaintext = "Ångström café 日本語 🎉";
-    const encrypted = manager.encrypt(plaintext);
-    expect(manager.decrypt(encrypted)).toBe(plaintext);
+    const encrypted = (await manager.encrypt(plaintext))._unsafeUnwrap();
+    expect((await manager.decrypt(encrypted))._unsafeUnwrap()).toBe(plaintext);
   });
 });
 
 // ---------------------------------------------------------------------------
 // Decrypt with corrupted ciphertext (auth tag validation)
-// Validates: Requirements 2.3, 2.4
 // ---------------------------------------------------------------------------
 
 describe("EncryptionManager decrypt with corrupted ciphertext", () => {
-  it("throws when ciphertext bytes are flipped", () => {
+  it("returns crypto_failed when ciphertext bytes are flipped", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const manager = createTestManager();
-    const encrypted = manager.encrypt("secret data");
+    const encrypted = (await manager.encrypt("secret data"))._unsafeUnwrap();
     const buf = Buffer.from(encrypted, "base64");
-    // Flip a byte in the ciphertext region (after iv=12 + authTag=16 = offset 28)
     buf.writeUInt8(buf.readUInt8(28) ^ 0xff, 28);
     const corrupted = buf.toString("base64");
-    expect(() => manager.decrypt(corrupted)).toThrow();
+    const result = await manager.decrypt(corrupted);
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("crypto_failed");
+    vi.restoreAllMocks();
   });
 
-  it("throws when auth tag bytes are flipped", () => {
+  it("returns crypto_failed when auth tag bytes are flipped", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const manager = createTestManager();
-    const encrypted = manager.encrypt("secret data");
+    const encrypted = (await manager.encrypt("secret data"))._unsafeUnwrap();
     const buf = Buffer.from(encrypted, "base64");
-    // Flip a byte in the auth tag region (offset 12..28)
     buf.writeUInt8(buf.readUInt8(12) ^ 0xff, 12);
     const corrupted = buf.toString("base64");
-    expect(() => manager.decrypt(corrupted)).toThrow();
+    const result = await manager.decrypt(corrupted);
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("crypto_failed");
+    vi.restoreAllMocks();
   });
 });
 
 // ---------------------------------------------------------------------------
 // Decrypt with truncated input
-// Validates: Requirements 2.3, 2.4
 // ---------------------------------------------------------------------------
 
 describe("EncryptionManager decrypt with truncated input", () => {
-  it("throws when input is shorter than iv + authTag (28 bytes)", () => {
+  it("returns crypto_failed when input is shorter than iv + authTag", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const manager = createTestManager();
-    // 20 bytes — too short to contain iv(12) + authTag(16)
     const truncated = Buffer.alloc(20).toString("base64");
-    expect(() => manager.decrypt(truncated)).toThrow();
+    const result = await manager.decrypt(truncated);
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("crypto_failed");
+    vi.restoreAllMocks();
   });
 
-  it("throws when input is exactly iv length (12 bytes)", () => {
+  it("returns crypto_failed when input is exactly iv length", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
     const manager = createTestManager();
     const truncated = Buffer.alloc(12).toString("base64");
-    expect(() => manager.decrypt(truncated)).toThrow();
+    const result = await manager.decrypt(truncated);
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("crypto_failed");
+    vi.restoreAllMocks();
   });
 });
 
 // ---------------------------------------------------------------------------
 // Encrypt produces different output each call (random IV)
-// Validates: Requirements 2.4
 // ---------------------------------------------------------------------------
 
 describe("EncryptionManager random IV produces unique ciphertext", () => {
-  it("two encryptions of the same plaintext produce different base64 outputs", () => {
+  it("two encryptions of the same plaintext produce different base64 outputs", async () => {
     const manager = createTestManager();
-    const a = manager.encrypt("same");
-    const b = manager.encrypt("same");
+    const a = (await manager.encrypt("same"))._unsafeUnwrap();
+    const b = (await manager.encrypt("same"))._unsafeUnwrap();
     expect(a).not.toBe(b);
   });
 
-  it("the first 12 bytes (IV) differ between encryptions", () => {
+  it("the first 12 bytes (IV) differ between encryptions", async () => {
     const manager = createTestManager();
-    const a = Buffer.from(manager.encrypt("same"), "base64");
-    const b = Buffer.from(manager.encrypt("same"), "base64");
+    const a = Buffer.from((await manager.encrypt("same"))._unsafeUnwrap(), "base64");
+    const b = Buffer.from((await manager.encrypt("same"))._unsafeUnwrap(), "base64");
     const ivA = a.subarray(0, 12);
     const ivB = b.subarray(0, 12);
     expect(ivA.equals(ivB)).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// init() — fire-and-forget safety
+// ---------------------------------------------------------------------------
+
+describe("EncryptionManager init()", () => {
+  it("does not throw when KMS fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const kms = createMockKms({ fail: true });
+    const manager = new EncryptionManager(kms, noopLogger);
+    await expect(manager.init()).resolves.toBeUndefined();
+    vi.restoreAllMocks();
+  });
+
+  it("logs InvalidCiphertextException with specific message", async () => {
+    const spyLogger: Logger = { ...noopLogger, critical: vi.fn() };
+    const kms = new KMSClient({});
+    kms.send = vi.fn(async () => {
+      const error = new Error("UnknownError");
+      (error as unknown as { name: string }).name = "InvalidCiphertextException";
+      throw error;
+    }) as unknown as typeof kms.send;
+    const manager = new EncryptionManager(kms, spyLogger);
+    await manager.init();
+    expect(spyLogger.critical).toHaveBeenCalledWith(
+      expect.stringContaining("encryption.kms.json contains invalid ciphertext"),
+      expect.objectContaining({ code: "encryption.invalid_ciphertext" }),
+    );
+  });
+
+  it("async methods retry after failed init", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const kms = createMockKms({ failTimes: 1 });
+    const manager = new EncryptionManager(kms, noopLogger);
+    await manager.init(); // fails
+    const result = await manager.encrypt("retry works");
+    expect(result.isOk()).toBe(true);
+    expect(kms.send).toHaveBeenCalledTimes(2);
+    vi.restoreAllMocks();
+  });
+
+  it("async methods return kms_unavailable when permanently unavailable", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const kms = createMockKms({ fail: true });
+    const manager = new EncryptionManager(kms, noopLogger);
+    await manager.init();
+    const result = await manager.encrypt("nope");
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("kms_unavailable");
+    vi.restoreAllMocks();
+  });
+});
+
