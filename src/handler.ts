@@ -347,7 +347,10 @@ async function handleWsAuthorizer(event: WsAuthorizerEvent): Promise<WsAuthorize
   // Extract accountId from connection path: /accounts/{accountId}
   const pathMatch = /\/accounts\/([^/?]+)/.exec(event.requestContext?.path ?? event.headers?.["x-forwarded-path"] ?? "");
   const accountId = pathMatch?.[1] ?? event.queryStringParameters?.["accountId"] ?? "";
-  if (!accountId) return wsDeny(event.methodArn);
+  if (!accountId) {
+    logger.track("WS authorizer denied: accountId missing from both path and query string", { code: "handler.ws_authorizer.missing_account_id", event });
+    return wsDeny(event.methodArn);
+  }
 
   return {
     principalId: userId,
