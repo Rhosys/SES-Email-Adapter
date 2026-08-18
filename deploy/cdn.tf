@@ -238,16 +238,6 @@ resource "random_password" "cf_origin_secret" {
   special = false
 }
 
-resource "aws_secretsmanager_secret" "cf_origin_secret" {
-  name                    = "${var.service_name}/cloudfront/origin-secret"
-  recovery_window_in_days = 0
-}
-
-resource "aws_secretsmanager_secret_version" "cf_origin_secret" {
-  secret_id     = aws_secretsmanager_secret.cf_origin_secret.id
-  secret_string = random_password.cf_origin_secret.result
-}
-
 # ---------------------------------------------------------------------------
 # S3 — static site assets (front-end)
 # ---------------------------------------------------------------------------
