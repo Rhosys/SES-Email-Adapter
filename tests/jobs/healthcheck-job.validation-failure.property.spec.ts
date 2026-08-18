@@ -5,6 +5,8 @@ import { HealthcheckJob, type HealthcheckJobDeps } from "../../src/jobs/healthch
 import { HealthcheckValidator } from "../../src/jobs/healthcheck-validator.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 import { checkDomain } from "../../src/dns/dns-checker.js";
+import type { ThreadMatcher } from "../../src/database/thread-matcher.js";
+import type { SesIdentityChecker } from "../../src/email/ses-identity-checker.js";
 
 const okSesChecker = { canSendFrom: vi.fn().mockResolvedValue({ verified: true, dkimEnabled: true, accountSendingEnabled: true }) };
 
@@ -77,8 +79,8 @@ function makeDeps(overrides: {
   } as unknown as HealthcheckJobDeps["threadDb"];
   const searchDatabase = {
     hasEmbedding: vi.fn().mockResolvedValue(ok(overrides.hasEmbedding ?? true)),
-  };
-  const validator = new HealthcheckValidator({ threadDb, searchDatabase, sesChecker: okSesChecker, dnsChecker: { checkDomain }, mailDomain: MAIL_DOMAIN, logger });
+  } as unknown as ThreadMatcher;
+  const validator = new HealthcheckValidator({ threadDb, searchDatabase, sesChecker: okSesChecker as unknown as SesIdentityChecker, dnsChecker: { checkDomain }, mailDomain: MAIL_DOMAIN, emailBucket: "test-emails-bucket", logGroupName: "/aws/lambda/test-function", logger });
 
   const deps: HealthcheckJobDeps = {
     threadDb,

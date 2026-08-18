@@ -312,6 +312,8 @@ export class CompositeRoot {
       sesChecker: new SesIdentityChecker(sesv2),
       dnsChecker: { checkDomain },
       mailDomain: MAIL_DOMAIN,
+      emailBucket: S3_BUCKET,
+      logGroupName: process.env["AWS_LAMBDA_LOG_GROUP_NAME"] ?? `/aws/lambda/${process.env["AWS_LAMBDA_FUNCTION_NAME"] ?? "unknown"}`,
       logger,
     });
 

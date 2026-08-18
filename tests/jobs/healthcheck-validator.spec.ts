@@ -52,9 +52,10 @@ function makeDeps(overrides: {
   logger?: MockLogger;
 } = {}): { deps: HealthcheckValidatorDeps; logger: MockLogger } {
   const logger = overrides.logger ?? createMockLogger();
+  const threads = overrides.threads ?? [makeThread()];
   const listResult = overrides.listErr
     ? err({ kind: "db_error", message: "boom" })
-    : ok(overrides.threads ?? [makeThread()]);
+    : ok(threads);
 
   const embeddingResult = overrides.hasEmbeddingResult ?? ok(overrides.hasEmbedding ?? true);
 
@@ -68,15 +69,18 @@ function makeDeps(overrides: {
   const deps: HealthcheckValidatorDeps = {
     threadDb: {
       listActiveThreadsSince: vi.fn().mockResolvedValue(listResult),
+      listSignals: vi.fn().mockResolvedValue(ok({ items: threads.map(t => ({ id: `sgn-${t.id}`, createdAt: t.lastSignalAt ?? t.createdAt })) })),
     } as unknown as HealthcheckValidatorDeps["threadDb"],
     searchDatabase: {
       hasEmbedding: vi.fn().mockResolvedValue(embeddingResult),
-    },
+    } as unknown as HealthcheckValidatorDeps["searchDatabase"],
     sesChecker: {
       canSendFrom: vi.fn().mockResolvedValue(sesResult),
-    },
+    } as unknown as HealthcheckValidatorDeps["sesChecker"],
     dnsChecker: { checkDomain },
     mailDomain: "platform.email.rhosys.cloud",
+    emailBucket: "test-emails-bucket",
+    logGroupName: "/aws/lambda/test-function",
     logger,
   };
 
@@ -164,11 +168,12 @@ describe("HealthcheckValidator", () => {
     expect(checkById(result.checks, "embedding-indexed").status).toBe("unknown");
   });
 
-  it("validateLatest validates yesterday (UTC)", async () => {
-    const expectedDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const { deps } = makeDeps({ threads: [makeThread({ createdAt: `${expectedDate}T06:00:00.000Z` })] });
+  it("validateLatest starts from today (UTC) and includes yesterday", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const { deps } = makeDeps({ threads: [makeThread({ createdAt: `${yesterday}T06:00:00.000Z` })] });
     const result = await new HealthcheckValidator(deps).validateLatest();
-    expect(result.checkedDate).toBe(expectedDate);
+    expect(result.checkedDate).toBe(today);
     expect(result.status).toBe("pass");
   });
 

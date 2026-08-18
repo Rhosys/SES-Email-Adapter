@@ -3,6 +3,8 @@ import { DateTime } from "luxon";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import { ok } from "../../src/errors.js";
 import { SYSTEM_ACCOUNT_ID } from "../../src/database/system-account-db.js";
+import type { ThreadMatcher } from "../../src/database/thread-matcher.js";
+import type { SesIdentityChecker } from "../../src/email/ses-identity-checker.js";
 
 vi.mock("../../src/email/template-renderer.js", () => ({
   renderTemplate: vi.fn().mockResolvedValue("<html>mock</html>"),
@@ -40,8 +42,8 @@ const MAIL_DOMAIN = "platform.email.rhosys.cloud";
 function createMockDeps(overrides: Partial<HealthcheckJobDeps> = {}): HealthcheckJobDeps {
   const threadDb = { listThreads: vi.fn().mockResolvedValue(ok({ items: [] })) } as unknown as HealthcheckJobDeps["threadDb"];
   const logger = createMockLogger();
-  const searchDatabase = { hasEmbedding: vi.fn().mockResolvedValue(ok(false)) };
-  const validator = new HealthcheckValidator({ threadDb, searchDatabase, sesChecker: okSesChecker, dnsChecker: { checkDomain }, mailDomain: MAIL_DOMAIN, logger });
+  const searchDatabase = { hasEmbedding: vi.fn().mockResolvedValue(ok(false)) } as unknown as ThreadMatcher;
+  const validator = new HealthcheckValidator({ threadDb, searchDatabase, sesChecker: okSesChecker as unknown as SesIdentityChecker, dnsChecker: { checkDomain }, mailDomain: MAIL_DOMAIN, emailBucket: "test-emails-bucket", logGroupName: "/aws/lambda/test-function", logger });
   return {
     threadDb,
     emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-123" })) } as unknown as HealthcheckJobDeps["emailService"],

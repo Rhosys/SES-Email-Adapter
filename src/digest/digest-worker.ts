@@ -13,6 +13,8 @@ import type { EmailServiceError } from "../email/email-service.js"
 import type { Logger } from "../logger.js"
 import type { EmailService } from "../email/email-service.js"
 import type { Thread, Account, ForwardingTarget } from "../types/index.js"
+import type { AccountDatabase } from "../database/account-database.js"
+import type { ThreadDatabase } from "../database/thread-database.js"
 import { shouldDispatchDigest, buildDigestSubject } from "./digest-frequency-filter.js"
 import type { DigestFrequency } from "./digest-frequency-filter.js"
 import type { UnsubscribeTokenGenerator } from "../email/unsubscribe-token-generator.js"
@@ -29,16 +31,9 @@ export interface IDigestSendMessage {
 }
 
 export interface IDigestWorkerDeps {
-  accountDb: {
-    getAccount(accountId: string): Promise<Result<Account | null, DbError>>
-    getForwardingTarget(accountId: string, target: string): Promise<Result<ForwardingTarget | null, DbError>>
-  }
-  threadDb: {
-    listActiveThreads(accountId: string, limit: number): Promise<Result<Thread[], DbError>>
-  }
-  signalDb: {
-    countQuarantined(accountId: string): Promise<Result<number, DbError>>
-  }
+  accountDb: AccountDatabase
+  threadDb: ThreadDatabase
+  signalDb: ThreadDatabase
   emailService: EmailService
   unsubscribeTokenGenerator: UnsubscribeTokenGenerator
   logger: Logger

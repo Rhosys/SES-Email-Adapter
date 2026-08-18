@@ -6,6 +6,8 @@ import { HealthcheckValidator } from "../../src/jobs/healthcheck-validator.js";
 import { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import { checkDomain } from "../../src/dns/dns-checker.js";
+import type { ThreadMatcher } from "../../src/database/thread-matcher.js";
+import type { SesIdentityChecker } from "../../src/email/ses-identity-checker.js";
 
 // ---------------------------------------------------------------------------
 // Component test: Healthcheck Send Pipeline
@@ -99,10 +101,12 @@ describe("Healthcheck send pipeline — SES interface contract", () => {
 
     const validator = new HealthcheckValidator({
       threadDb: { listActiveThreadsSince: vi.fn().mockResolvedValue(ok(threads)) } as never,
-      searchDatabase: { hasEmbedding: vi.fn().mockResolvedValue(ok(true)) },
-      sesChecker: { canSendFrom: vi.fn().mockResolvedValue({ verified: true, dkimEnabled: true, accountSendingEnabled: true }) },
+      searchDatabase: { hasEmbedding: vi.fn().mockResolvedValue(ok(true)) } as unknown as ThreadMatcher,
+      sesChecker: { canSendFrom: vi.fn().mockResolvedValue({ verified: true, dkimEnabled: true, accountSendingEnabled: true }) } as unknown as SesIdentityChecker,
       dnsChecker: { checkDomain },
       mailDomain: MAIL_DOMAIN,
+      emailBucket: "test-emails-bucket",
+      logGroupName: "/aws/lambda/test-function",
       logger,
     });
 

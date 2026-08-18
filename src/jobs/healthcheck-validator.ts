@@ -4,6 +4,11 @@ import type { Logger } from "../logger.js";
 import type { DbError, Result } from "../errors.js";
 import type { Domain, DnsRecord } from "../types/index.js";
 import { SYSTEM_ACCOUNT_ID } from "../database/system-account-db.js";
+import { S3Client, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { CloudWatchLogsClient, StartQueryCommand, GetQueryResultsCommand } from "@aws-sdk/client-cloudwatch-logs";
+import type { ThreadDatabase } from "../database/thread-database.js";
+import type { ThreadMatcher } from "../database/thread-matcher.js";
+import type { SesIdentityChecker } from "../email/ses-identity-checker.js";
 
 // ---------------------------------------------------------------------------
 // Healthcheck validation
@@ -55,9 +60,15 @@ export interface HealthCheckValidation {
 
 export interface HealthCheckDiagnostics {
   /** Top 10 SYSTEM threads returned by the query, sorted by createdAt descending. */
-  recentThreads: Array<{ id: string; createdAt: string; workflow: string }>;
+  recentThreads: Array<{ id: string; createdAt: string; workflow: string; lastSignalAt?: string }>;
   /** The exact DynamoDB query (as JSON) used to look for healthcheck threads. */
   ddbQuery: Record<string, unknown>;
+  /** S3 objects found in the emails/ prefix during the expected delivery window. */
+  s3Objects?: Array<{ key: string; lastModified: string; size: number }>;
+  /** CloudWatch Log Insights results for inbound processing of healthcheck emails. */
+  logInsightsResults?: Array<Record<string, string>>;
+  /** Signals found across all SYSTEM threads, grouped by date (yyyy-MM-dd). */
+  signalsByDate?: Record<string, Array<{ id: string; createdAt: string }>>;
 }
 
 export interface ValidationChecks {
@@ -67,11 +78,13 @@ export interface ValidationChecks {
 }
 
 export interface HealthcheckValidatorDeps {
-  threadDb: { listActiveThreadsSince(accountId: string, sinceDate: string): Promise<Result<Array<{ id: string; createdAt: string; workflow: string; lastSignalAt?: string }>, DbError>> };
-  searchDatabase: { hasEmbedding(threadId: string): Promise<Result<boolean, DbError>> };
-  sesChecker: { canSendFrom(domain: string): Promise<{ verified: boolean; dkimEnabled: boolean; accountSendingEnabled: boolean; detail?: string }> };
+  threadDb: ThreadDatabase;
+  searchDatabase: ThreadMatcher;
+  sesChecker: SesIdentityChecker;
   dnsChecker: { checkDomain(domain: Domain): Promise<DnsRecord[]> };
   mailDomain: string;
+  emailBucket: string;
+  logGroupName: string;
   logger: Logger;
 }
 
@@ -91,7 +104,7 @@ export class HealthcheckValidator {
   async validateLatest(): Promise<HealthCheckValidation> {
     const now = DateTime.utc();
     const checkedAt = now.toISO()!;
-    const yesterday = now.minus({ days: 1 }).toFormat("yyyy-MM-dd");
+    const today = now.toFormat("yyyy-MM-dd");
 
     // Infra checks are point-in-time — run once
     const dnsChecks = await this.checkPlatformDns();
@@ -109,7 +122,7 @@ export class HealthcheckValidator {
           code: "healthcheck.validation_error",
           error: result.error,
         });
-        return { checkedDate: yesterday, checkedAt, status: "unknown", rawChecks: null, checks: [...infraChecks, ...this.errorChecks("Validation query failed — could not list threads.")] };
+        return { checkedDate: today, checkedAt, status: "unknown", rawChecks: null, checks: [...infraChecks, ...this.errorChecks("Validation query failed — could not list threads.")] };
       }
       threads = result.value;
     } catch (e) {
@@ -117,19 +130,22 @@ export class HealthcheckValidator {
         code: "healthcheck.validation_error",
         error: e,
       });
-      return { checkedDate: yesterday, checkedAt, status: "unknown", rawChecks: null, checks: [...infraChecks, ...this.errorChecks("Validation threw an unexpected error.")] };
+      return { checkedDate: today, checkedAt, status: "unknown", rawChecks: null, checks: [...infraChecks, ...this.errorChecks("Validation threw an unexpected error.")] };
     }
 
-    // Check day-by-day starting from yesterday, going back up to MAX_LOOKBACK_DAYS.
+    // Fetch signals for all SYSTEM threads to validate by signal createdAt (not thread lastSignalAt)
+    const allSignals = await this.fetchSignalsForThreads(threads);
+
+    // Check day-by-day starting from today, going back up to MAX_LOOKBACK_DAYS.
     // Collect pipeline checks for each failed day (with date in detail). Stop on first success.
     const pipelineChecks: HealthCheckItem[] = [];
     let rawChecks: ValidationChecks | null = null;
     let diagnostics: HealthCheckDiagnostics | undefined;
-    let yesterdayPassed = false;
+    let todayOrYesterdayPassed = false;
 
-    for (let daysBack = 1; daysBack <= MAX_LOOKBACK_DAYS; daysBack++) {
+    for (let daysBack = 0; daysBack <= MAX_LOOKBACK_DAYS; daysBack++) {
       const date = now.minus({ days: daysBack }).toFormat("yyyy-MM-dd");
-      const dayResult = await this.validateDay(date, threads, { sinceDate });
+      const dayResult = await this.validateDay(date, threads, { sinceDate }, allSignals);
 
       for (const check of dayResult.checks) {
         pipelineChecks.push(check);
@@ -138,15 +154,36 @@ export class HealthcheckValidator {
       if (dayResult.diagnostics) diagnostics = dayResult.diagnostics;
 
       if (dayResult.status === "pass") {
-        if (daysBack === 1) yesterdayPassed = true;
+        if (daysBack <= 1) todayOrYesterdayPassed = true;
         break;
       }
     }
 
     const allInfraPassed = infraChecks.every(c => c.status === "pass");
-    const overallStatus: HealthCheckStatus = yesterdayPassed && allInfraPassed ? "pass" : "fail";
+    const overallStatus: HealthCheckStatus = todayOrYesterdayPassed && allInfraPassed ? "pass" : "fail";
 
-    return { checkedDate: yesterday, checkedAt, status: overallStatus, rawChecks, checks: [...infraChecks, ...pipelineChecks], ...(diagnostics ? { diagnostics } : {}) };
+    // Always include all threads in diagnostics for observability
+    if (!diagnostics) {
+      diagnostics = {
+        recentThreads: threads
+          .slice()
+          .sort((a, b) => (b.lastSignalAt ?? b.createdAt).localeCompare(a.lastSignalAt ?? a.createdAt))
+          .slice(0, 10)
+          .map(t => ({ id: t.id, createdAt: t.createdAt, workflow: t.workflow, ...(t.lastSignalAt ? { lastSignalAt: t.lastSignalAt } : {}) })),
+        ddbQuery: {
+          TableName: "signals",
+          IndexName: "gsi1",
+          KeyConditionExpression: "gsi1pk = :pk AND gsi1sk >= :start",
+          ExpressionAttributeValues: {
+            ":pk": `ACCT#${SYSTEM_ACCOUNT_ID}`,
+            ":start": `LASTACT#active#${sinceDate}`,
+          },
+          ScanIndexForward: false,
+        },
+      };
+    }
+
+    return { checkedDate: today, checkedAt, status: overallStatus, rawChecks, checks: [...infraChecks, ...pipelineChecks], ...(diagnostics ? { diagnostics } : {}) };
   }
 
   async validate(date: string): Promise<HealthCheckValidation> {
@@ -189,38 +226,62 @@ export class HealthcheckValidator {
     return { ...base, status, rawChecks: dayResult.rawChecks, checks: [...infraChecks, ...dayResult.checks], ...(dayResult.diagnostics ? { diagnostics: dayResult.diagnostics } : {}) };
   }
 
-  private async validateDay(date: string, threads: Array<{ id: string; createdAt: string; workflow: string; lastSignalAt?: string }>, queryContext?: { sinceDate: string }): Promise<{ status: HealthCheckStatus; rawChecks: ValidationChecks | null; checks: HealthCheckItem[]; diagnostics?: HealthCheckDiagnostics }> {
-    // Primary: find a healthcheck thread whose lastSignalAt falls on the target date (covers
-    // the case where the same thread is reused across days via vector similarity matching).
-    // Fallback: find by createdAt for newly-created threads.
-    const activeOnDay = threads.filter((t) => (t.lastSignalAt ?? t.createdAt).slice(0, 10) === date);
-    const createdOnDay = threads.filter((t) => t.createdAt.slice(0, 10) === date);
-    const candidatePool = activeOnDay.length > 0 ? activeOnDay : createdOnDay;
-    const thread = candidatePool.find((t) => t.workflow === "healthcheck") ?? candidatePool[0];
+  private async validateDay(date: string, threads: Array<{ id: string; createdAt: string; workflow: string; lastSignalAt?: string }>, queryContext?: { sinceDate: string }, allSignals?: Map<string, Array<{ id: string; createdAt: string }>>): Promise<{ status: HealthCheckStatus; rawChecks: ValidationChecks | null; checks: HealthCheckItem[]; diagnostics?: HealthCheckDiagnostics }> {
+    // Signal-based matching: find a signal created on the target date within any SYSTEM thread.
+    // This is immune to the lastSignalAt-advancement problem where subsequent signals shift
+    // the thread's lastSignalAt to a newer day, making older days invisible.
+    let thread: { id: string; createdAt: string; workflow: string; lastSignalAt?: string } | undefined;
+
+    if (allSignals) {
+      for (const t of threads) {
+        const signals = allSignals.get(t.id) ?? [];
+        const hasSignalOnDay = signals.some(s => s.createdAt.slice(0, 10) === date);
+        if (hasSignalOnDay) {
+          thread = t;
+          break;
+        }
+      }
+    }
+
+    // Fallback to the original thread-level matching if no signals map provided
+    if (!thread) {
+      const activeOnDay = threads.filter((t) => (t.lastSignalAt ?? t.createdAt).slice(0, 10) === date);
+      const createdOnDay = threads.filter((t) => t.createdAt.slice(0, 10) === date);
+      const candidatePool = activeOnDay.length > 0 ? activeOnDay : createdOnDay;
+      thread = candidatePool.find((t) => t.workflow === "healthcheck") ?? candidatePool[0];
+    }
 
     if (!thread) {
       this.deps.logger.error(`Healthcheck thread not found for ${date}.`, {
         code: "healthcheck.thread_not_found",
         date,
-        recentThreads: threads.slice(0, 10).map(t => ({ id: t.id, createdAt: t.createdAt, workflow: t.workflow })),
-      });
-      // TODO: also fallback to running a realtime log insights query against the log insights
-      // for the cloudwatch group (/aws/lambda/ses-email-adapter) for the time period in the last
-      // 30 hours to see if we received any deliverability feedback that way, a successful delivery
-      // of the message. We should be able to search for the healthcheck header tag we stuck in
-      // the email (X-Numaeel-Healthcheck-Id).
-      this.deps.logger.info("Diagnostic hint: run a CloudWatch Log Insights query against /aws/lambda/ses-email-adapter for the last 30h filtering on X-Numaeel-Healthcheck-Id to check for SES delivery feedback.", {
-        code: "healthcheck.thread_not_found_hint",
-        date,
+        allThreads: threads.map(t => ({ id: t.id, createdAt: t.createdAt, workflow: t.workflow, ...(t.lastSignalAt ? { lastSignalAt: t.lastSignalAt } : {}) })),
       });
 
+      // Automated delivery diagnostics — check S3 and CloudWatch for evidence of the
+      // healthcheck email arriving (or not) at the inbound pipeline.
+      const deliveryDiagnostics = await this.checkDeliveryEvidence(date);
+
       const sinceDate = queryContext?.sinceDate ?? date;
+
+      // Build signalsByDate from allSignals for diagnostics
+      const signalsByDate: Record<string, Array<{ id: string; createdAt: string }>> = {};
+      if (allSignals) {
+        for (const signals of allSignals.values()) {
+          for (const s of signals) {
+            const day = s.createdAt.slice(0, 10);
+            if (!signalsByDate[day]) signalsByDate[day] = [];
+            signalsByDate[day].push({ id: s.id, createdAt: s.createdAt });
+          }
+        }
+      }
+
       const diagnostics: HealthCheckDiagnostics = {
         recentThreads: threads
           .slice()
-          .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+          .sort((a, b) => (b.lastSignalAt ?? b.createdAt).localeCompare(a.lastSignalAt ?? a.createdAt))
           .slice(0, 10)
-          .map(t => ({ id: t.id, createdAt: t.createdAt, workflow: t.workflow })),
+          .map(t => ({ id: t.id, createdAt: t.createdAt, workflow: t.workflow, ...(t.lastSignalAt ? { lastSignalAt: t.lastSignalAt } : {}) })),
         ddbQuery: {
           TableName: "signals",
           IndexName: "gsi1",
@@ -231,6 +292,9 @@ export class HealthcheckValidator {
           },
           ScanIndexForward: false,
         },
+        ...(Object.keys(signalsByDate).length > 0 ? { signalsByDate } : {}),
+        ...(deliveryDiagnostics.s3Objects ? { s3Objects: deliveryDiagnostics.s3Objects } : {}),
+        ...(deliveryDiagnostics.logInsightsResults ? { logInsightsResults: deliveryDiagnostics.logInsightsResults } : {}),
       };
 
       return {
@@ -324,6 +388,128 @@ export class HealthcheckValidator {
         },
       ],
     };
+  }
+
+  private async fetchSignalsForThreads(threads: Array<{ id: string }>): Promise<Map<string, Array<{ id: string; createdAt: string }>>> {
+    const result = new Map<string, Array<{ id: string; createdAt: string }>>();
+    for (const thread of threads) {
+      const signalsResult = await this.deps.threadDb.listSignals(SYSTEM_ACCOUNT_ID, thread.id, { limit: 30 });
+      if (signalsResult.isOk()) {
+        result.set(thread.id, signalsResult.value.items.map(s => ({ id: s.id, createdAt: s.createdAt })));
+      }
+    }
+    return result;
+  }
+
+  private async checkDeliveryEvidence(date: string): Promise<{ s3Objects?: Array<{ key: string; lastModified: string; size: number }>; logInsightsResults?: Array<Record<string, string>> }> {
+    // The healthcheck email is sent at 06:00 UTC on `date`. SES delivers it within seconds
+    // back to the inbound endpoint, so look from 05:55 to 06:30 UTC on `date`.
+    const windowStart = DateTime.fromISO(date, { zone: "utc" }).set({ hour: 5, minute: 55 });
+    const windowEnd = DateTime.fromISO(date, { zone: "utc" }).set({ hour: 6, minute: 30 });
+
+    const result: { s3Objects?: Array<{ key: string; lastModified: string; size: number }>; logInsightsResults?: Array<Record<string, string>> } = {};
+
+    // 1. Check S3 for objects written during the delivery window
+    try {
+      const s3 = new S3Client({});
+      const listResult = await s3.send(new ListObjectsV2Command({
+        Bucket: this.deps.emailBucket,
+        Prefix: "emails/",
+        // S3 doesn't support time-range filtering natively — list recent objects
+        // and filter by LastModified. Use MaxKeys to cap cost.
+        MaxKeys: 100,
+      }));
+
+      const objects = (listResult.Contents ?? [])
+        .filter(obj => {
+          if (!obj.LastModified) return false;
+          const modified = DateTime.fromJSDate(obj.LastModified, { zone: "utc" });
+          return modified >= windowStart && modified <= windowEnd;
+        })
+        .map(obj => ({
+          key: obj.Key ?? "",
+          lastModified: obj.LastModified?.toISOString() ?? "",
+          size: obj.Size ?? 0,
+        }));
+
+      if (objects.length > 0) {
+        result.s3Objects = objects;
+        this.deps.logger.info("S3 delivery evidence found — healthcheck email was stored by SES inbound.", {
+          code: "healthcheck.s3_evidence_found",
+          date,
+          objectCount: objects.length,
+          objects,
+        });
+      } else {
+        this.deps.logger.error("No S3 objects found in delivery window — SES inbound never stored the healthcheck email.", {
+          code: "healthcheck.s3_evidence_missing",
+          date,
+          bucket: this.deps.emailBucket,
+          prefix: "emails/",
+          windowStart: windowStart.toISO(),
+          windowEnd: windowEnd.toISO(),
+        });
+      }
+    } catch (e) {
+      this.deps.logger.warn("S3 delivery evidence check failed.", { code: "healthcheck.s3_check_error", date, error: e });
+    }
+
+    // 2. Check CloudWatch Logs for inbound processing of healthcheck emails
+    try {
+      const cwl = new CloudWatchLogsClient({});
+      const query = `fields @timestamp, @message
+        | filter @message like "healthcheck" or @message like "no_account_for_recipient"
+        | sort @timestamp desc
+        | limit 20`;
+
+      const startQuery = await cwl.send(new StartQueryCommand({
+        logGroupName: this.deps.logGroupName,
+        startTime: Math.floor(windowStart.toSeconds()),
+        endTime: Math.floor(windowEnd.toSeconds()),
+        queryString: query,
+      }));
+
+      if (startQuery.queryId) {
+        // Poll for results (Log Insights is async)
+        let status = "Running";
+        let queryRows: Array<Array<{ field?: string; value?: string }>> | undefined;
+        for (let attempt = 0; attempt < 10 && status === "Running"; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          const getResults = await cwl.send(new GetQueryResultsCommand({ queryId: startQuery.queryId }));
+          status = getResults.status ?? "Complete";
+          queryRows = (getResults.results ?? []) as Array<Array<{ field?: string; value?: string }>>;
+        }
+
+        if (queryRows && queryRows.length > 0) {
+          const formatted = queryRows.map(row => {
+            const entry: Record<string, string> = {};
+            for (const field of row) {
+              if (field.field && field.value) entry[field.field] = field.value;
+            }
+            return entry;
+          });
+          result.logInsightsResults = formatted;
+          this.deps.logger.info("CloudWatch log evidence found for healthcheck delivery window.", {
+            code: "healthcheck.log_evidence_found",
+            date,
+            resultCount: formatted.length,
+            results: formatted.slice(0, 5),
+          });
+        } else {
+          this.deps.logger.error("No CloudWatch log entries found for healthcheck in delivery window — Lambda was never invoked for the healthcheck email.", {
+            code: "healthcheck.log_evidence_missing",
+            date,
+            logGroupName: this.deps.logGroupName,
+            windowStart: windowStart.toISO(),
+            windowEnd: windowEnd.toISO(),
+          });
+        }
+      }
+    } catch (e) {
+      this.deps.logger.warn("CloudWatch Logs delivery evidence check failed.", { code: "healthcheck.log_check_error", date, error: e });
+    }
+
+    return result;
   }
 
   private async checkPlatformDns(): Promise<HealthCheckItem[]> {

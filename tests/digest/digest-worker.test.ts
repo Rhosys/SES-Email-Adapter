@@ -6,6 +6,8 @@ import { DigestWorker } from "../../src/digest/digest-worker.js"
 import type { IDigestWorkerDeps, IDigestSendMessage } from "../../src/digest/digest-worker.js"
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js"
 import type { Account, Thread, ForwardingTarget } from "../../src/types/index.js"
+import type { AccountDatabase } from "../../src/database/account-database.js"
+import type { ThreadDatabase } from "../../src/database/thread-database.js"
 
 vi.mock("../../src/email/template-renderer.js", () => ({
   renderTemplate: vi.fn().mockResolvedValue("<html>digest</html>"),
@@ -69,13 +71,15 @@ function buildDeps(): TestDeps {
     accountDb: {
       getAccount: vi.fn().mockResolvedValue(ok(buildAccount())),
       getForwardingTarget: vi.fn().mockResolvedValue(ok(buildTarget())),
-    },
+    } as unknown as AccountDatabase,
     threadDb: {
       listActiveThreads: vi.fn().mockResolvedValue(ok([buildArc("arc_1"), buildArc("arc_2")])),
-    },
+      listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
+    } as unknown as ThreadDatabase,
     signalDb: {
       countQuarantined: vi.fn().mockResolvedValue(ok(3)),
-    },
+      listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
+    } as unknown as ThreadDatabase,
     emailService: { send: mockSend } as unknown as IDigestWorkerDeps["emailService"],
     unsubscribeTokenGenerator: { generate: vi.fn().mockResolvedValue("tok") } as unknown as IDigestWorkerDeps["unsubscribeTokenGenerator"],
     logger,

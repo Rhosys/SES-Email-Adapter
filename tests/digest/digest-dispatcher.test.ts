@@ -6,6 +6,7 @@ import type { IAccountMetaRow, IDigestDispatcherDeps } from "../../src/digest/di
 import { dbError } from "../../src/errors.js"
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js"
 import type { SignalQueue } from "../../src/messaging/signal-queue.js"
+import type { AccountDatabase } from "../../src/database/account-database.js"
 
 // Monday — daily dispatches, weekly does NOT, monthly does NOT (22nd)
 const monday = DateTime.fromISO("2026-06-22")
@@ -19,7 +20,7 @@ function buildDeps(overrides?: Partial<IDigestDispatcherDeps>): TestDeps {
   const logger = createMockLogger()
   const mockSendBatch = vi.fn().mockResolvedValue(ok(undefined))
   const base: TestDeps = {
-    accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok([])) },
+    accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok([])) } as unknown as AccountDatabase,
     signalQueue: { send: vi.fn().mockResolvedValue(ok(undefined)), sendBatch: mockSendBatch } as unknown as SignalQueue,
     logger,
     mockSendBatch,
@@ -43,7 +44,7 @@ describe("DigestDispatcher — REQ-1.3", () => {
       ]
 
       const deps = buildDeps({
-        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) },
+        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) } as unknown as AccountDatabase,
       })
       const dispatcher = new DigestDispatcher(deps)
 
@@ -68,7 +69,7 @@ describe("DigestDispatcher — REQ-1.3", () => {
       ]
 
       const deps = buildDeps({
-        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) },
+        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) } as unknown as AccountDatabase,
       })
       const dispatcher = new DigestDispatcher(deps)
 
@@ -86,7 +87,7 @@ describe("DigestDispatcher — REQ-1.3", () => {
       ]
 
       const deps = buildDeps({
-        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) },
+        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) } as unknown as AccountDatabase,
       })
       const { err: neverthrowErr } = await import("neverthrow")
       deps.mockSendBatch.mockResolvedValueOnce(neverthrowErr(dbError(new Error("SQS unavailable"))))
@@ -106,7 +107,7 @@ describe("DigestDispatcher — REQ-1.3", () => {
       ]
 
       const deps = buildDeps({
-        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) },
+        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) } as unknown as AccountDatabase,
       })
       const { err: neverthrowErr } = await import("neverthrow")
       deps.mockSendBatch.mockResolvedValueOnce(neverthrowErr(dbError(new Error("SQS batch send partial failure: 1 messages failed"))))
@@ -127,7 +128,7 @@ describe("DigestDispatcher — REQ-1.3", () => {
       }))
 
       const deps = buildDeps({
-        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) },
+        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) } as unknown as AccountDatabase,
       })
       const dispatcher = new DigestDispatcher(deps)
 
@@ -155,7 +156,7 @@ describe("DigestDispatcher — REQ-1.3", () => {
       }))
 
       const deps = buildDeps({
-        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) },
+        accountDb: { queryAllAccountMetas: vi.fn().mockResolvedValue(ok(accounts)) } as unknown as AccountDatabase,
       })
       const dispatcher = new DigestDispatcher(deps)
 
@@ -175,7 +176,7 @@ describe("DigestDispatcher — REQ-1.3", () => {
     it("propagates db error from account query", async () => {
       const deps = buildDeps()
       const queryMock = vi.fn().mockResolvedValue({ isErr: () => true, isOk: () => false, error: dbError(new Error("DDB timeout")) })
-      deps.accountDb = { queryAllAccountMetas: queryMock }
+      deps.accountDb = { queryAllAccountMetas: queryMock } as unknown as AccountDatabase
       const dispatcher = new DigestDispatcher(deps)
 
       const result = await dispatcher.dispatch(monday)

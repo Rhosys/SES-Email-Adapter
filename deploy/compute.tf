@@ -24,16 +24,17 @@ resource "aws_iam_role_policy" "lambda_permissions" {
       {
         Sid      = "CloudWatchLogs"
         Effect   = "Allow"
-        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:StartQuery", "logs:GetQueryResults"]
         Resource = "${aws_cloudwatch_log_group.shared.arn}:*"
       },
       {
-        Sid    = "S3ReadEmails"
-        Effect = "Allow"
-        Action = ["s3:GetObject"]
+        Sid      = "S3ReadEmails"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject", "s3:ListBucket"]
         Resource = [
           "${aws_s3_bucket.emails.arn}/emails/*",
           "${aws_s3_bucket.emails.arn}/saved/*",
+          aws_s3_bucket.emails.arn,
         ]
       },
       {

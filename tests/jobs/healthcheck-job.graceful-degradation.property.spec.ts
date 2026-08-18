@@ -14,6 +14,8 @@ import { HealthcheckValidator } from "../../src/jobs/healthcheck-validator.js";
 import { checkDomain } from "../../src/dns/dns-checker.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import type { MockLogger } from "../helpers/mock-logger.js";
+import type { ThreadMatcher } from "../../src/database/thread-matcher.js";
+import type { SesIdentityChecker } from "../../src/email/ses-identity-checker.js";
 
 const okSesChecker = { canSendFrom: vi.fn().mockResolvedValue({ verified: true, dkimEnabled: true, accountSendingEnabled: true }) };
 
@@ -68,7 +70,7 @@ function makeDeps(overrides: DepsOverrides = {}): HealthcheckJobDeps {
   const emailService = overrides.emailService ?? ({ send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-1" })) } as any);
   const searchDatabase = overrides.searchDatabase ?? { hasEmbedding: vi.fn().mockResolvedValue(ok(true)) };
   const logger = overrides.logger ?? createMockLogger();
-  const validator = new HealthcheckValidator({ threadDb, searchDatabase, sesChecker: okSesChecker, dnsChecker: { checkDomain }, mailDomain: MAIL_DOMAIN, logger });
+  const validator = new HealthcheckValidator({ threadDb, searchDatabase: searchDatabase as unknown as ThreadMatcher, sesChecker: okSesChecker as unknown as SesIdentityChecker, dnsChecker: { checkDomain }, mailDomain: MAIL_DOMAIN, emailBucket: "test-emails-bucket", logGroupName: "/aws/lambda/test-function", logger });
   return {
     threadDb,
     emailService,
@@ -134,7 +136,7 @@ describe("Property 4: Graceful degradation — send always executes", () => {
     const deps = makeDeps({
       threadDb: { listThreads: setupThreadDb() } as any,
       emailService: { send: emailSend } as any,
-      searchDatabase: { hasEmbedding: setupSearchDb() },
+      searchDatabase: { hasEmbedding: setupSearchDb() } as unknown as ThreadMatcher,
       logger: mockLogger,
     });
 
@@ -179,7 +181,7 @@ describe("Property 4: Graceful degradation — send always executes", () => {
     const deps = makeDeps({
       threadDb: { listThreads: vi.fn().mockRejectedValue(new Error("DynamoDB catastrophic")) } as any,
       emailService: { send: vi.fn().mockRejectedValue(new Error("SES catastrophic")) } as any,
-      searchDatabase: { hasEmbedding: vi.fn().mockRejectedValue(new Error("Aurora down")) },
+      searchDatabase: { hasEmbedding: vi.fn().mockRejectedValue(new Error("Aurora down")) } as unknown as ThreadMatcher,
       logger: mockLogger,
     });
 

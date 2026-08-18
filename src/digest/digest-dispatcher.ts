@@ -13,6 +13,7 @@ import type { Logger } from "../logger.js"
 import type { SignalQueue } from "../messaging/signal-queue.js"
 import { shouldDispatchDigest } from "./digest-frequency-filter.js"
 import type { DigestFrequency } from "./digest-frequency-filter.js"
+import type { AccountDatabase } from "../database/account-database.js"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,7 +25,7 @@ export interface IAccountMetaRow {
 }
 
 export interface IDigestDispatcherDeps {
-  accountDb: { queryAllAccountMetas(): Promise<Result<IAccountMetaRow[], DbError>> }
+  accountDb: AccountDatabase
   signalQueue: SignalQueue
   logger: Logger
 }
