@@ -19,7 +19,7 @@ const device: Device = {
 };
 
 const payload: NotificationPayload = {
-  type: "signal:created",
+  type: "thread:updated",
   signalId: "SES#msg-001",
   threadId: "arc-uuid-1",
   from: { address: "alice@example.com", name: "Alice" },

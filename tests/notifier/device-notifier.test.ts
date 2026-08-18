@@ -244,7 +244,7 @@ describe("DeviceNotifier", () => {
       await notifier.notify("acct-1", arc, signal, "high");
 
       const expectedPayload: NotificationPayload = {
-        type: "signal:created",
+        type: "thread:updated",
         signalId: "sgn-msg001",
         threadId: "arc-001",
         from: { address: "alice@example.com", name: "Alice" },

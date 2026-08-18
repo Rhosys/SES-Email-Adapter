@@ -100,7 +100,7 @@ function buildPayload(thread: Thread, signal: Signal, urgency: ThreadUrgency, re
     from.name = signal.data.from.name;
   }
   const payload: NotificationPayload = {
-    type: "signal:created",
+    type: "thread:updated",
     signalId: signal.id,
     threadId: thread.id,
     from,
