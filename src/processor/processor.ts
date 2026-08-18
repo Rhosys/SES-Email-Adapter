@@ -1012,6 +1012,15 @@ export class SignalProcessor {
       classificationOutput = classification.value;
     }
 
+    // 4b. requiresReply override — if the alias is not a direct recipient (only CC/BCC),
+    // the email is not addressed to the user so a reply is not expected.
+    if (classificationOutput.workflow === "conversation" && classificationOutput.workflowData.workflow === "conversation" && classificationOutput.workflowData.requiresReply) {
+      const isDirectRecipient = parsed.to.some(addr => addr.address.toLowerCase() === recipientAddress.toLowerCase());
+      if (!isDirectRecipient) {
+        classificationOutput.workflowData = { ...classificationOutput.workflowData, requiresReply: false };
+      }
+    }
+
     // 5. Build embed text from classification output (attacker-free content)
     const senderDomain = parsed.from.address.split("@").pop() ?? "";
     const embedText = buildEmbedText(senderDomain, classificationOutput, parsed.subject);
