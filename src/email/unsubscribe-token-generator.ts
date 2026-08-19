@@ -11,7 +11,7 @@ import type { Result } from "../errors.js";
 // ---------------------------------------------------------------------------
 
 export type UnsubscribeVerifyError =
-  | { kind: "malformed_token" }
+  | { kind: "malformed_token"; cause?: unknown; payload?: string }
   | { kind: "invalid_signature" }
   | { kind: "expired" }
   | { kind: "wrong_scope" }
@@ -72,8 +72,8 @@ export class UnsubscribeTokenGenerator {
     try {
       payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
       signature = new Uint8Array(Buffer.from(signatureB64, "base64url"));
-    } catch {
-      return err({ kind: "malformed_token" });
+    } catch (e) {
+      return err({ kind: "malformed_token", cause: e, payload: payloadB64 });
     }
 
     let verifyResult: { SignatureValid?: boolean | undefined };
