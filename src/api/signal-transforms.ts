@@ -6,9 +6,20 @@ import type {
   AnySignal,
   EmailSignalData,
   DeliverabilitySignalData,
+  MatchedRuleResult,
   Signal as DbSignal,
 } from "../types/index.js";
 import type * as Api from "./schemas.js";
+
+// matchedRules is an append-only trace (e.g. a signal dismissed from quarantine gets a second
+// SR-00 entry alongside whatever originally quarantined it). Collapse same-id entries down to the
+// last one found before returning to the client, so re-evaluations/dismissals read as the current
+// explanation rather than a duplicate-keyed list.
+function collapseMatchedRules(rules: MatchedRuleResult[]): MatchedRuleResult[] {
+  const byRuleId = new Map<string, MatchedRuleResult>();
+  for (const rule of rules) byRuleId.set(rule.ruleId, rule);
+  return [...byRuleId.values()];
+}
 
 export function toApiThread(thread: DbThread): Api.Thread {
   return {
@@ -79,7 +90,7 @@ function toApiEmailSignalData(data: EmailSignalData): Api.InboundEmailSignalData
     recipientAddress: data.recipientAddress,
     workflow: data.workflow as Api.InboundEmailSignalData["workflow"],
     ...(data.workflowData ? { workflowData: data.workflowData as Api.InboundEmailSignalData["workflowData"] } : {}),
-    ...(data.matchedRules ? { matchedRules: data.matchedRules as Api.InboundEmailSignalData["matchedRules"] } : {}),
+    ...(data.matchedRules ? { matchedRules: collapseMatchedRules(data.matchedRules) as Api.InboundEmailSignalData["matchedRules"] } : {}),
     ...(data.unsubscribe ? { unsubscribe: data.unsubscribe } : {}),
   };
   return inbound;

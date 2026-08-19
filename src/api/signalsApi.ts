@@ -142,9 +142,15 @@ export class SignalsApi {
       if (body.status === "dismiss") {
         // Dismiss carries no sender opinion, so unlike a real block/reject/violation it would otherwise
         // leave no trace of why the signal ended up in the blocked partition. Record a synthetic
-        // matchedRules entry (same convention as the processor's SR-00) so the blocked-signal detail
-        // view can explain "dismissed by user" instead of showing stale quarantine-time reasons.
-        const dismissRule: MatchedRuleResult = { ruleId: "SR-DISMISS", actions: [{ type: "block_hidden" }], labelsAdded: [], statusChange: "block_hidden", text: "Dismissed by user from quarantine" };
+        // matchedRules entry under the same SR-00 id the processor already uses for rule-less
+        // explanations, rather than minting a new id. matchedRules is an append-only trace, and the
+        // API layer collapses same-id entries down to the last one on read (see collapseMatchedRules
+        // in signal-transforms.ts) — so fold the prior SR-00 explanation (why it was quarantined) into
+        // this one's text (that the user then dismissed it), and the collapsed view reads as a single
+        // coherent story instead of the dismiss silently replacing the original reason.
+        const priorSR00Text = signal.data.matchedRules?.find(r => r.ruleId === "SR-00")?.text;
+        const dismissText = priorSR00Text ? `${priorSR00Text} — dismissed by user from quarantine` : "Dismissed by user from quarantine";
+        const dismissRule: MatchedRuleResult = { ruleId: "SR-00", actions: [{ type: "block_hidden" }], labelsAdded: [], statusChange: "block_hidden", text: dismissText };
         const dismissedSignal: Signal = { ...signal, status: "block_hidden", data: { ...signal.data, matchedRules: [...(signal.data.matchedRules ?? []), dismissRule] } };
         const saveResult = await threadDb.saveSignal(dismissedSignal);
         if (saveResult.isErr()) { logger.error("Failed to dismiss signal.", { code: "api.quarantine_response.block_failed", error: saveResult.error }); return err(c, 500, "Internal Server Error"); }

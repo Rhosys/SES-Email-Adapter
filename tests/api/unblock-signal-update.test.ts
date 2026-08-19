@@ -316,7 +316,7 @@ describe("POST /signals/:id/quarantineResponse — sender disposition", () => {
     expect(accountDb.ensureAlias).not.toHaveBeenCalled();
   });
 
-  it("dismiss → blocks the signal, records no sender opinion, and traces a synthetic SR-DISMISS rule", async () => {
+  it("dismiss → blocks the signal, records no sender opinion, and folds the dismissal into the existing SR-00 trace", async () => {
     vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(sr00Signal()));
 
     const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "dismiss" } });
@@ -327,13 +327,37 @@ describe("POST /signals/:id/quarantineResponse — sender disposition", () => {
       data: expect.objectContaining({
         matchedRules: [
           { ruleId: "SR-00", actions: [{ type: "quarantine_visible" }], labelsAdded: [], statusChange: "quarantine_visible", text: "Sender newsletter.example.org is not in approved senders" },
-          { ruleId: "SR-DISMISS", actions: [{ type: "block_hidden" }], labelsAdded: [], statusChange: "block_hidden", text: "Dismissed by user from quarantine" },
+          { ruleId: "SR-00", actions: [{ type: "block_hidden" }], labelsAdded: [], statusChange: "block_hidden", text: "Sender newsletter.example.org is not in approved senders — dismissed by user from quarantine" },
         ],
       }),
     }));
     expect(threadDb.updateSignalStatus).not.toHaveBeenCalled();
     expect(accountDb.saveSender).not.toHaveBeenCalled();
     expect(accountDb.ensureAlias).not.toHaveBeenCalled();
+  });
+
+  it("dismiss → falls back to a plain dismissal reason when the signal carries no prior SR-00 trace", async () => {
+    const signal = makeSignal({
+      data: {
+        recipientAddress: "user@example.com",
+        from: { address: "sender@spammy.com", name: "Sender" },
+        matchedRules: [{ ruleId: "SR-05", actions: [{ type: "quarantine_hidden" }], labelsAdded: [], statusChange: "quarantine_hidden" }],
+      },
+    });
+    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(signal));
+
+    const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "dismiss" } });
+    expect(res.status).toBe(200);
+
+    expect(threadDb.saveSignal).toHaveBeenCalledWith(expect.objectContaining({
+      status: "block_hidden",
+      data: expect.objectContaining({
+        matchedRules: [
+          { ruleId: "SR-05", actions: [{ type: "quarantine_hidden" }], labelsAdded: [], statusChange: "quarantine_hidden" },
+          { ruleId: "SR-00", actions: [{ type: "block_hidden" }], labelsAdded: [], statusChange: "block_hidden", text: "Dismissed by user from quarantine" },
+        ],
+      }),
+    }));
   });
 
   it("approve → records the sender allow unconditionally, even for a content-rule quarantine", async () => {
