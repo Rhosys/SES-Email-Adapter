@@ -243,21 +243,6 @@ function getIdentityValues(workflow: string, workflowData: WorkflowData): string
   return values;
 }
 
-function flatten(path: string, value: unknown, lines: string[]): void {
-  if (value == null) return;
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    lines.push(`${path}=${value}`);
-  } else if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      flatten(`${path}[${i}]`, value[i], lines);
-    }
-  } else if (typeof value === "object") {
-    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      flatten(`${path}.${k}`, v, lines);
-    }
-  }
-}
-
 // ---------------------------------------------------------------------------
 // MIME integration
 // ---------------------------------------------------------------------------

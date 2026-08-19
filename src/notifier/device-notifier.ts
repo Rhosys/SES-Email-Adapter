@@ -3,7 +3,7 @@ import type { Result, DbError } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { Thread, ThreadUrgency, Signal } from "../types/index.js";
 import type { DeviceStore } from "./device-store.js";
-import type { Deliverer, Device, DeviceType, Notifier, NotificationPayload, NotificationReason } from "./types.js";
+import type { Deliverer, DeviceType, Notifier, NotificationPayload, NotificationReason } from "./types.js";
 import { urgencyToPushPriority } from "./types.js";
 
 export class DeviceNotifier implements Notifier {
@@ -89,8 +89,8 @@ export class DeviceNotifier implements Notifier {
     return err(dbError("Total delivery failure: all device deliveries failed"));
   }
 
-  async notifyBlocked(_accountId: string, _signal: Signal): Promise<Result<void, DbError>> {
-    return ok(undefined);
+  notifyBlocked(_accountId: string, _signal: Signal): Promise<Result<void, DbError>> {
+    return Promise.resolve(ok(undefined));
   }
 }
 

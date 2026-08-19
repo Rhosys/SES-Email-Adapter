@@ -28,7 +28,10 @@ export type ProviderSendError =
 // ---------------------------------------------------------------------------
 
 export interface ActivationResult {
-  syncCursor: string
+  /** Opaque provider-issued cursor (Gmail historyId, Outlook deltaLink, JMAP queryState). */
+  syncCursor?: string
+  /** Structured sync-progress state for platforms whose cursor isn't a single opaque token (IMAP). */
+  syncState?: Record<string, unknown>
   expiresAt: string
   providerSubscriptionId: string
   /**

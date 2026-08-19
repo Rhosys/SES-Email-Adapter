@@ -1553,7 +1553,7 @@ export class AccountDatabase {
     emailAddress: string;
     status: ExternalMailExchange["status"];
     imapConfig: { host: string; tlsConfig: "TLS" | "DISABLED"; username: string; encryptedPassword: string };
-    syncCursor: string;
+    syncState?: Record<string, unknown>;
     lastSyncAt: string;
     nextSyncTime?: string;
     errorReason?: string;
@@ -1567,8 +1567,8 @@ export class AccountDatabase {
       emailAddress: data.emailAddress,
       status: data.status,
       imapConfig: data.imapConfig,
-      syncCursor: data.syncCursor,
       lastSyncAt: data.lastSyncAt,
+      ...(data.syncState !== undefined ? { syncState: data.syncState } : {}),
       ...(data.nextSyncTime !== undefined ? { nextSyncTime: data.nextSyncTime } : {}),
       ...(data.errorReason !== undefined ? { errorReason: data.errorReason } : {}),
       createdAt: now,
@@ -1651,7 +1651,7 @@ export class AccountDatabase {
     }
   }
 
-  async updateExternalExchange(accountId: string, emxId: string, fields: Partial<Pick<ExternalMailExchange, "status" | "syncCursor" | "expiresAt" | "lastSyncAt" | "nextSyncTime" | "userId" | "connectionUserId" | "connectionId" | "consecutiveFailures">> & { errorReason?: string; pushSubscriptionId?: string; providerSubscriptionId?: string; encryptionCertificateId?: string }, clearFields?: Array<"errorReason" | "providerSubscriptionId" | "pushSubscriptionId" | "encryptionCertificateId">): Promise<Result<ExternalMailExchange, DbError>> {
+  async updateExternalExchange(accountId: string, emxId: string, fields: Partial<Pick<ExternalMailExchange, "status" | "syncCursor" | "syncState" | "expiresAt" | "lastSyncAt" | "nextSyncTime" | "userId" | "connectionUserId" | "connectionId" | "consecutiveFailures">> & { errorReason?: string; pushSubscriptionId?: string; providerSubscriptionId?: string; encryptionCertificateId?: string }, clearFields?: Array<"errorReason" | "providerSubscriptionId" | "pushSubscriptionId" | "encryptionCertificateId">): Promise<Result<ExternalMailExchange, DbError>> {
     const now = DateTime.utc().toISO()!;
     const names: Record<string, string> = { "#updatedAt": "updatedAt" };
     const values: Record<string, unknown> = { ":updatedAt": now };

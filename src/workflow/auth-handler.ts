@@ -11,7 +11,7 @@ import type { DbError } from "../errors.js";
 import type { Signal, Thread, AuthData } from "../types/index.js";
 import type { WorkflowHandler } from "./types.js";
 import type { DeviceStore } from "../notifier/device-store.js";
-import type { Deliverer, DeliveryResult } from "../notifier/types.js";
+import type { Deliverer, DeliveryResult, NotificationPayload } from "../notifier/types.js";
 import type { ThreadDatabase } from "../database/thread-database.js";
 import type { Logger } from "../logger.js";
 import { getETLD1 } from "../processor/filter.js";
@@ -80,7 +80,7 @@ export class AuthWorkflowHandler implements WorkflowHandler {
     }
 
     for (const device of devicesResult.value) {
-      const result: DeliveryResult = await this.wsDeliverer.deliver(device, payload as any, "interrupt");
+      const result: DeliveryResult = await this.wsDeliverer.deliver(device, payload as unknown as NotificationPayload, "interrupt");
       if (result.status === "stale") {
         const deleteResult = await this.deviceStore.deleteDevice(accountId, device.token);
         if (deleteResult.isErr()) { this.logger.warn("Failed to delete stale WebSocket device", { code: "workflow.auth.delete_device_failed", accountId, token: device.token, error: deleteResult.error }); }

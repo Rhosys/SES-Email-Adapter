@@ -8,7 +8,7 @@ import { isValidEmail } from "../email/validate-email.js";
 import { renderTemplate } from "../email/template-renderer.js";
 import { buildEmailTags } from "../email/tag-sanitizer.js";
 import { UpdateAccountRequest, InviteUserRequest, UpdateUserRequest } from "./requests.js";
-import { Account as AccountSchema, ErrorCode, Pagination as PaginationSchema } from "./schemas.js";
+import { Account as AccountSchema, Pagination as PaginationSchema } from "./schemas.js";
 import type * as Api from "./schemas.js";
 import { TIMEZONE_ALLOWLIST } from "./timezone-allowlist.js";
 import type { AccountDatabase } from "../database/account-database.js";

@@ -18,7 +18,7 @@ import type { Logger } from "../logger.js";
 import type { PostApprovalCalendarHandlerDeps } from "../processor/calendar/post-approval-handler.js";
 import type { NotFoundError, ProcessorError } from "../errors.js";
 import { QuarantineResponse } from "./requests.js";
-import { Signal as SignalSchema, ListSignalsResponse } from "./schemas.js";
+import { ListSignalsResponse } from "./schemas.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
 export interface SignalReprocessor {

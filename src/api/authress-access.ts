@@ -13,7 +13,6 @@ const AUTHRESS_CLIENT_ID = "sc_a9RdHnQzsXJeAzTJgaGf98v";
 const AUTHRESS_KEY_ID = process.env["AUTHRESS_KEY_ID"] ?? "";
 const AUTHRESS_ACCOUNT_ID = "acc-g017y29d874dh";
 
-const ACCOUNT_ROLES: AccountRole[] = ["admin", "member", "viewer"];
 
 const ROLE_TO_ID: Record<AccountRole, string> = {
   admin: "ro_ag2b0hrztp7n84b25qxqijwewm",

@@ -15,8 +15,6 @@ import type { CalendarEventData, CalendarInviteInvalidData } from "../../types/c
 import type { ThreadDatabase } from "../../database/thread-database.js";
 import type { AccountDatabase } from "../../database/account-database.js";
 import type { Logger } from "../../logger.js";
-import type { DbError, Result } from "../../errors.js";
-import { ok, err, dbError } from "../../errors.js";
 import { generateId } from "../../utils/id.js";
 import { findCalendarAttachment, parseIcs } from "./ics-parser.js";
 import { buildCalendarSignalLookupId } from "./signal-lookup.js";

@@ -301,8 +301,8 @@ export class JmapAdapter implements ProviderAdapter {
     return ok(undefined);
   }
 
-  async deactivate(_emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>> {
-    return ok(undefined);
+  deactivate(_emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>> {
+    return Promise.resolve(ok(undefined));
   }
 
   // ---------------------------------------------------------------------------
@@ -664,7 +664,10 @@ export class JmapAdapter implements ProviderAdapter {
 
       if (verifyResult.isErr()) {
         // Cannot verify — clear subscription, fall through to polling
-        await this.db.updateExternalExchange(emx.accountId, emx.id, {}, ["pushSubscriptionId"]);
+        const clearResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {}, ["pushSubscriptionId"]);
+        if (clearResult.isErr()) {
+          this.logger.warn("Failed to clear unverifiable push subscription", { code: "jmap.push.clear_failed", emxId: emx.id, error: clearResult.error });
+        }
         return "fallthrough";
       }
 
@@ -673,7 +676,10 @@ export class JmapAdapter implements ProviderAdapter {
 
       if (pgResponse && pgResponse[0] === "error" || (notFound && notFound.includes(emx.pushSubscriptionId))) {
         // Subscription gone — clear and fall through
-        await this.db.updateExternalExchange(emx.accountId, emx.id, {}, ["pushSubscriptionId"]);
+        const clearResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {}, ["pushSubscriptionId"]);
+        if (clearResult.isErr()) {
+          this.logger.warn("Failed to clear gone push subscription", { code: "jmap.push.clear_failed", emxId: emx.id, error: clearResult.error });
+        }
         return "fallthrough";
       }
 

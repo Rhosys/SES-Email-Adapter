@@ -72,7 +72,7 @@ export class UnsubscribeTokenGenerator {
     try {
       payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf-8"));
       signature = new Uint8Array(Buffer.from(signatureB64, "base64url"));
-    } catch (e) {
+    } catch {
       return err({ kind: "malformed_token" });
     }
 
