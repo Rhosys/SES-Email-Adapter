@@ -5,7 +5,7 @@ import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { ListThreadsParams } from "../api/app.js";
-import type { Thread, Signal, AnySignal, EmailSignalData, OutboundEmailSignalData, Page, PageParams, ThreadStatus, ThreadUrgency, Workflow } from "../types/index.js";
+import type { Thread, Signal, AnySignal, OutboundEmailSignalData, Page, PageParams, ThreadStatus, ThreadUrgency, Workflow } from "../types/index.js";
 import type { CalendarEventData } from "../types/calendar.js";
 
 // ---------------------------------------------------------------------------
@@ -160,7 +160,6 @@ export class ThreadDatabase {
       gsi1pk = `ACCT#${signal.accountId}#BLOCKED`;
     }
     const gsi1sk = signal.id;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { arcId: _arcId, ...rest } = signal as AnySignal & { arcId?: string };
     try {
       await dynamo.send(new PutCommand({
@@ -302,7 +301,6 @@ export class ThreadDatabase {
   }
 
   async saveThread(thread: Thread): Promise<Result<void, DbError>> {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { arcId: _arcId, ...rest } = thread as Thread & { arcId?: string };
     try {
       const item: Record<string, unknown> = {
