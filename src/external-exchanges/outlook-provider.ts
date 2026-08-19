@@ -382,9 +382,14 @@ export class OutlookProvider implements ProviderAdapter {
       }
     }
 
-    // 4. Process each notification in value[] where changeType === "created"
+    // 4. Process each notification in value[] where changeType === "created". Graph batches
+    // notifications for delivery efficiency at the delivery-worker level, not per-subscription —
+    // a single call's value[] can legitimately carry notifications for several different
+    // subscriptions (mailboxes) if their changes landed around the same time, so nothing below
+    // may assume there's only one exchange involved.
     const notifications = body.value ?? [];
     const messageEntries: Array<{ id: string; payload: unknown }> = [];
+    const touchedExchanges = new Map<string, { accountId: string; id: string }>();
 
     for (const notification of notifications) {
       if (notification.changeType !== "created") continue;
@@ -409,6 +414,7 @@ export class OutlookProvider implements ProviderAdapter {
         continue;
       }
 
+      touchedExchanges.set(emx.id, { accountId: emx.accountId, id: emx.id });
       messageEntries.push({
         id: `outlook-${messageEntries.length}`,
         payload: { source: "outlook", providerMessageId, emxId: emx.id, accountId: emx.accountId },
@@ -420,6 +426,17 @@ export class OutlookProvider implements ProviderAdapter {
       this.logger.error("Outlook webhook: failed to enqueue emx_inbound batch", { code: "emx.outlook.batch_failed", count: messageEntries.length, error: batchResult.error });
       return c.json({ error: "Internal Server Error" }, 500);
     }
+
+    // lastSyncAt reflects "last time a push notification was actually processed" — renew()
+    // only extends the subscription, it never observes mail, so this webhook is the only place
+    // Outlook's sync activity is real. Set unconditionally, same as IMAP/JMAP polling, for every
+    // distinct exchange this call touched — writes are independent, so run them concurrently
+    // rather than one at a time.
+    const now = DateTime.utc().toISO()!;
+    await Promise.all(Array.from(touchedExchanges.values(), async (emx) => {
+      const syncUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { lastSyncAt: now });
+      if (syncUpdateResult.isErr()) { this.logger.warn("Failed to update Outlook lastSyncAt after webhook", { code: "emx.outlook.webhook_sync_update_failed", emxId: emx.id, error: syncUpdateResult.error }); }
+    }));
 
     // 5. Return 202 — Graph expects fast response
     return c.json({}, 202);
