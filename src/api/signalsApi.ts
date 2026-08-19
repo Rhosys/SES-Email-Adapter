@@ -10,7 +10,7 @@ import { resolveRetention } from "../retention.js";
 import { buildActiveThread } from "../thread-factory.js";
 import { isEmailSignal } from "../types/index.js";
 import type { Result } from "neverthrow";
-import type { Thread, Signal, AnySignal, Attachment, PageParams } from "../types/index.js";
+import type { Thread, Signal, AnySignal, Attachment, MatchedRuleResult, PageParams } from "../types/index.js";
 import type { Pagination } from "../types/index.js";
 import type { ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
@@ -139,18 +139,34 @@ export class SignalsApi {
       const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
       const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
 
-      if (body.status === "block_hidden" || body.status === "block_reject" || body.status === "report_violation" || body.status === "dismiss") {
-        const effectiveStatus = body.status === "dismiss" ? "block_hidden" : body.status;
-        const blockResult = await threadDb.updateSignalStatus(accountId, signal.signalLookupId, effectiveStatus);
+      if (body.status === "dismiss") {
+        // Dismiss carries no sender opinion, so unlike a real block/reject/violation it would otherwise
+        // leave no trace of why the signal ended up in the blocked partition. Record a synthetic
+        // matchedRules entry under the same SR-00 id the processor already uses for rule-less
+        // explanations, rather than minting a new id. matchedRules is an append-only trace, and the
+        // API layer collapses same-id entries down to the last one on read (see collapseMatchedRules
+        // in signal-transforms.ts) — so fold the prior SR-00 explanation (why it was quarantined) into
+        // this one's text (that the user then dismissed it), and the collapsed view reads as a single
+        // coherent story instead of the dismiss silently replacing the original reason.
+        const priorSR00Text = signal.data.matchedRules?.find(r => r.ruleId === "SR-00")?.text;
+        const dismissText = priorSR00Text ? `${priorSR00Text} — dismissed by user from quarantine` : "Dismissed by user from quarantine";
+        const dismissRule: MatchedRuleResult = { ruleId: "SR-00", actions: [{ type: "block_hidden" }], labelsAdded: [], statusChange: "block_hidden", text: dismissText };
+        const dismissedSignal: Signal = { ...signal, status: "block_hidden", data: { ...signal.data, matchedRules: [...(signal.data.matchedRules ?? []), dismissRule] } };
+        const saveResult = await threadDb.saveSignal(dismissedSignal);
+        if (saveResult.isErr()) { logger.error("Failed to dismiss signal.", { code: "api.quarantine_response.block_failed", error: saveResult.error }); return err(c, 500, "Internal Server Error"); }
+
+        logger.info("Signal blocked", { code: "api.signals.blocked", accountId, signalId, decision: "block_hidden" });
+        return c.json(dismissedSignal, 200);
+      }
+
+      if (body.status === "block_hidden" || body.status === "block_reject" || body.status === "report_violation") {
+        const blockResult = await threadDb.updateSignalStatus(accountId, signal.signalLookupId, body.status);
         if (blockResult.isErr()) { logger.error("Failed to block signal.", { code: "api.quarantine_response.block_failed", error: blockResult.error }); return err(c, 500, "Internal Server Error"); }
 
-        // Dismiss = no sender opinion recorded. Block/reject/violation = persist sender disposition.
-        if (body.status !== "dismiss") {
-          const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, body.status);
-          if (saveSenderResult.isErr()) { logger.error("Failed to save sender disposition.", { code: "api.quarantine_response.save_sender_failed", error: saveSenderResult.error }); return err(c, 500, "Internal Server Error"); }
-        }
+        const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, body.status);
+        if (saveSenderResult.isErr()) { logger.error("Failed to save sender disposition.", { code: "api.quarantine_response.save_sender_failed", error: saveSenderResult.error }); return err(c, 500, "Internal Server Error"); }
 
-        logger.info("Signal blocked", { code: "api.signals.blocked", accountId, signalId, decision: effectiveStatus });
+        logger.info("Signal blocked", { code: "api.signals.blocked", accountId, signalId, decision: body.status });
         return c.json(blockResult.value, 200);
       }
 
