@@ -83,6 +83,7 @@ function makeThreadDb() {
     listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     listPreThreadSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     updateSignalStatus: vi.fn().mockImplementation((_, id, status) => Promise.resolve(ok({ id, status }))),
+    saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
     findThreadByGroupingKey: vi.fn().mockResolvedValue(ok(null)),
     getSignalById: vi.fn().mockResolvedValue(ok(null)),
     createSignal: vi.fn().mockImplementation((signal) => Promise.resolve(ok(signal))),
@@ -312,6 +313,26 @@ describe("POST /signals/:id/quarantineResponse — sender disposition", () => {
     expect(res.status).toBe(200);
 
     expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "user@example.com", "example.org", "block_hidden");
+    expect(accountDb.ensureAlias).not.toHaveBeenCalled();
+  });
+
+  it("dismiss → blocks the signal, records no sender opinion, and traces a synthetic SR-DISMISS rule", async () => {
+    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(sr00Signal()));
+
+    const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "dismiss" } });
+    expect(res.status).toBe(200);
+
+    expect(threadDb.saveSignal).toHaveBeenCalledWith(expect.objectContaining({
+      status: "block_hidden",
+      data: expect.objectContaining({
+        matchedRules: [
+          { ruleId: "SR-00", actions: [{ type: "quarantine_visible" }], labelsAdded: [], statusChange: "quarantine_visible", text: "Sender newsletter.example.org is not in approved senders" },
+          { ruleId: "SR-DISMISS", actions: [{ type: "block_hidden" }], labelsAdded: [], statusChange: "block_hidden", text: "Dismissed by user from quarantine" },
+        ],
+      }),
+    }));
+    expect(threadDb.updateSignalStatus).not.toHaveBeenCalled();
+    expect(accountDb.saveSender).not.toHaveBeenCalled();
     expect(accountDb.ensureAlias).not.toHaveBeenCalled();
   });
 
