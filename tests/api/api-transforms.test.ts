@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toApiThread, toApiSignal } from "../../src/api/transform.js";
+import { toApiThread, toApiSignal } from "../../src/api/signal-transforms.js";
 import { ErrorCode } from "../../src/api/schemas.js";
 import type { Thread, AnySignal, EmailSignalData } from "../../src/types/index.js";
 

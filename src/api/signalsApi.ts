@@ -3,7 +3,7 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { DateTime } from "luxon";
 import { getDomain } from "tldts";
 import { zParse } from "./validate.js";
-import { toApiThread, toApiSignal } from "./transform.js";
+import { toApiThread, toApiSignal } from "./signal-transforms.js";
 import { deriveGroupingKey } from "../grouping-key.js";
 import { handlePostApprovalCalendar } from "../processor/calendar/post-approval-handler.js";
 import { resolveRetention } from "../retention.js";

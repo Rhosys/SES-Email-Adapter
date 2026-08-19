@@ -6,7 +6,7 @@ import { getDomain } from "tldts";
 import { validateRecipientMx } from "../dns/mx-validator.js";
 import { computeUndoWindowSeconds } from "./undo-window.js";
 import { zParse } from "./validate.js";
-import { toApiThread, toApiSignal } from "./transform.js";
+import { toApiThread, toApiSignal } from "./signal-transforms.js";
 import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../retention.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";

@@ -3,21 +3,40 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { DateTime } from "luxon";
 import { generateAccountId } from "../utils/id.js";
 import { zParse } from "./validate.js";
-import { toApiAccount } from "./transform.js";
 import { aggregateStatsRows } from "../database/stats-writer.js";
 import { isValidEmail } from "../email/validate-email.js";
 import { renderTemplate } from "../email/template-renderer.js";
 import { buildEmailTags } from "../email/tag-sanitizer.js";
 import { UpdateAccountRequest, InviteUserRequest, UpdateUserRequest } from "./requests.js";
 import { Account as AccountSchema, ErrorCode, Pagination as PaginationSchema } from "./schemas.js";
+import type * as Api from "./schemas.js";
 import { TIMEZONE_ALLOWLIST } from "./timezone-allowlist.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
-import type { Account, Pagination } from "../types/index.js";
+import type { Account as DbAccount, Account, Pagination } from "../types/index.js";
+import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import type { EmailService } from "../email/email-service.js";
 import type { Result } from "neverthrow";
 import type { AuthressServiceError } from "../errors.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
+
+function toApiAccount(account: DbAccount): Api.Account {
+  return {
+    accountId: account.id,
+    name: account.name,
+    timezone: account.timezone,
+    ...(account.retentionDuration ? { retentionDuration: account.retentionDuration as Api.Account["retentionDuration"] } : {}),
+    ...(account.digest !== undefined ? { digest: account.digest } : {}),
+    // Always populated — accounts that never explicitly saved a filtering preference fall back to the
+    // platform default so the API never implies "no filtering" when an unknown-sender policy is in effect.
+    filtering: { defaultUnknownSenderPolicy: account.filtering?.defaultUnknownSenderPolicy ?? DEFAULT_UNKNOWN_SENDER_POLICY },
+    ...(account.onboarding ? { onboarding: account.onboarding } : {}),
+    ...(account.billingPlan ? { billingPlan: account.billingPlan } : {}),
+    ...(account.defaultCalendarInviteForwardingTargetId ? { defaultCalendarInviteForwardingTargetId: account.defaultCalendarInviteForwardingTargetId } : {}),
+    createdAt: account.createdAt,
+    updatedAt: account.updatedAt,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Access (Authress RBAC)

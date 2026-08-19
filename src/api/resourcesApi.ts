@@ -1,15 +1,55 @@
 import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import { toApiResource, decodeResourceId } from "./transform.js";
 import { zParse } from "./validate.js";
 import { UpdateResourceRequest } from "./requests.js";
 import { RESOURCE_WORKFLOWS, RESOURCE_STATUSES } from "../types/index.js";
-import type { ResourceWorkflow, ResourceStatus } from "../types/index.js";
+import type { Resource as DbResource, ResourceWorkflow, ResourceStatus } from "../types/index.js";
 import type { ListResourcesParams, ResourceDatabase } from "../database/resource-database.js";
 import type { Logger } from "../logger.js";
 import { Resource as ResourceSchema, ListResourcesResponse } from "./schemas.js";
+import type * as Api from "./schemas.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 import type { Pagination } from "../types/index.js";
+
+// Public resource id is an opaque token encoding threadId + the item's own sk
+// (workflow#resourceKey), so a direct-by-id lookup needs no secondary index —
+// decode the id, reconstruct the DDB primary key, GetItem.
+export function encodeResourceId(threadId: string, sk: string): string {
+  return `res-${Buffer.from(`${threadId}:${sk}`).toString("base64url")}`;
+}
+
+function decodeResourceId(resourceId: string): { threadId: string; sk: string } | null {
+  if (!resourceId.startsWith("res-")) return null;
+  const decoded = Buffer.from(resourceId.slice(4), "base64url").toString("utf-8");
+  const sepIndex = decoded.indexOf(":");
+  if (sepIndex === -1) return null;
+  return { threadId: decoded.slice(0, sepIndex), sk: decoded.slice(sepIndex + 1) };
+}
+
+// Assets backed by a stored file (pkpass) are exposed as a CDN download URL, never as a
+// storage key — the API must not reveal where or how content is stored. Built the same way
+// as signal attachment URLs so both surfaces serve the same object through one convention.
+function toApiResource(resource: DbResource, contentCdnBaseUrl: string): Api.Resource {
+  return {
+    resourceId: encodeResourceId(resource.threadId, `${resource.workflow}#${resource.resourceKey}`),
+    threadId: resource.threadId,
+    workflow: resource.workflow as Api.Resource["workflow"],
+    status: resource.status as Api.Resource["status"],
+    expectedResolutionDate: resource.expectedResolutionDate,
+    ...(resource.displayDate ? { displayDate: resource.displayDate } : {}),
+    ...(resource.resolvedAt ? { resolvedAt: resource.resolvedAt } : {}),
+    assets: (resource.assets ?? []).map(a => ({
+      type: a.type as Api.ResourceAsset["type"],
+      label: a.label,
+      rawValue: a.rawValue,
+      sourceSignalId: a.sourceSignalId,
+      ...(a.s3Key && contentCdnBaseUrl ? { url: `${contentCdnBaseUrl}/${a.s3Key}` } : {}),
+      extractedAt: a.extractedAt,
+    })),
+    createdAt: resource.createdAt,
+    updatedAt: resource.updatedAt,
+  };
+}
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };

@@ -2,19 +2,37 @@ import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { DateTime } from "luxon";
 import { zParse } from "./validate.js";
-import { toApiDomain, toApiDomainWithRecords } from "./transform.js";
 import { CreateDomainRequest } from "./requests.js";
 import {
   Domain as DomainSchema, DomainWithRecords as DomainWithRecordsSchema,
   ListDomainsResponse,
 } from "./schemas.js";
+import type * as Api from "./schemas.js";
 import { checkDomain } from "../dns/dns-checker.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { AuditDatabase } from "../database/audit-database.js";
 import type { DomainIdentityService } from "../email/domain-identity-service.js";
 import type { Logger } from "../logger.js";
-import type { Domain, DnsRecord } from "../types/index.js";
+import type { Domain as DbDomain, DnsRecord } from "../types/index.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
+
+function toApiDomain(domain: DbDomain): Api.Domain {
+  return {
+    domainId: domain.domain,
+    domain: domain.domain,
+    receivingSetupComplete: domain.receivingSetupComplete,
+    senderSetupComplete: domain.senderSetupComplete,
+    createdAt: domain.createdAt,
+    updatedAt: domain.updatedAt,
+  };
+}
+
+function toApiDomainWithRecords(domain: DbDomain, records: DnsRecord[]): Api.DomainWithRecords {
+  return {
+    ...toApiDomain(domain),
+    records,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // DNS record builder
@@ -25,7 +43,7 @@ const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud";
 
 // Always returns all 4 DNS records for a domain regardless of setup tier.
 // The status field on each record reflects the last health check result.
-function buildDnsRecords(domain: Domain): DnsRecord[] {
+function buildDnsRecords(domain: DbDomain): DnsRecord[] {
   const d = domain.domain;
   const failing = new Set(domain.failingRecords ?? []);
   const checked = domain.lastCheckedAt !== undefined;

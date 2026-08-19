@@ -1,17 +1,32 @@
 import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { zParse } from "./validate.js";
-import { toApiRule } from "./transform.js";
 import { CreateRuleRequest, UpdateRuleRequest } from "./requests.js";
 import { Rule as RuleSchema, ListRulesResponse, ErrorCode } from "./schemas.js";
+import type * as Api from "./schemas.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { AuditDatabase } from "../database/audit-database.js";
 import type { UserCodeExecutorClient } from "../processor/user-code-client.js";
 import type { BillingHandler } from "../billing/billing-handler.js";
 import type { Logger } from "../logger.js";
-import type { Rule } from "../types/index.js";
+import type { Rule as DbRule, Rule } from "../types/index.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 import { validateRuleCondition } from "./validate-rule-condition.js";
+
+function toApiRule(rule: DbRule): Api.Rule {
+  return {
+    ruleId: rule.id,
+    name: rule.name,
+    ...(rule.condition ? { condition: rule.condition } : {}),
+    ...(rule.conditionType ? { conditionType: rule.conditionType } : {}),
+    actions: rule.actions,
+    status: rule.status as Api.Rule["status"],
+    priorityOrder: rule.priorityOrder,
+    ...(rule.accountId === "SYSTEM" ? { type: "IMMUTABLE" as const } : {}),
+    createdAt: rule.createdAt,
+    updatedAt: rule.updatedAt,
+  };
+}
 
 async function validateForwardTargets(
   accountId: string,

@@ -1,12 +1,30 @@
 import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { zParse } from "./validate.js";
-import { toApiView } from "./transform.js";
 import { CreateViewRequest, UpdateViewRequest } from "./requests.js";
 import { View as ViewSchema, ListViewsResponse } from "./schemas.js";
+import type * as Api from "./schemas.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
+import type { View as DbView } from "../types/index.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
+
+function toApiView(view: DbView): Api.View {
+  return {
+    viewId: view.id,
+    name: view.name,
+    ...(view.icon ? { icon: view.icon } : {}),
+    ...(view.color ? { color: view.color } : {}),
+    ...(view.workflow ? { workflow: view.workflow as Api.View["workflow"] } : {}),
+    labels: view.labels,
+    sortField: view.sortField as Api.View["sortField"],
+    sortDirection: view.sortDirection as Api.View["sortDirection"],
+    position: view.position,
+    ...(view.layout ? { layout: view.layout as unknown[] } : {}),
+    createdAt: view.createdAt,
+    updatedAt: view.updatedAt,
+  };
+}
 
 export class ViewsApi {
   constructor(private readonly accountDb: AccountDatabase, private readonly logger: Logger) {}

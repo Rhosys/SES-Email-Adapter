@@ -2,9 +2,8 @@ import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { DateTime } from "luxon";
 import { randomUUID } from "crypto";
-import type { ForwardingTarget } from "../types/index.js";
+import type { ForwardingTarget as DbForwardingTarget, Alias as DbAlias, AliasSender as DbAliasSender } from "../types/index.js";
 import { zParse } from "./validate.js";
-import { toApiAlias, toApiAliasSender, toApiForwardingTarget } from "./transform.js";
 import { CreateAliasRequest, UpdateAliasRequest, CreateSenderRequest, UpdateSenderRequest, CreateForwardingTargetRequest, VerifyForwardingTargetRequest } from "./requests.js";
 import {
   Alias as AliasSchema, AliasSender as AliasSenderSchema,
@@ -12,11 +11,41 @@ import {
   ListAliasesResponse, ListSendersResponse,
   ListForwardingTargetsResponse,
 } from "./schemas.js";
+import type * as Api from "./schemas.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { AuditDatabase } from "../database/audit-database.js";
 import type { Logger } from "../logger.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 import type { IForwardingService } from "../forwarding/forwarding-service.js";
+
+function toApiAlias(alias: DbAlias): Api.Alias {
+  return {
+    alias: alias.id,
+    unknownSenderPolicy: alias.unknownSenderPolicy as Api.Alias["unknownSenderPolicy"],
+    createdAt: alias.createdAt,
+    updatedAt: alias.updatedAt,
+  };
+}
+
+function toApiAliasSender(sender: DbAliasSender): Api.AliasSender {
+  return {
+    alias: sender.aliasAddress,
+    sender: sender.senderDomain,  // DB stores eTLD+1; exposed as sender field
+    policy: sender.policy as Api.AliasSender["policy"],
+    createdAt: sender.addedAt,
+    updatedAt: sender.addedAt,  // DB doesn't have updatedAt yet
+  };
+}
+
+function toApiForwardingTarget(fa: DbForwardingTarget): Api.ForwardingTarget {
+  return {
+    target: fa.target,
+    type: fa.type,
+    status: fa.status,
+    createdAt: fa.createdAt,
+    ...(fa.verifiedAt ? { verifiedAt: fa.verifiedAt } : {}),
+  };
+}
 
 export class AliasesApi {
   constructor(
@@ -304,7 +333,7 @@ export class AliasesApi {
       if (existing?.status === "verified") return c.json(toApiForwardingTarget(existing), 201);
 
       const now = DateTime.utc().toISO()!;
-      const addr: ForwardingTarget = {
+      const addr: DbForwardingTarget = {
         id: body.target,
         accountId,
         target: body.target,
@@ -353,7 +382,7 @@ export class AliasesApi {
       if (existing.status === "verified") return c.json(toApiForwardingTarget(existing), 200);
       if (existing.token !== body.token) return err(c, 400, "Invalid token", "INVALID_TOKEN");
 
-      const verified: ForwardingTarget = { ...existing, status: "verified", verifiedAt: DateTime.utc().toISO()! };
+      const verified: DbForwardingTarget = { ...existing, status: "verified", verifiedAt: DateTime.utc().toISO()! };
       const saveResult = await accountDb.saveForwardingTarget(verified);
       if (saveResult.isErr()) { logger.error("Failed to save verified forwarding target.", { code: "api.forwarding.verify.save_failed", accountId, error: saveResult.error }); return err(c, 500, "Internal Server Error"); }
       logger.info("Forwarding target verified", { code: "api.forwarding.verified", accountId, address });

@@ -3,14 +3,27 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { DateTime } from "luxon";
 import { generateId } from "../utils/id.js";
 import { zParse } from "./validate.js";
-import { toApiTemplate } from "./transform.js";
 import { CreateTemplateRequest, ReplaceTemplateRequest, UpdateTemplateRequest } from "./requests.js";
 import { EmailTemplate as EmailTemplateSchema, ListTemplatesResponse } from "./schemas.js";
+import type * as Api from "./schemas.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { AuditDatabase } from "../database/audit-database.js";
 import type { UserCodeExecutorClient } from "../processor/user-code-client.js";
 import type { Logger } from "../logger.js";
+import type { EmailTemplate as DbEmailTemplate } from "../types/index.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
+
+function toApiTemplate(template: DbEmailTemplate): Api.EmailTemplate {
+  return {
+    templateId: template.id,
+    name: template.name,
+    subject: template.subject,
+    body: template.body,
+    ...(template.functions ? { functions: template.functions } : {}),
+    createdAt: template.createdAt,
+    updatedAt: template.updatedAt,
+  };
+}
 
 export class TemplatesApi {
   constructor(

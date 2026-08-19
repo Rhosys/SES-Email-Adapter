@@ -1,12 +1,24 @@
 import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { zParse } from "./validate.js";
-import { toApiLabel } from "./transform.js";
 import { CreateLabelRequest, UpdateLabelRequest } from "./requests.js";
 import { Label as LabelSchema, ListLabelsResponse } from "./schemas.js";
+import type * as Api from "./schemas.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
+import type { Label as DbLabel } from "../types/index.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
+
+function toApiLabel(label: DbLabel): Api.Label {
+  return {
+    label: label.id,
+    name: label.name,
+    applyInstruction: label.applyInstruction,
+    ...(label.color ? { color: label.color } : {}),
+    ...(label.icon ? { icon: label.icon } : {}),
+    createdAt: label.createdAt,
+  };
+}
 
 export class LabelsApi {
   constructor(private readonly accountDb: AccountDatabase, private readonly logger: Logger) {}
