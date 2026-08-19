@@ -54,7 +54,7 @@ function makeImapEmx(overrides?: Partial<ExternalMailExchange>): ExternalMailExc
 
 function makeImapAdapter(): ProviderAdapter {
   return {
-    activate: vi.fn().mockResolvedValue(ok({ syncState: { uidvalidity: 123, lastUid: 42 }, expiresAt: "2025-06-15T11:00:00Z", providerSubscriptionId: "poll" })),
+    activate: vi.fn().mockResolvedValue(ok({ syncCursor: "123:42", syncState: { uidvalidity: 123, lastUid: 42 }, expiresAt: "2025-06-15T11:00:00Z", providerSubscriptionId: "poll" })),
     renew: vi.fn().mockResolvedValue(ok({ expiresAt: "2025-06-15T12:00:00Z" })),
     deactivate: vi.fn().mockResolvedValue(ok(undefined)),
     fetchMessage: vi.fn().mockResolvedValue(ok({ rawMime: new Uint8Array(), receivedAt: "2025-01-01T00:00:00Z" })),
@@ -154,6 +154,7 @@ describe("External Exchanges IMAP API", () => {
         expect.objectContaining({
           emailAddress: "user@example.com",
           status: "active",
+          syncCursor: "123:42",
           syncState: { uidvalidity: 123, lastUid: 42 },
           nextSyncTime: "2025-06-15T11:00:00Z",
           imapConfig: expect.objectContaining({ encryptedPassword: "encrypted-blob-base64" }),

@@ -731,11 +731,13 @@ export interface ExternalMailExchange {
   platform: EmxPlatform;
   emailAddress: string;            // the external mailbox being watched
   status: EmxStatus;
-  syncCursor?: string;             // Gmail: historyId; Outlook: full deltaLink URL; JMAP: queryState.
-                                    // IMAP legacy only — new IMAP exchanges use syncState instead (see below).
-  // Structured per-platform sync-progress state, for platforms whose cursor isn't a single opaque
-  // provider-issued token. IMAP: { uidvalidity: number; lastUid: number }. Prefer this over encoding
-  // multiple values into syncCursor — no ad hoc string format, no hand-rolled parsing.
+  syncCursor?: string;             // Gmail: historyId; Outlook: full deltaLink URL; JMAP: queryState;
+                                    // IMAP: human-readable "{uidvalidity}:{lastUid}" (see syncState below).
+  // Structured per-platform sync-progress state, saved alongside syncCursor for platforms whose
+  // progress isn't a single opaque provider-issued token. IMAP: { uidvalidity: number; lastUid:
+  // number } — the field IMAP code actually reads back (see resolveImapSyncState), so a stray or
+  // truncated syncCursor can never break parsing. syncCursor keeps being written in parallel as a
+  // human-readable value for the API response / debugging — it is not being phased out.
   syncState?: Record<string, unknown>;
   expiresAt?: string;              // ISO datetime — when watch/subscription lapses
   lastSyncAt?: string;             // ISO datetime — last successful sync completion

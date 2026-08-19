@@ -199,12 +199,12 @@ export class ExternalExchangesApi {
           return c.json(serializeEmx(result.value), 201);
         }
 
-        const { syncState, expiresAt } = activateResult.value;
+        const { syncCursor, syncState, expiresAt } = activateResult.value;
         const now = DateTime.utc().toISO()!;
         const result = await accountDb.createImapExchange(accountId, {
           emailAddress: imapConfig.username, status: "active",
           imapConfig: { host: imapConfig.host, tlsConfig: imapConfig.tlsConfig, username: imapConfig.username, encryptedPassword },
-          syncState: syncState!, lastSyncAt: now, nextSyncTime: expiresAt,
+          syncCursor: syncCursor!, syncState: syncState!, lastSyncAt: now, nextSyncTime: expiresAt,
         });
         if (result.isErr()) { logger.error("Failed to create IMAP exchange record", { code: "api.emx.imap.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
         const imapEnsureResult = await accountDb.ensureAlias(accountId, imapConfig.username, "allow_all", aliasCheck.isOk() ? aliasCheck.value : undefined, result.value.id);
@@ -510,7 +510,7 @@ export class ExternalExchangesApi {
         encryptedPassword = emx.imapConfig.encryptedPassword;
       }
 
-      const { syncState: newSyncState, expiresAt: newExpiresAt } = testResult.value;
+      const { syncCursor: newSyncCursor, syncState: newSyncState, expiresAt: newExpiresAt } = testResult.value;
       const patchNow = DateTime.utc().toISO()!;
 
       const updateResult = await accountDb.updateExternalExchangeImapConfig(accountId, emxId, {
@@ -518,8 +518,8 @@ export class ExternalExchangesApi {
       });
       if (updateResult.isErr()) { logger.error("Failed to update exchange", { code: "api.emx.patch_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
 
-      // Always persist fresh syncState and timing from the activation test
-      const imapTimingResult = await accountDb.updateExternalExchange(accountId, emxId, { syncState: newSyncState!, lastSyncAt: patchNow, nextSyncTime: newExpiresAt });
+      // Always persist fresh syncCursor + syncState and timing from the activation test
+      const imapTimingResult = await accountDb.updateExternalExchange(accountId, emxId, { syncCursor: newSyncCursor!, syncState: newSyncState!, lastSyncAt: patchNow, nextSyncTime: newExpiresAt });
       if (imapTimingResult.isErr()) { logger.warn("Failed to update IMAP sync timing", { code: "api.emx.patch.imap.timing_failed", accountId, emxId, error: imapTimingResult.error }); }
 
       // Ensure alias exists for the EMX email address (may have been missed or deleted)

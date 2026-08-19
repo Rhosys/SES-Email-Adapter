@@ -1553,6 +1553,7 @@ export class AccountDatabase {
     emailAddress: string;
     status: ExternalMailExchange["status"];
     imapConfig: { host: string; tlsConfig: "TLS" | "DISABLED"; username: string; encryptedPassword: string };
+    syncCursor?: string;
     syncState?: Record<string, unknown>;
     lastSyncAt: string;
     nextSyncTime?: string;
@@ -1568,6 +1569,7 @@ export class AccountDatabase {
       status: data.status,
       imapConfig: data.imapConfig,
       lastSyncAt: data.lastSyncAt,
+      ...(data.syncCursor !== undefined ? { syncCursor: data.syncCursor } : {}),
       ...(data.syncState !== undefined ? { syncState: data.syncState } : {}),
       ...(data.nextSyncTime !== undefined ? { nextSyncTime: data.nextSyncTime } : {}),
       ...(data.errorReason !== undefined ? { errorReason: data.errorReason } : {}),

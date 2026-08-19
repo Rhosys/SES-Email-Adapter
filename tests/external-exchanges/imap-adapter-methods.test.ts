@@ -117,6 +117,8 @@ describe("ImapAdapter.activate", () => {
     const value = result._unsafeUnwrap();
     // syncState = { uidvalidity, lastUid: uidNext - 1 } = { uidvalidity: 123, lastUid: 42 }
     expect(value.syncState).toEqual({ uidvalidity: 123, lastUid: 42 });
+    // syncCursor is kept as a human-readable parallel to syncState, not replaced by it
+    expect(value.syncCursor).toBe("123:42");
     expect(value.providerSubscriptionId).toBe("poll");
     // Read off imapConfig.username directly — IMAP has no separate identity to verify against.
     expect(value.emailAddress).toBe("user@example.com");
@@ -184,15 +186,15 @@ describe("ImapAdapter.renew", () => {
     // Only 500 should be enqueued (via single batch call)
     expect(mockSignalQueue.sendBatch).toHaveBeenCalledTimes(1);
     expect(mockSignalQueue.sendBatch.mock.calls[0]![1]).toHaveLength(500);
-    // Cursor should advance to the 500th UID
+    // Cursor should advance to the 500th UID -- both representations, kept in sync
     expect(mockDb.updateExternalExchange).toHaveBeenCalledWith(
       "acct-1",
       "emx_testABC123",
-      expect.objectContaining({ syncState: { uidvalidity: 123, lastUid: 500 } }),
+      expect.objectContaining({ syncCursor: "123:500", syncState: { uidvalidity: 123, lastUid: 500 } }),
     );
   });
 
-  it("advances syncState to highest UID enqueued", async () => {
+  it("advances syncCursor and syncState to highest UID enqueued", async () => {
     const adapter = createAdapter();
     const emx = makeEmx({ syncState: { uidvalidity: 123, lastUid: 42 } });
     mockMailbox.uidValidity = BigInt(123);
@@ -206,7 +208,7 @@ describe("ImapAdapter.renew", () => {
     expect(mockDb.updateExternalExchange).toHaveBeenCalledWith(
       "acct-1",
       "emx_testABC123",
-      expect.objectContaining({ syncState: { uidvalidity: 123, lastUid: 45 } }),
+      expect.objectContaining({ syncCursor: "123:45", syncState: { uidvalidity: 123, lastUid: 45 } }),
     );
   });
 });

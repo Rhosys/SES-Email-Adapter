@@ -29,15 +29,26 @@ export interface ImapSyncState {
 }
 
 /**
+ * Builds the human-readable syncCursor string kept alongside syncState on every write, for
+ * display/debugging (it's surfaced as-is in the external-exchanges API response). syncState is
+ * the field IMAP code actually reads back — see resolveImapSyncState below.
+ */
+export function formatSyncCursor(uidvalidity: number, lastUid: number): string {
+  return `${uidvalidity}:${lastUid}`;
+}
+
+/**
  * Reads IMAP sync progress off an exchange record. Prefers the structured `syncState` property
- * bag; falls back to parsing the legacy colon-delimited `syncCursor` string
- * ("{uidvalidity}:{lastUid}") for exchanges created before `syncState` existed. Returns a Result
- * rather than throwing — an exchange with no readable state is an ordinary renewal failure
- * (handleRenewalFailure), not something that should crash the sweep for every other exchange
- * queued behind it.
+ * bag; falls back to parsing the colon-delimited `syncCursor` string ("{uidvalidity}:{lastUid}")
+ * for exchanges written before `syncState` existed, or for any record where syncState is
+ * otherwise missing/malformed. Returns a Result rather than throwing — an exchange with no
+ * readable state is an ordinary renewal failure (handleRenewalFailure), not something that
+ * should crash the sweep for every other exchange queued behind it.
  *
- * TODO: once every active IMAP exchange has been through one renew()/PATCH cycle post-deploy,
- * every active row will have syncState and this legacy-cursor fallback can be deleted (see TODO.md).
+ * syncCursor itself is not going away — IMAP keeps writing it on every update as a
+ * human-readable parallel to syncState. Only this fallback-parsing branch is transitional
+ * scaffolding: once every active exchange carries syncState too (see TODO.md), reads will
+ * always hit the first branch and this one just never triggers.
  */
 export function resolveImapSyncState(emx: ExternalMailExchange): Result<ImapSyncState, string> {
   const state = emx.syncState;
@@ -311,7 +322,7 @@ export class ImapAdapter implements ProviderAdapter {
     const syncState: ImapSyncState = { uidvalidity, lastUid };
     const expiresAt = DateTime.utc().plus({ minutes: 15 }).toISO()!;
     this.logger.info("IMAP activation succeeded", { code: "imap.activate.success", host: imapConfig.host, username: imapConfig.username, uidvalidity, lastUid });
-    return ok({ syncState, expiresAt, providerSubscriptionId: "poll", emailAddress: imapConfig.username });
+    return ok({ syncCursor: formatSyncCursor(uidvalidity, lastUid), syncState, expiresAt, providerSubscriptionId: "poll", emailAddress: imapConfig.username });
   }
 
   async renew(emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>> {
@@ -383,9 +394,10 @@ export class ImapAdapter implements ProviderAdapter {
         return err({ kind: "provider_renewal_failed", cause: "SQS batch send failed" });
       }
 
-      // Update syncState to highest UID in batch
+      // Update syncCursor + syncState to highest UID in batch
       const highestUid = batch[batch.length - 1]!;
       const cursorUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
+        syncCursor: formatSyncCursor(currentUidvalidity, highestUid),
         syncState: { uidvalidity: currentUidvalidity, lastUid: highestUid } satisfies ImapSyncState,
         lastSyncAt: DateTime.utc().toISO()!,
         nextSyncTime: DateTime.utc().plus({ minutes: 15 }).toISO()!,
