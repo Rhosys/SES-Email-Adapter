@@ -86,13 +86,14 @@ export class DraftSendWorker {
     const to = signal.data.to.map(r => r.address).join(", ");
     const subject = signal.data.subject;
     const body = "textBody" in signal.data ? (signal.data.textBody ?? "") : "";
+    const inReplyTo = await this.resolveInReplyTo(accountId, threadId, signal);
 
     const sendResult = await this.replySender.sendReply({
       to,
       from,
       subject,
       body,
-      inReplyTo: threadId,
+      ...(inReplyTo ? { inReplyTo } : {}),
       accountId,
       signalId: signal.id,
       threadId,
@@ -135,5 +136,34 @@ export class DraftSendWorker {
 
     this.logger.info("Draft send: signal sent successfully", { code: "draft_send.sent", signalId, accountId, sesMessageId: messageId });
     return ok(undefined);
+  }
+
+  /**
+   * Resolves the In-Reply-To/References value from the specific message this draft was
+   * composed as a reply to (Signal.data.linkedSignalId, set explicitly by the UI at draft
+   * creation — see CreateDraftSignalRequest). Returns undefined — never a wrong value — when
+   * there's nothing to link, the linked signal can't be found, or it has no Message-ID header;
+   * each of those is logged so a persistently missing link is visible.
+   */
+  private async resolveInReplyTo(accountId: string, threadId: string, signal: Signal): Promise<string | undefined> {
+    if (!("linkedSignalId" in signal.data) || !signal.data.linkedSignalId) return undefined;
+    const linkedSignalId = signal.data.linkedSignalId;
+
+    const linkedResult = await this.threadDb.getSignalById(accountId, linkedSignalId, threadId);
+    if (linkedResult.isErr()) {
+      this.logger.error("Draft send: failed to fetch linked signal for In-Reply-To — header will be omitted.", { code: "draft_send.linked_signal_fetch_failed", signalId: signal.id, accountId, linkedSignalId, error: linkedResult.error });
+      return undefined;
+    }
+    const linked = linkedResult.value;
+    if (!linked) {
+      this.logger.error("Draft send: linked signal not found — In-Reply-To will be omitted.", { code: "draft_send.linked_signal_not_found", signalId: signal.id, accountId, linkedSignalId });
+      return undefined;
+    }
+    const messageId = linked.data.headers["message-id"];
+    if (!messageId) {
+      this.logger.warn("Draft send: linked signal has no Message-ID header — In-Reply-To will be omitted.", { code: "draft_send.linked_signal_no_message_id", signalId: signal.id, accountId, linkedSignalId });
+      return undefined;
+    }
+    return messageId;
   }
 }

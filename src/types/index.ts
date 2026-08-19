@@ -454,6 +454,11 @@ export interface OutboundEmailSignalData extends EmailSignalDataBase {
   htmlBody?: string;
   sendInitiatedAt?: string;    // ISO 8601 — when POST /send was called
   sendFailureReason?: string;  // "all_recipients_bounced" | "ses_permanent_failure"
+  // The specific inbound signal this draft is a reply to, set explicitly when the UI opens the
+  // reply composer from a signal card (not inferred from the thread). Source of truth for the
+  // In-Reply-To/References headers at send time — see DraftSendWorker. Absent for a draft not
+  // composed as a reply to any particular message (e.g. a pong or a thread-level compose).
+  linkedSignalId?: string;
 }
 
 // Union — used where either inbound or outbound email signals are accepted

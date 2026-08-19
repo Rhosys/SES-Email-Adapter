@@ -95,7 +95,8 @@ export interface ReplySender {
     from: string;
     subject: string;
     body: string;
-    inReplyTo: string;
+    /** RFC 5322 Message-ID of the specific message being replied to. Omit when there isn't one. */
+    inReplyTo?: string;
     /** Absent for platform-originated mail, which sends under the platform tenant. */
     accountId?: string;
     signalId?: string;
@@ -471,7 +472,7 @@ export class SignalProcessor {
           from,
           subject: signal.data.subject ?? "",
           body: "textBody" in signal.data ? (signal.data.textBody ?? "") : "",
-          inReplyTo: signal.id,
+          ...(signal.data.headers["message-id"] ? { inReplyTo: signal.data.headers["message-id"] } : {}),
           accountId: usePlatformDomain ? this.platformTenantName : accountId,
           signalId: signal.id,
           threadId: thread.id,

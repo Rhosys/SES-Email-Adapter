@@ -369,6 +369,14 @@ export class ThreadsApi {
       const thread = threadResult.value;
       if (!thread || thread.status === "deleted") return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
       const body = await zParse(CreateDraftSignalRequest, c.req.raw);
+      if (body.linkedSignalId) {
+        const linkedResult = await threadDb.getSignalById(accountId, body.linkedSignalId, threadId);
+        if (linkedResult.isErr()) {
+          logger.error("Failed to look up linkedSignalId for draft creation.", { code: "api.thread.create_signal.linked_lookup_failed", accountId, threadId, error: linkedResult.error });
+          return err(c, 500, "Internal Server Error");
+        }
+        if (!linkedResult.value) return err(c, 400, "linkedSignalId does not refer to a signal in this thread", "SIGNAL_NOT_FOUND");
+      }
       const now = DateTime.utc().toISO()!;
       const id = generateId("sgn-");
       const signal: Signal = {
@@ -388,6 +396,7 @@ export class ThreadsApi {
           cc: [],
           subject: body.subject,
           ...(body.textBody != null ? { textBody: body.textBody } : {}),
+          ...(body.linkedSignalId != null ? { linkedSignalId: body.linkedSignalId } : {}),
           attachments: [],
           headers: {},
           recipientAddress: body.from.address,
