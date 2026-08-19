@@ -77,6 +77,10 @@ export const CreateDraftSignalRequest = z.object({
   to: z.array(EmailAddressSchema).min(1),
   subject: z.string(),
   textBody: z.string().optional(),
+  // The specific signal this draft is replying to, from the composer's "Reply" action — sourced
+  // for the In-Reply-To/References headers at send time. Omit for a thread-level or from-scratch
+  // compose with no specific message being replied to.
+  linkedSignalId: z.string().optional(),
 });
 export type CreateDraftSignalRequest = z.infer<typeof CreateDraftSignalRequest>;
 

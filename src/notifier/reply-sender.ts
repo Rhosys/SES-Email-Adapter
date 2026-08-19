@@ -51,16 +51,21 @@ export class ReplySenderService implements ReplySender {
     from: string;
     subject: string;
     body: string;
-    inReplyTo: string;
+    /** RFC 5322 Message-ID of the specific message being replied to, e.g. "<abc@mail.example.com>".
+     * Omit when there isn't one (compose-from-scratch, or the linked message's Message-ID
+     * couldn't be resolved) — a wrong value is worse than no In-Reply-To/References at all. */
+    inReplyTo?: string;
     accountId?: string;
     signalId?: string;
     threadId?: string;
   }): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
     const subject = `Re: ${opts.subject}`;
-    const headers = [
-      { Name: "In-Reply-To", Value: opts.inReplyTo },
-      { Name: "References", Value: opts.inReplyTo },
-    ];
+    const headers = opts.inReplyTo
+      ? [
+          { Name: "In-Reply-To", Value: opts.inReplyTo },
+          { Name: "References", Value: opts.inReplyTo },
+        ]
+      : [];
 
     // Platform-originated mail (a pong from the platform domain) carries no account. It sends
     // under the platform tenant, and having no alias it never routes through a provider —

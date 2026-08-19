@@ -86,16 +86,17 @@ export class DraftSendWorker {
     const to = signal.data.to.map(r => r.address).join(", ");
     const subject = signal.data.subject;
     const body = "textBody" in signal.data ? (signal.data.textBody ?? "") : "";
+    const inReplyTo = await this.resolveInReplyTo(accountId, threadId, signal);
 
     const sendResult = await this.replySender.sendReply({
       to,
       from,
       subject,
       body,
-      inReplyTo: signal.threadId ?? "",
+      ...(inReplyTo ? { inReplyTo } : {}),
       accountId,
       signalId: signal.id,
-      ...(signal.threadId ? { threadId: signal.threadId } : {}),
+      threadId,
     });
 
     if (sendResult.isErr()) {
@@ -107,7 +108,7 @@ export class DraftSendWorker {
           status: "draft",
           sendInitiatedAt: null,
           sendFailureReason: describeSendFailure(sendResult.error),
-          ...(signal.threadId ? { threadId: signal.threadId } : {}),
+          threadId,
         });
         if (failureResult.isErr()) return err(failureResult.error);
         return ok(undefined);
@@ -129,11 +130,45 @@ export class DraftSendWorker {
       sentAt: now,
       sesMessageId: messageId,
       ...(gsi3pk ? { gsi3pk } : {}),
-      ...(signal.threadId ? { threadId: signal.threadId } : {}),
+      threadId,
     });
     if (updateResult.isErr()) return err(updateResult.error);
 
     this.logger.info("Draft send: signal sent successfully", { code: "draft_send.sent", signalId, accountId, sesMessageId: messageId });
     return ok(undefined);
+  }
+
+  /**
+   * Resolves the In-Reply-To/References value from the specific message this draft was
+   * composed as a reply to (Signal.data.linkedSignalId, set explicitly by the UI at draft
+   * creation — see CreateDraftSignalRequest). Returns undefined — never a wrong value — when
+   * there's nothing to link, the linked signal can't be found, or it has no Message-ID header.
+   *
+   * linkedSignalId is intentionally unvalidated at creation time (a lookup then would only
+   * prove the signal existed then, not now) — so "not found" here is an ordinary, expected
+   * outcome (the linked signal aged out or was deleted between compose and send), not a fault;
+   * tracked rather than logged as an error. A DB error fetching it, or a found-but-headerless
+   * signal, are more likely to indicate a real problem and stay louder.
+   */
+  private async resolveInReplyTo(accountId: string, threadId: string, signal: Signal): Promise<string | undefined> {
+    if (!("linkedSignalId" in signal.data) || !signal.data.linkedSignalId) return undefined;
+    const linkedSignalId = signal.data.linkedSignalId;
+
+    const linkedResult = await this.threadDb.getSignalById(accountId, linkedSignalId, threadId);
+    if (linkedResult.isErr()) {
+      this.logger.error("Draft send: failed to fetch linked signal for In-Reply-To — header will be omitted.", { code: "draft_send.linked_signal_fetch_failed", signalId: signal.id, accountId, linkedSignalId, error: linkedResult.error });
+      return undefined;
+    }
+    const linked = linkedResult.value;
+    if (!linked) {
+      this.logger.track("Draft send: linked signal no longer exists — In-Reply-To will be omitted.", { code: "draft_send.linked_signal_not_found", signalId: signal.id, accountId, linkedSignalId });
+      return undefined;
+    }
+    const messageId = linked.data.headers["message-id"];
+    if (!messageId) {
+      this.logger.warn("Draft send: linked signal has no Message-ID header — In-Reply-To will be omitted.", { code: "draft_send.linked_signal_no_message_id", signalId: signal.id, accountId, linkedSignalId });
+      return undefined;
+    }
+    return messageId;
   }
 }

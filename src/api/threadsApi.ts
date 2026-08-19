@@ -11,8 +11,8 @@ import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../retention.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { EmailContentStore } from "./content-store.js";
-import type { Thread, Signal, AnySignal, Attachment, PageParams, ThreadStatus, Workflow } from "../types/index.js";
-import type { CalendarEventData, CalendarResponseData, DomainMisconfigurationData, Pagination } from "../types/index.js";
+import type { Signal, AnySignal, Attachment, PageParams, ThreadStatus, Workflow } from "../types/index.js";
+import type { CalendarResponseData, DomainMisconfigurationData, Pagination } from "../types/index.js";
 import type { UpdateThreadFields, ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
@@ -75,7 +75,7 @@ export class ThreadsApi {
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, emailContentStore, contentCdnBaseUrl, embeddingGenerator, threadMatcher, signalQueue } = this;
+    const { threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, signalReprocessor, emailContentStore, contentCdnBaseUrl, embeddingGenerator, threadMatcher, signalQueue } = this;
 
     // -------------------------------------------------------------------------
     // 1. GET /accounts/{accountId}/threads — list threads
@@ -369,6 +369,9 @@ export class ThreadsApi {
       const thread = threadResult.value;
       if (!thread || thread.status === "deleted") return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
       const body = await zParse(CreateDraftSignalRequest, c.req.raw);
+      // linkedSignalId is not validated here — a lookup now would only prove the signal exists
+      // at creation time, not at send time (arbitrarily later), which is the point it actually
+      // matters. DraftSendWorker resolves it when sending and handles it being gone by then.
       const now = DateTime.utc().toISO()!;
       const id = generateId("sgn-");
       const signal: Signal = {
@@ -388,6 +391,7 @@ export class ThreadsApi {
           cc: [],
           subject: body.subject,
           ...(body.textBody != null ? { textBody: body.textBody } : {}),
+          ...(body.linkedSignalId != null ? { linkedSignalId: body.linkedSignalId } : {}),
           attachments: [],
           headers: {},
           recipientAddress: body.from.address,

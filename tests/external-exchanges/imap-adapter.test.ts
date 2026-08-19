@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import {
-  parseSyncCursor,
-  formatSyncCursor,
+  resolveImapSyncState,
   createImapClient,
 } from "../../src/external-exchanges/imap-adapter.js";
 import type { ImapFlowOptions } from "imapflow";
+import type { ExternalMailExchange } from "../../src/types/index.js";
 
 vi.mock("imapflow", () => {
   return {
@@ -17,26 +17,41 @@ vi.mock("imapflow", () => {
   };
 });
 
+function fakeEmx(overrides: Partial<ExternalMailExchange>): ExternalMailExchange {
+  return {
+    id: "emx-test", accountId: "acct-1", platform: "imap", emailAddress: "a@b.com",
+    status: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
-// Property 1: syncCursor round-trip
+// Property 1: syncState round-trip, plus legacy syncCursor fallback
 // Validates: Requirements 3.4, 3.5, 4.1
 // ---------------------------------------------------------------------------
 
-describe("syncCursor round-trip", () => {
+describe("resolveImapSyncState", () => {
   it.each([
     { uidvalidity: 0, lastUid: 0, label: "both zero" },
     { uidvalidity: 1, lastUid: 1, label: "both one" },
     { uidvalidity: 4294967295, lastUid: 4294967295, label: "both 2^32-1 (max)" },
     { uidvalidity: 1234567890, lastUid: 42, label: "typical values" },
     { uidvalidity: 1, lastUid: 0, label: "uidvalidity=1, lastUid=0 (empty inbox)" },
-  ])("format → parse produces original values ($label)", ({ uidvalidity, lastUid }) => {
-    const cursor = formatSyncCursor(uidvalidity, lastUid);
-    const parsed = parseSyncCursor(cursor);
-    expect(parsed).toEqual({ uidvalidity, lastUid });
+  ])("reads structured syncState directly ($label)", ({ uidvalidity, lastUid }) => {
+    const result = resolveImapSyncState(fakeEmx({ syncState: { uidvalidity, lastUid } }));
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ uidvalidity, lastUid });
   });
 
-  it("formatSyncCursor produces the expected string format", () => {
-    expect(formatSyncCursor(1234567890, 42)).toBe("1234567890:42");
+  it("falls back to parsing the legacy colon-delimited syncCursor when syncState is absent", () => {
+    const result = resolveImapSyncState(fakeEmx({ syncCursor: "1234567890:42" }));
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ uidvalidity: 1234567890, lastUid: 42 });
+  });
+
+  it("prefers syncState over a legacy syncCursor when both are present", () => {
+    const result = resolveImapSyncState(fakeEmx({ syncState: { uidvalidity: 1, lastUid: 2 }, syncCursor: "999:999" }));
+    expect(result._unsafeUnwrap()).toEqual({ uidvalidity: 1, lastUid: 2 });
   });
 });
 
@@ -76,18 +91,24 @@ describe("createImapClient TLS config → port resolution", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Parse errors: malformed inputs
+// Invalid/missing state: returns an error Result, never throws
 // ---------------------------------------------------------------------------
 
-describe("parseSyncCursor errors", () => {
+describe("resolveImapSyncState errors", () => {
   it.each([
     { input: "nocolon", label: "missing colon" },
     { input: "abc:42", label: "non-numeric uidvalidity (NaN)" },
     { input: "42:abc", label: "non-numeric lastUid (NaN)" },
     { input: "-1:42", label: "negative uidvalidity" },
     { input: "42:-1", label: "negative lastUid" },
-  ])("throws for $label", ({ input }) => {
-    expect(() => parseSyncCursor(input)).toThrow();
+  ])("returns an error Result for $label, does not throw", ({ input }) => {
+    let result;
+    expect(() => { result = resolveImapSyncState(fakeEmx({ syncCursor: input })); }).not.toThrow();
+    expect(result!.isErr()).toBe(true);
+  });
+
+  it("returns an error Result when neither syncState nor syncCursor is present", () => {
+    expect(resolveImapSyncState(fakeEmx({})).isErr()).toBe(true);
   });
 });
 

@@ -12,7 +12,7 @@ function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit
   return {
     id: "USR#signal-001",
     signalLookupId: "USR#signal-001",
-    threadId: "arc-001",
+    threadId: "thr-001",
     accountId: "acct-001",
     source: "user",
     type: "email",
@@ -100,7 +100,7 @@ describe("DraftSendWorker", () => {
     expect(replySender.sendReply).not.toHaveBeenCalled();
   });
 
-  it("sends email and updates status to sent on success", async () => {
+  it("sends email and updates status to sent on success (no linkedSignalId — no In-Reply-To)", async () => {
     const result = await worker.process(PAYLOAD);
 
     expect(result.isOk()).toBe(true);
@@ -109,36 +109,71 @@ describe("DraftSendWorker", () => {
       from: "me@example.com",
       subject: "Hello",
       body: "Hi there",
-      inReplyTo: "arc-001",
       accountId: "acct-001",
       signalId: "USR#signal-001",
-      threadId: "arc-001",
+      threadId: "thr-001",
     });
     expect(threadDb.updateSignalSendStatus).toHaveBeenCalledWith("acct-001", "USR#signal-001", {
       status: "sent",
       sentAt: expect.any(String),
       sesMessageId: "ses-msg-001",
       gsi3pk: "ACCT#acct-001#MSGID#ses-msg-001@eu-central-1.amazonses.com",
-      threadId: "arc-001",
+      threadId: "thr-001",
     });
   });
 
-  it("omits threadId from sendReply opts when signal has no threadId", async () => {
-    const signalWithoutThread = makeSignal();
-    delete signalWithoutThread.threadId;
-    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(signalWithoutThread));
+  // threadId now always comes from the dispatch payload (DraftSendPayload.threadId: string,
+  // required — it's the DynamoDB GSI1 partition key getSignalById queried with, so the
+  // returned signal can only ever belong to that threadId). There is no longer a code path
+  // where it's omitted; the old "signal has no threadId" branch was dead defensive code
+  // reading a weaker, coincidentally-optional field off the fetched signal instead of the
+  // value already guaranteed non-empty by the payload's type.
 
-    const result = await worker.process(PAYLOAD);
+  describe("In-Reply-To resolution from linkedSignalId", () => {
+    it("resolves In-Reply-To from the linked signal's Message-ID header", async () => {
+      vi.mocked(threadDb.getSignalById)
+        .mockResolvedValueOnce(ok(makeSignal({ data: { linkedSignalId: "USR#linked-001" } })))
+        .mockResolvedValueOnce(ok(makeSignal({
+          id: "USR#linked-001",
+          data: { headers: { "message-id": "<abc123@mail.example.com>" } },
+        })));
 
-    expect(result.isOk()).toBe(true);
-    expect(replySender.sendReply).toHaveBeenCalledWith({
-      to: "recipient@example.com",
-      from: "me@example.com",
-      subject: "Hello",
-      body: "Hi there",
-      inReplyTo: "",
-      accountId: "acct-001",
-      signalId: "USR#signal-001",
+      const result = await worker.process(PAYLOAD);
+
+      expect(result.isOk()).toBe(true);
+      expect(threadDb.getSignalById).toHaveBeenNthCalledWith(2, "acct-001", "USR#linked-001", "thr-001");
+      expect(replySender.sendReply).toHaveBeenCalledWith(expect.objectContaining({
+        inReplyTo: "<abc123@mail.example.com>",
+      }));
+    });
+
+    it("omits In-Reply-To and tracks (not errors) when the linked signal is not found — expected once creation-time validation is gone", async () => {
+      const logger = createMockLogger();
+      const localWorker = new DraftSendWorker(threadDb, replySender, logger);
+      vi.mocked(threadDb.getSignalById)
+        .mockResolvedValueOnce(ok(makeSignal({ data: { linkedSignalId: "USR#missing-001" } })))
+        .mockResolvedValueOnce(ok(null));
+
+      const result = await localWorker.process(PAYLOAD);
+
+      expect(result.isOk()).toBe(true);
+      expect(replySender.sendReply).toHaveBeenCalledWith(expect.not.objectContaining({ inReplyTo: expect.anything() }));
+      expect(logger.calls.some(c => c.method === "track" && c.context?.code === "draft_send.linked_signal_not_found")).toBe(true);
+      expect(logger.calls.some(c => c.method === "error")).toBe(false);
+    });
+
+    it("omits In-Reply-To and logs a warning when the linked signal has no Message-ID header", async () => {
+      const logger = createMockLogger();
+      const localWorker = new DraftSendWorker(threadDb, replySender, logger);
+      vi.mocked(threadDb.getSignalById)
+        .mockResolvedValueOnce(ok(makeSignal({ data: { linkedSignalId: "USR#linked-001" } })))
+        .mockResolvedValueOnce(ok(makeSignal({ id: "USR#linked-001", data: { headers: {} } })));
+
+      const result = await localWorker.process(PAYLOAD);
+
+      expect(result.isOk()).toBe(true);
+      expect(replySender.sendReply).toHaveBeenCalledWith(expect.not.objectContaining({ inReplyTo: expect.anything() }));
+      expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "draft_send.linked_signal_no_message_id")).toBe(true);
     });
   });
 

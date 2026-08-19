@@ -1,7 +1,6 @@
 import { DateTime } from "luxon";
 import { ok } from "../errors.js";
 import type { Result } from "../errors.js";
-import type { ExternalMailExchange } from "../types/index.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import type { ImapAdapter } from "./imap-adapter.js";
@@ -65,7 +64,7 @@ export class EmxIdleWorker {
     }
 
     const now = DateTime.utc();
-    const tasks: Array<Promise<Result<void, never>>> = [];
+    const tasks: Array<{ emxId: string; platform: string; promise: Promise<Result<void, never>> }> = [];
 
     for (const emx of exchanges) {
       // Dedup: skip if synced recently (R4.12)
@@ -86,9 +85,9 @@ export class EmxIdleWorker {
       }
 
       if (emx.platform === "imap") {
-        tasks.push(this.imapAdapter.idleAndDispatch(emx, IDLE_TIMEOUT_MS));
+        tasks.push({ emxId: emx.id, platform: emx.platform, promise: this.imapAdapter.idleAndDispatch(emx, IDLE_TIMEOUT_MS) });
       } else {
-        tasks.push(this.jmapAdapter.pollAndDispatch(emx, JMAP_POLL_ITERATIONS, JMAP_POLL_INTERVAL_MS));
+        tasks.push({ emxId: emx.id, platform: emx.platform, promise: this.jmapAdapter.pollAndDispatch(emx, JMAP_POLL_ITERATIONS, JMAP_POLL_INTERVAL_MS) });
       }
     }
 
@@ -97,8 +96,16 @@ export class EmxIdleWorker {
       return ok(undefined);
     }
 
-    // Run all concurrently (R1.2)
-    await Promise.allSettled(tasks);
+    // Run all concurrently (R1.2). Each task's own Result errors are already logged by the
+    // adapter — this only guards against a task throwing in violation of its Result contract,
+    // which allSettled would otherwise swallow with no trace at all.
+    const settled = await Promise.allSettled(tasks.map(t => t.promise));
+    settled.forEach((outcome, i) => {
+      if (outcome.status === "rejected") {
+        const task = tasks[i]!;
+        this.logger.error("emx_idle: task rejected unexpectedly", { code: "emx.idle.task_rejected", accountId, emxId: task.emxId, platform: task.platform, error: outcome.reason });
+      }
+    });
 
     this.logger.info("emx_idle: completed", { code: "emx.idle.done", accountId, exchangeCount: tasks.length });
     return ok(undefined);

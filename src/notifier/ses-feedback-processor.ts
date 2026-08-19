@@ -148,7 +148,6 @@ export class SesFeedbackProcessor {
 
       // Check if this bounce is for a user-sent signal
       {
-        const sesMessageId = feedback.mail.messageId;
         const signalId = feedback.mail.tags?.[TAG_SIGNAL_ID];
         // Prefixed tag takes priority; fall back to bare "accountId" for pre-migration emails
         const accountId = feedback.mail.tags?.[TAG_ACCOUNT_ID] ?? feedback.mail.tags?.["accountId"];

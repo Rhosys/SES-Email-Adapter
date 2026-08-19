@@ -5,7 +5,7 @@ import { checkDomain } from "../dns/dns-checker.js";
 import { isOutstandingThread, buildAccountLogEntry, buildAccountReports, buildRunCompleteLogEntry } from "./staleness-logic.js";
 import type { AccountStalenessReport } from "./staleness-logic.js";
 import { computeSnapshot, isSnapshotRow, isDiffRow, monthFromSnapshotSk, dateFromDiffSk, buildSnapshotSk } from "../database/stats-writer.js";
-import type { StatsRow, StatsMetric } from "../database/stats-writer.js";
+import type { StatsMetric } from "../database/stats-writer.js";
 import type { Logger } from "../logger.js";
 
 export class DomainHealthJob {

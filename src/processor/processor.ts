@@ -4,11 +4,11 @@ import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import type { IForwardingService } from "../forwarding/forwarding-service.js";
-import { ok, err, dbError, processorError, noAccountError, invalidResponseError, notFoundError } from "../errors.js";
+import { ok, err, dbError, processorError, noAccountError, notFoundError } from "../errors.js";
 import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, NoAccountError } from "../errors.js";
 import type { EmailServiceError } from "../email/email-service.js";
 import type { ProviderSendError } from "../external-exchanges/provider-adapter.js";
-import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, SignalSource, SignalStatus, Domain, ThreadStatus, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, InvalidTemplateFunctionData, AutoSendBlockedData, UnsubscribeInfo, InboundEmailSignalData, OutboundEmailSignalData } from "../types/index.js";
+import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, UnsubscribeInfo, InboundEmailSignalData } from "../types/index.js";
 import { deriveGroupingKey } from "../grouping-key.js";
 import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
@@ -95,7 +95,8 @@ export interface ReplySender {
     from: string;
     subject: string;
     body: string;
-    inReplyTo: string;
+    /** RFC 5322 Message-ID of the specific message being replied to. Omit when there isn't one. */
+    inReplyTo?: string;
     /** Absent for platform-originated mail, which sends under the platform tenant. */
     accountId?: string;
     signalId?: string;
@@ -471,7 +472,7 @@ export class SignalProcessor {
           from,
           subject: signal.data.subject ?? "",
           body: "textBody" in signal.data ? (signal.data.textBody ?? "") : "",
-          inReplyTo: signal.id,
+          ...(signal.data.headers["message-id"] ? { inReplyTo: signal.data.headers["message-id"] } : {}),
           accountId: usePlatformDomain ? this.platformTenantName : accountId,
           signalId: signal.id,
           threadId: thread.id,

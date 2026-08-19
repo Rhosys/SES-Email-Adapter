@@ -454,6 +454,11 @@ export interface OutboundEmailSignalData extends EmailSignalDataBase {
   htmlBody?: string;
   sendInitiatedAt?: string;    // ISO 8601 — when POST /send was called
   sendFailureReason?: string;  // "all_recipients_bounced" | "ses_permanent_failure"
+  // The specific inbound signal this draft is a reply to, set explicitly when the UI opens the
+  // reply composer from a signal card (not inferred from the thread). Source of truth for the
+  // In-Reply-To/References headers at send time — see DraftSendWorker. Absent for a draft not
+  // composed as a reply to any particular message (e.g. a pong or a thread-level compose).
+  linkedSignalId?: string;
 }
 
 // Union — used where either inbound or outbound email signals are accepted
@@ -731,7 +736,14 @@ export interface ExternalMailExchange {
   platform: EmxPlatform;
   emailAddress: string;            // the external mailbox being watched
   status: EmxStatus;
-  syncCursor?: string;             // Gmail: historyId; Outlook: full deltaLink URL; IMAP: {uidvalidity}:{lastUid}
+  syncCursor?: string;             // Gmail: historyId; Outlook: full deltaLink URL; JMAP: queryState;
+                                    // IMAP: human-readable "{uidvalidity}:{lastUid}" (see syncState below).
+  // Structured per-platform sync-progress state, saved alongside syncCursor for platforms whose
+  // progress isn't a single opaque provider-issued token. IMAP: { uidvalidity: number; lastUid:
+  // number } — the field IMAP code actually reads back (see resolveImapSyncState), so a stray or
+  // truncated syncCursor can never break parsing. syncCursor keeps being written in parallel as a
+  // human-readable value for the API response / debugging — it is not being phased out.
+  syncState?: Record<string, unknown>;
   expiresAt?: string;              // ISO datetime — when watch/subscription lapses
   lastSyncAt?: string;             // ISO datetime — last successful sync completion
   providerSubscriptionId?: string; // Graph subscription UUID or "watch" for Gmail

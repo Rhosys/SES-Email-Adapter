@@ -233,7 +233,7 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
 
   // 6. Sanitize HTML and inline CID images
   let htmlBody: string | undefined;
-  let extractedLinks: Array<{ url: string; text: string | null }> = [];
+  const extractedLinks: Array<{ url: string; text: string | null }> = [];
 
   if (parsed.html) {
     const htmlInput = typeof parsed.html === "string" ? parsed.html : "";

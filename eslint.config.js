@@ -11,6 +11,12 @@ export default [
         tsconfigRootDir: import.meta.dirname,
       },
     },
+    rules: {
+      // The shared config's args:"after-used" doesn't exempt a leading underscore — but this
+      // codebase already uses that convention everywhere for interface-mandated unused params
+      // (e.g. ProviderAdapter.deactivate(_emx)). Recognize it instead of fighting it file by file.
+      "@typescript-eslint/no-unused-vars": ["error", { vars: "all", args: "after-used", argsIgnorePattern: "^_", ignoreRestSiblings: true }],
+    },
   },
 
   // Project-specific: restricted imports for processor isolation (ADR 011)

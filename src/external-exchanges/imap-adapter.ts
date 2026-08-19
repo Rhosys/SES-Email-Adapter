@@ -19,22 +19,54 @@ import type { SignalQueue } from "../messaging/signal-queue.js";
 import type { Logger } from "../logger.js";
 
 // ---------------------------------------------------------------------------
-// Sync cursor utilities
+// Sync state utilities
 // ---------------------------------------------------------------------------
 
+export interface ImapSyncState {
+  uidvalidity: number;
+  lastUid: number;
+  [key: string]: unknown;
+}
+
+/**
+ * Builds the human-readable syncCursor string kept alongside syncState on every write, for
+ * display/debugging (it's surfaced as-is in the external-exchanges API response). syncState is
+ * the field IMAP code actually reads back — see resolveImapSyncState below.
+ */
 export function formatSyncCursor(uidvalidity: number, lastUid: number): string {
   return `${uidvalidity}:${lastUid}`;
 }
 
-export function parseSyncCursor(cursor: string): { uidvalidity: number; lastUid: number } {
+/**
+ * Reads IMAP sync progress off an exchange record. Prefers the structured `syncState` property
+ * bag; falls back to parsing the colon-delimited `syncCursor` string ("{uidvalidity}:{lastUid}")
+ * for exchanges written before `syncState` existed, or for any record where syncState is
+ * otherwise missing/malformed. Returns a Result rather than throwing — an exchange with no
+ * readable state is an ordinary renewal failure (handleRenewalFailure), not something that
+ * should crash the sweep for every other exchange queued behind it.
+ *
+ * syncCursor itself is not going away — IMAP keeps writing it on every update as a
+ * human-readable parallel to syncState. Only this fallback-parsing branch is transitional
+ * scaffolding: once every active exchange carries syncState too (see TODO.md), reads will
+ * always hit the first branch and this one just never triggers.
+ */
+export function resolveImapSyncState(emx: ExternalMailExchange): Result<ImapSyncState, string> {
+  const state = emx.syncState;
+  if (state && typeof state["uidvalidity"] === "number" && typeof state["lastUid"] === "number") {
+    return ok({ uidvalidity: state["uidvalidity"], lastUid: state["lastUid"] });
+  }
+
+  const cursor = emx.syncCursor;
+  if (!cursor) return err(`Missing sync state: exchange ${emx.id} has neither syncState nor a legacy syncCursor`);
+
   const idx = cursor.indexOf(":");
-  if (idx < 1) throw new Error(`Invalid sync cursor: ${cursor}`);
+  if (idx < 1) return err(`Invalid legacy sync cursor: ${cursor}`);
   const uidvalidity = Number(cursor.slice(0, idx));
   const lastUid = Number(cursor.slice(idx + 1));
   if (!Number.isFinite(uidvalidity) || uidvalidity < 0 || !Number.isFinite(lastUid) || lastUid < 0) {
-    throw new Error(`Invalid sync cursor values: ${cursor}`);
+    return err(`Invalid legacy sync cursor values: ${cursor}`);
   }
-  return { uidvalidity, lastUid };
+  return ok({ uidvalidity, lastUid });
 }
 
 // ---------------------------------------------------------------------------
@@ -287,10 +319,10 @@ export class ImapAdapter implements ProviderAdapter {
 
     const { uidvalidity, uidNext } = stateResult.value;
     const lastUid = uidNext > 1 ? uidNext - 1 : 0;
-    const syncCursor = formatSyncCursor(uidvalidity, lastUid);
+    const syncState: ImapSyncState = { uidvalidity, lastUid };
     const expiresAt = DateTime.utc().plus({ minutes: 15 }).toISO()!;
     this.logger.info("IMAP activation succeeded", { code: "imap.activate.success", host: imapConfig.host, username: imapConfig.username, uidvalidity, lastUid });
-    return ok({ syncCursor, expiresAt, providerSubscriptionId: "poll", emailAddress: imapConfig.username });
+    return ok({ syncCursor: formatSyncCursor(uidvalidity, lastUid), syncState, expiresAt, providerSubscriptionId: "poll", emailAddress: imapConfig.username });
   }
 
   async renew(emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>> {
@@ -323,7 +355,12 @@ export class ImapAdapter implements ProviderAdapter {
     }
 
     const { uidvalidity: currentUidvalidity } = stateResult.value;
-    const { uidvalidity: storedUidvalidity, lastUid } = parseSyncCursor(emx.syncCursor!);
+    const syncStateResult = resolveImapSyncState(emx);
+    if (syncStateResult.isErr()) {
+      await conn.logout();
+      return this.handleRenewalFailure(emx, syncStateResult.error);
+    }
+    const { uidvalidity: storedUidvalidity, lastUid } = syncStateResult.value;
 
     if (currentUidvalidity !== storedUidvalidity) {
       await conn.logout();
@@ -357,10 +394,11 @@ export class ImapAdapter implements ProviderAdapter {
         return err({ kind: "provider_renewal_failed", cause: "SQS batch send failed" });
       }
 
-      // Update syncCursor to highest UID in batch
+      // Update syncCursor + syncState to highest UID in batch
       const highestUid = batch[batch.length - 1]!;
       const cursorUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
         syncCursor: formatSyncCursor(currentUidvalidity, highestUid),
+        syncState: { uidvalidity: currentUidvalidity, lastUid: highestUid } satisfies ImapSyncState,
         lastSyncAt: DateTime.utc().toISO()!,
         nextSyncTime: DateTime.utc().plus({ minutes: 15 }).toISO()!,
         consecutiveFailures: 0,
@@ -381,8 +419,8 @@ export class ImapAdapter implements ProviderAdapter {
     return ok(undefined);
   }
 
-  async deactivate(_emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>> {
-    return ok(undefined);
+  deactivate(_emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>> {
+    return Promise.resolve(ok(undefined));
   }
 
   // ---------------------------------------------------------------------------
@@ -421,9 +459,19 @@ export class ImapAdapter implements ProviderAdapter {
   // pre-existing unfetched emails between the old cursor and the new mail event
   // would be permanently skipped. IDLE's only job: detect change → enqueue
   // emx_dispatch → let renew() do the cursor-aware catch-up from lastUid-10.
+  //
+  // IDLE only observes live IMAP EXISTS events — mail that arrived before this session opened
+  // (the gap since the last renew()) produces no EXISTS and would otherwise go unnoticed until
+  // the next 15-minute sweep. So every call also fires an immediate catch-up dispatch up front,
+  // independent of whatever IDLE itself observes during the session.
   // ---------------------------------------------------------------------------
 
   async idleAndDispatch(emx: ExternalMailExchange, timeoutMs: number): Promise<Result<void, never>> {
+    const catchUpResult = await this.signalQueue.send("emx_dispatch", { emxId: emx.id, accountId: emx.accountId });
+    if (catchUpResult.isErr()) {
+      this.logger.error("emx_idle: failed to enqueue pre-IDLE catch-up dispatch", { code: "emx.idle.catch_up_enqueue_failed", emxId: emx.id, error: catchUpResult.error });
+    }
+
     const result = await this.idle(emx, timeoutMs);
     if (result.isErr()) {
       this.logger.warn("emx_idle: IMAP connection failed or dropped", { code: "emx.idle.imap_connect_failed", emxId: emx.id, error: result.error });
@@ -495,7 +543,7 @@ export class ImapAdapter implements ProviderAdapter {
   // ---------------------------------------------------------------------------
 
   private async handleRenewalFailure(emx: ExternalMailExchange, cause: string): Promise<Result<void, ProviderRenewalError>> {
-    this.logger.info("IMAP renewal failed", { code: "imap.renew.failed", emxId: emx.id, cause });
+    this.logger.error("IMAP renewal failed", { code: "imap.renew.failed", emxId: emx.id, cause });
     const failures = (emx.consecutiveFailures ?? 0) + 1;
     if (failures >= 3) {
       const deactivateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {

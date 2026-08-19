@@ -2,7 +2,7 @@ import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { zParse } from "./validate.js";
 import { CreateRuleRequest, UpdateRuleRequest } from "./requests.js";
-import { Rule as RuleSchema, ListRulesResponse, ErrorCode } from "./schemas.js";
+import { Rule as RuleSchema, ListRulesResponse } from "./schemas.js";
 import type * as Api from "./schemas.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { AuditDatabase } from "../database/audit-database.js";
@@ -52,7 +52,7 @@ export class RulesApi {
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { accountDb, auditDb, astValidator, billingHandler, logger } = this;
+    const { accountDb, auditDb, astValidator, logger } = this;
 
     app.openapi(route({
       method: "get",

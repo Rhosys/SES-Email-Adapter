@@ -6,7 +6,7 @@ import type { DbError } from "../errors.js";
 import type { EmailServiceError } from "../email/email-service.js";
 import type { Logger } from "../logger.js";
 import type { EmailService } from "../email/email-service.js";
-import type { Account, AccountOnboarding, Domain, ForwardingTarget } from "../types/index.js";
+import type { Account, Domain, ForwardingTarget } from "../types/index.js";
 import type { OnboardingProgress } from "./compose-followup-email.js";
 import { composeFollowupEmail } from "./compose-followup-email.js";
 import { renderTemplate } from "../email/template-renderer.js";

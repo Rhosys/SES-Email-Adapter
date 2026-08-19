@@ -1,7 +1,6 @@
 import dns from "node:dns/promises";
 import { DateTime } from "luxon";
 import type { Logger } from "../logger.js";
-import type { DbError, Result } from "../errors.js";
 import type { Domain, DnsRecord } from "../types/index.js";
 import { SYSTEM_ACCOUNT_ID } from "../database/system-account-db.js";
 import { S3Client, ListObjectsV2Command } from "@aws-sdk/client-s3";

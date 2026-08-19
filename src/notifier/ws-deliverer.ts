@@ -1,10 +1,10 @@
 import { ApiGatewayManagementApiClient, PostToConnectionCommand } from "@aws-sdk/client-apigatewaymanagementapi";
-import type { Device, Deliverer, DeliveryResult, NotificationPayload, PushPriority } from "./types.js";
+import type { Device, Deliverer, DeliverablePayload, DeliveryResult, PushPriority } from "./types.js";
 
 export class WsDeliverer implements Deliverer {
   constructor(private readonly apigw: ApiGatewayManagementApiClient) {}
 
-  async deliver(device: Device, payload: NotificationPayload, _priority: PushPriority): Promise<DeliveryResult> {
+  async deliver(device: Device, payload: DeliverablePayload, _priority: PushPriority): Promise<DeliveryResult> {
     try {
       await this.apigw.send(
         new PostToConnectionCommand({
