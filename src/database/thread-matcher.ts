@@ -57,7 +57,8 @@ export interface MultiClusterAuroraWriter {
 // Constants
 // ---------------------------------------------------------------------------
 
-const SIMILARITY_THRESHOLD = 0.5;
+const THREAD_MATCH_THRESHOLD = 0.5;
+const SEARCH_THRESHOLD = 0.75;
 const MAX_ATTEMPTS = 3;
 const BASE_DELAY_MS = 1000;
 
@@ -223,7 +224,7 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
             .where(and(
               eq(threadEmbeddings.accountId, accountId),
               eq(threadEmbeddings.recipientAddress, recipientAddress),
-              sql`${threadEmbeddings.embedding} <=> ${toVector(embedding)} < ${SIMILARITY_THRESHOLD}`,
+              sql`${threadEmbeddings.embedding} <=> ${toVector(embedding)} < ${THREAD_MATCH_THRESHOLD}`,
             ))
             .orderBy(sql`${threadEmbeddings.embedding} <=> ${toVector(embedding)}`)
             .limit(1);
@@ -285,7 +286,7 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
             .where(and(
               eq(threadEmbeddings.accountId, opts.accountId),
               eq(threadEmbeddings.recipientAddress, opts.recipientAddress),
-              sql`${threadEmbeddings.embedding} <=> ${toVector(opts.embedding)} < ${SIMILARITY_THRESHOLD}`,
+              sql`${threadEmbeddings.embedding} <=> ${toVector(opts.embedding)} < ${THREAD_MATCH_THRESHOLD}`,
             ))
             .orderBy(sql`${threadEmbeddings.embedding} <=> ${toVector(opts.embedding)}`)
             .limit(1);
@@ -321,7 +322,7 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
               SELECT DISTINCT ON (thread_id) thread_id, embedding <=> ${toVector(embedding)} AS dist
               FROM thread_embeddings
               WHERE account_id = ${accountId}
-                AND embedding <=> ${toVector(embedding)} < ${SIMILARITY_THRESHOLD}
+                AND embedding <=> ${toVector(embedding)} < ${SEARCH_THRESHOLD}
               ORDER BY thread_id, embedding <=> ${toVector(embedding)}
             ) sub
             ORDER BY dist

@@ -148,7 +148,7 @@ describe("ThreadMatcher.searchByVector", () => {
     expect(selectInput.sql!.toLowerCase()).toContain("limit");
   });
 
-  it("uses SIMILARITY_THRESHOLD (0.5) in the distance filter", async () => {
+  it("uses SEARCH_THRESHOLD (0.75) in the distance filter", async () => {
     rdsMock
       .on(BeginTransactionCommand).resolves({ transactionId: "txn-search-5" })
       .on(ExecuteStatementCommand)
@@ -161,11 +161,11 @@ describe("ThreadMatcher.searchByVector", () => {
     const execCalls = rdsMock.commandCalls(ExecuteStatementCommand);
     const selectInput = execCalls[1]!.args[0].input as { sql?: string; parameters?: Array<{ name: string; value: { doubleValue?: number; stringValue?: string } }> };
 
-    // SIMILARITY_THRESHOLD = 0.5 — passed as a parameterized value
+    // SEARCH_THRESHOLD = 0.75 — passed as a parameterized value
     // The SQL uses <=> :N < :M pattern, where the threshold is one of the parameters
     expect(selectInput.sql).toContain("<");
     const thresholdParam = selectInput.parameters?.find(
-      p => p.value.doubleValue === 0.5 || p.value.stringValue === "0.5",
+      p => p.value.doubleValue === 0.75 || p.value.stringValue === "0.75",
     );
     expect(thresholdParam).toBeDefined();
   });
