@@ -92,10 +92,10 @@ export class DraftSendWorker {
       from,
       subject,
       body,
-      inReplyTo: signal.threadId ?? "",
+      inReplyTo: threadId,
       accountId,
       signalId: signal.id,
-      ...(signal.threadId ? { threadId: signal.threadId } : {}),
+      threadId,
     });
 
     if (sendResult.isErr()) {
@@ -107,7 +107,7 @@ export class DraftSendWorker {
           status: "draft",
           sendInitiatedAt: null,
           sendFailureReason: describeSendFailure(sendResult.error),
-          ...(signal.threadId ? { threadId: signal.threadId } : {}),
+          threadId,
         });
         if (failureResult.isErr()) return err(failureResult.error);
         return ok(undefined);
@@ -129,7 +129,7 @@ export class DraftSendWorker {
       sentAt: now,
       sesMessageId: messageId,
       ...(gsi3pk ? { gsi3pk } : {}),
-      ...(signal.threadId ? { threadId: signal.threadId } : {}),
+      threadId,
     });
     if (updateResult.isErr()) return err(updateResult.error);
 

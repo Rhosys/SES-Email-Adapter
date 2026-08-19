@@ -12,7 +12,7 @@ function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit
   return {
     id: "USR#signal-001",
     signalLookupId: "USR#signal-001",
-    threadId: "arc-001",
+    threadId: "thr-001",
     accountId: "acct-001",
     source: "user",
     type: "email",
@@ -109,38 +109,26 @@ describe("DraftSendWorker", () => {
       from: "me@example.com",
       subject: "Hello",
       body: "Hi there",
-      inReplyTo: "arc-001",
+      inReplyTo: "thr-001",
       accountId: "acct-001",
       signalId: "USR#signal-001",
-      threadId: "arc-001",
+      threadId: "thr-001",
     });
     expect(threadDb.updateSignalSendStatus).toHaveBeenCalledWith("acct-001", "USR#signal-001", {
       status: "sent",
       sentAt: expect.any(String),
       sesMessageId: "ses-msg-001",
       gsi3pk: "ACCT#acct-001#MSGID#ses-msg-001@eu-central-1.amazonses.com",
-      threadId: "arc-001",
+      threadId: "thr-001",
     });
   });
 
-  it("omits threadId from sendReply opts when signal has no threadId", async () => {
-    const signalWithoutThread = makeSignal();
-    delete signalWithoutThread.threadId;
-    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(signalWithoutThread));
-
-    const result = await worker.process(PAYLOAD);
-
-    expect(result.isOk()).toBe(true);
-    expect(replySender.sendReply).toHaveBeenCalledWith({
-      to: "recipient@example.com",
-      from: "me@example.com",
-      subject: "Hello",
-      body: "Hi there",
-      inReplyTo: "",
-      accountId: "acct-001",
-      signalId: "USR#signal-001",
-    });
-  });
+  // threadId now always comes from the dispatch payload (DraftSendPayload.threadId: string,
+  // required — it's the DynamoDB GSI1 partition key getSignalById queried with, so the
+  // returned signal can only ever belong to that threadId). There is no longer a code path
+  // where it's omitted; the old "signal has no threadId" branch was dead defensive code
+  // reading a weaker, coincidentally-optional field off the fetched signal instead of the
+  // value already guaranteed non-empty by the payload's type.
 
   it("joins multiple recipients in the to field", async () => {
     vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({
