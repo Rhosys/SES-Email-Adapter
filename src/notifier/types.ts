@@ -1,5 +1,5 @@
 import type { Result } from "neverthrow";
-import type { Thread, ThreadUrgency, PushPriority, Signal } from "../types/index.js";
+import type { Thread, ThreadUrgency, PushPriority, Signal, AuthData } from "../types/index.js";
 import type { DbError } from "../errors.js";
 
 export { urgencyToPushPriority } from "../processor/priority.js";
@@ -25,7 +25,7 @@ export type DeliveryResult =
   | { status: "failed"; reason: string };
 
 export interface Deliverer {
-  deliver(device: Device, payload: NotificationPayload, priority: PushPriority): Promise<DeliveryResult>;
+  deliver(device: Device, payload: DeliverablePayload, priority: PushPriority): Promise<DeliveryResult>;
 }
 
 // ─── Notification Payload ────────────────────────────────────────────────────
@@ -42,6 +42,21 @@ export interface NotificationPayload {
   urgency: ThreadUrgency;
   reason?: NotificationReason;
 }
+
+// In-app OTP banner delivery (WsDeliverer only — see AuthWorkflowHandler). Distinct shape from
+// NotificationPayload, so both live in this union rather than behind an `unknown`/`any` cast at
+// the call site.
+export interface OtpPayload {
+  type: "otp";
+  signalId: string;
+  code: string;
+  authType: AuthData["authType"];
+  expiresInMinutes?: string;
+  originDomain: string;
+  subject: string;
+}
+
+export type DeliverablePayload = NotificationPayload | OtpPayload;
 
 // ─── Notifier Interface ──────────────────────────────────────────────────────
 

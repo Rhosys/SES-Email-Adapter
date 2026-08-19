@@ -1,10 +1,17 @@
 import type { FcmClient, FcmMessage } from "./fcm-client.js";
-import type { Device, Deliverer, DeliveryResult, NotificationPayload, PushPriority } from "./types.js";
+import type { Device, Deliverer, DeliverablePayload, DeliveryResult, NotificationPayload, PushPriority } from "./types.js";
 
 export class FcmDeliverer implements Deliverer {
   constructor(private readonly fcmClient: FcmClient) {}
 
-  async deliver(device: Device, payload: NotificationPayload, priority: PushPriority): Promise<DeliveryResult> {
+  async deliver(device: Device, payload: DeliverablePayload, priority: PushPriority): Promise<DeliveryResult> {
+    // FCM/APNs push is only wired up for thread:updated today — OTP delivery is WsDeliverer-only
+    // (in-app banner, see AuthWorkflowHandler). Fail loudly rather than building a malformed
+    // notification if that ever changes without updating buildFcmMessage below.
+    if (payload.type !== "thread:updated") {
+      return { status: "failed", reason: `FcmDeliverer cannot build a notification for payload type "${payload.type}"` };
+    }
+
     const effectivePriority = priority === "silent" ? "ambient" : priority;
     const message = buildFcmMessage(device.token, payload, effectivePriority);
 
