@@ -225,6 +225,23 @@ export class SignalClassifier {
       }
     }
 
+    // Validate currency fields — must be a valid ISO 4217 code (3 uppercase letters)
+    if (typeof coercedWorkflowData.currency === "string") {
+      const raw = coercedWorkflowData.currency as string;
+      if (!isValidCurrencyCode(raw)) {
+        this.logger.track("Classifier returned invalid currency code — nullified.", {
+          code: "classifier.invalid_currency",
+          value: raw,
+          signalId: input.signalId,
+          accountId: input.accountId,
+          workflow: raw,
+        });
+        coercedWorkflowData.currency = null;
+      } else {
+        coercedWorkflowData.currency = raw.trim().toUpperCase();
+      }
+    }
+
     this.logger.info("Classifier workflowData coercion complete.", {
       code: "classifier.coercion_result",
       signalId: input.signalId,
@@ -361,9 +378,18 @@ function isValidUrl(value: string): boolean {
   }
 }
 
-const UNSPECIFIED_PATTERNS = ["<unspecified>", "not specified", "unknown", "n/a", "none", "unspecified", "null"];
+const UNSPECIFIED_PATTERNS = [
+  "<unspecified>", "not specified", "not_specified", "unknown", "n/a", "na", "none",
+  "unspecified", "null", "undefined", "not available", "not applicable", "—", "-", "tbd",
+];
 
 function isUnspecifiedSentinel(value: string): boolean {
   const lower = value.trim().toLowerCase();
   return UNSPECIFIED_PATTERNS.includes(lower);
+}
+
+const ISO_4217_PATTERN = /^[A-Z]{3}$/;
+
+function isValidCurrencyCode(value: string): boolean {
+  return ISO_4217_PATTERN.test(value.trim().toUpperCase());
 }
