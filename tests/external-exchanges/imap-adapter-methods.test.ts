@@ -211,6 +211,25 @@ describe("ImapAdapter.renew", () => {
       expect.objectContaining({ syncCursor: "123:45", syncState: { uidvalidity: 123, lastUid: 45 } }),
     );
   });
+
+  it("updates lastSyncAt even when no new messages are found — connection health, not new-mail, is what it reflects", async () => {
+    vi.useFakeTimers({ now: new Date("2026-06-15T12:00:00.000Z") });
+    const adapter = createAdapter();
+    const emx = makeEmx({ syncState: { uidvalidity: 123, lastUid: 42 } });
+    mockMailbox.uidValidity = BigInt(123);
+    mockClient.search.mockResolvedValue([]);
+
+    const result = await adapter.renew(emx);
+
+    expect(result.isOk()).toBe(true);
+    expect(mockSignalQueue.sendBatch).not.toHaveBeenCalled();
+    expect(mockDb.updateExternalExchange).toHaveBeenCalledWith(
+      "acct-1",
+      "emx_testABC123",
+      expect.objectContaining({ lastSyncAt: "2026-06-15T12:00:00.000Z" }),
+    );
+    vi.useRealTimers();
+  });
 });
 
 describe("ImapAdapter.fetchMessage", () => {

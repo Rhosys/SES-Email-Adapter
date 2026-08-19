@@ -407,8 +407,11 @@ export class ImapAdapter implements ProviderAdapter {
 
       this.logger.info("IMAP sync complete", { code: "imap.renew.synced", emxId: emx.id, newMessages: batch.length, highestUid });
     } else {
-      // No new messages — just update timing
+      // No new messages — still update lastSyncAt. It reflects "last time we successfully
+      // polled", not "last time we found mail" (same as JMAP's performQueryChanges) — the UI
+      // uses it as a connection-health signal, so it must move on every successful cycle.
       const timingUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
+        lastSyncAt: DateTime.utc().toISO()!,
         nextSyncTime: DateTime.utc().plus({ minutes: 15 }).toISO()!,
         consecutiveFailures: 0,
       });
