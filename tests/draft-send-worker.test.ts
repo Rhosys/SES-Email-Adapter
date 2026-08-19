@@ -147,7 +147,7 @@ describe("DraftSendWorker", () => {
       }));
     });
 
-    it("omits In-Reply-To and logs an error when the linked signal is not found", async () => {
+    it("omits In-Reply-To and tracks (not errors) when the linked signal is not found — expected once creation-time validation is gone", async () => {
       const logger = createMockLogger();
       const localWorker = new DraftSendWorker(threadDb, replySender, logger);
       vi.mocked(threadDb.getSignalById)
@@ -158,7 +158,8 @@ describe("DraftSendWorker", () => {
 
       expect(result.isOk()).toBe(true);
       expect(replySender.sendReply).toHaveBeenCalledWith(expect.not.objectContaining({ inReplyTo: expect.anything() }));
-      expect(logger.calls.some(c => c.method === "error" && c.context?.code === "draft_send.linked_signal_not_found")).toBe(true);
+      expect(logger.calls.some(c => c.method === "track" && c.context?.code === "draft_send.linked_signal_not_found")).toBe(true);
+      expect(logger.calls.some(c => c.method === "error")).toBe(false);
     });
 
     it("omits In-Reply-To and logs a warning when the linked signal has no Message-ID header", async () => {
