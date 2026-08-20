@@ -44,6 +44,7 @@ import type { HealthCheckValidatorPort } from "./adminApi.js";
 import { UnsubscribeApi } from "./unsubscribeApi.js";
 import type { UnsubscribeTokenGenerator } from "../email/unsubscribe-token-generator.js";
 import { ExternalExchangesApi } from "./externalExchangesApi.js";
+import type { ExchangesDatabase } from "../database/exchanges-database.js";
 import type { JmapAdapter } from "../external-exchanges/jmap-adapter.js";
 import { ThreadsApi } from "./threadsApi.js";
 import { ResourcesApi } from "./resourcesApi.js";
@@ -83,6 +84,7 @@ export interface AppDeps {
   threadDb: ThreadDatabase;
   resourceDb: ResourceDatabase;
   accountDb: AccountDatabase;
+  exchangesDb: ExchangesDatabase;
   auditDb: AuditDatabase;
   auth: AuthService;
   access: AccessService;
@@ -115,7 +117,7 @@ export interface AppDeps {
   jmapAdapter: JmapAdapter;
 }
 
-export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, emailContentStore, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator, gmailProvider, outlookProvider, adapters, encryptionManager, signalQueue, jmapAdapter }: AppDeps) {
+export function createApp({ threadDb, resourceDb, accountDb, exchangesDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, emailContentStore, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator, gmailProvider, outlookProvider, adapters, encryptionManager, signalQueue, jmapAdapter }: AppDeps) {
   type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
   const app = new OpenAPIHono<AppEnv>();
 
@@ -336,7 +338,7 @@ export function createApp({ threadDb, resourceDb, accountDb, auditDb, auth, acce
   new UserApi(accountDb, access, logger).register(app, helpers);
   // Resolved per call, not bound at construction: `access` is optional here (see the
   // `authorize` guard above), and only the OAuth connect path ever reaches this.
-  new ExternalExchangesApi(accountDb, adapters, (userId, connectionId) => access.getLinkedIdentity(userId, connectionId), encryptionManager, signalQueue, logger).register(app, helpers);
+  new ExternalExchangesApi(accountDb, exchangesDb, adapters, (userId, connectionId) => access.getLinkedIdentity(userId, connectionId), encryptionManager, signalQueue, logger).register(app, helpers);
 
   // ---------------------------------------------------------------------------
   // Not Found & Method Not Allowed — must be registered after all routes

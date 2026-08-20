@@ -46,7 +46,7 @@ describe("GmailProvider webhook — lastSyncAt", () => {
   it("updates lastSyncAt on every processed push, even when history.list finds no new messages", async () => {
     const emx = makeEmx();
     const db = {
-      listExpiringExchanges: vi.fn().mockResolvedValue(ok([emx])),
+      listExchangesDue: vi.fn().mockResolvedValue(ok([emx])),
       updateExternalExchange: vi.fn().mockResolvedValue(ok(emx)),
     };
     const signalQueue = { sendBatch: vi.fn().mockResolvedValue(ok(undefined)) };

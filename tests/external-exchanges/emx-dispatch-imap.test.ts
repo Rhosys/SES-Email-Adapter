@@ -21,7 +21,7 @@ const mockLogger: Logger = {
 };
 
 const mockDb = {
-  listExpiringExchanges: vi.fn(),
+  listExchangesDue: vi.fn(),
   getExternalExchange: vi.fn(),
 };
 
@@ -80,7 +80,7 @@ beforeEach(() => {
 describe("dispatch worker delegates renewal to the adapter", () => {
   it("calls renew(emx) directly for IMAP — no credentials involved", async () => {
     const emx = makeImapEmx();
-    mockDb.listExpiringExchanges.mockResolvedValue(ok([emx]));
+    mockDb.listExchangesDue.mockResolvedValue(ok([emx]));
     vi.mocked(mockImapAdapter.renew).mockResolvedValue(ok(undefined));
 
     const worker = createWorker();
@@ -104,7 +104,7 @@ describe("dispatch worker delegates renewal to the adapter", () => {
       createdAt: "2025-01-01T00:00:00Z",
       updatedAt: "2025-01-01T00:00:00Z",
     };
-    mockDb.listExpiringExchanges.mockResolvedValue(ok([gmailEmx]));
+    mockDb.listExchangesDue.mockResolvedValue(ok([gmailEmx]));
     vi.mocked(mockGmailAdapter.renew).mockResolvedValue(ok(undefined));
 
     const worker = createWorker();
@@ -122,7 +122,7 @@ describe("dispatch worker delegates renewal to the adapter", () => {
 describe("dispatch worker logs adapter errors", () => {
   it("logs error when IMAP renewal fails", async () => {
     const emx = makeImapEmx();
-    mockDb.listExpiringExchanges.mockResolvedValue(ok([emx]));
+    mockDb.listExchangesDue.mockResolvedValue(ok([emx]));
     vi.mocked(mockImapAdapter.renew).mockResolvedValue(
       err({ kind: "provider_renewal_failed", cause: "invalid credentials" }),
     );
@@ -139,7 +139,7 @@ describe("dispatch worker logs adapter errors", () => {
 
   it("logs success when IMAP renewal succeeds", async () => {
     const emx = makeImapEmx();
-    mockDb.listExpiringExchanges.mockResolvedValue(ok([emx]));
+    mockDb.listExchangesDue.mockResolvedValue(ok([emx]));
     vi.mocked(mockImapAdapter.renew).mockResolvedValue(ok(undefined));
 
     const worker = createWorker();
@@ -168,7 +168,7 @@ describe("dispatch worker logs adapter errors", () => {
       createdAt: "2025-01-01T00:00:00Z",
       updatedAt: "2025-01-01T00:00:00Z",
     };
-    mockDb.listExpiringExchanges.mockResolvedValue(ok([gmailEmx]));
+    mockDb.listExchangesDue.mockResolvedValue(ok([gmailEmx]));
     vi.mocked(mockGmailAdapter.renew).mockResolvedValue(err({ kind: "provider_renewal_failed", cause: "token refresh failed" }));
 
     const worker = createWorker();

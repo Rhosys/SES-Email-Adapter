@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ReplySenderService } from "../../src/notifier/reply-sender.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
+import type { ExchangesDatabase } from "../../src/database/exchanges-database.js";
 import type { ProviderAdapter } from "../../src/external-exchanges/provider-adapter.js";
 import type { Alias, ExternalMailExchange } from "../../src/types/index.js";
 import { ok, err } from "../../src/errors.js";
@@ -26,26 +27,34 @@ function makeLogger(): Logger {
 /** Account DB stub. Default: the from-address is a plain alias with no exchange behind it. */
 function makeAccountDb(overrides: {
   alias?: Alias | null;
-  exchange?: ExternalMailExchange | null;
   senderSetupComplete?: boolean;
 } = {}): AccountDatabase {
   return {
     getAlias: vi.fn().mockResolvedValue(ok(overrides.alias ?? null)),
-    getExternalExchange: vi.fn().mockResolvedValue(ok(overrides.exchange ?? null)),
     getDomainByName: vi.fn().mockResolvedValue(ok(overrides.senderSetupComplete ? { senderSetupComplete: true } : null)),
   } as unknown as AccountDatabase;
+}
+
+function makeExchangesDb(overrides: {
+  exchange?: ExternalMailExchange | null;
+} = {}): ExchangesDatabase {
+  return {
+    getExternalExchange: vi.fn().mockResolvedValue(ok(overrides.exchange ?? null)),
+  } as unknown as ExchangesDatabase;
 }
 
 function makeSender(opts: {
   emailService: EmailService;
   logger?: Logger;
   accountDb?: AccountDatabase;
+  exchangesDb?: ExchangesDatabase;
   adapters?: Record<string, ProviderAdapter>;
 } ): ReplySenderService {
   return new ReplySenderService({
     emailService: opts.emailService,
     logger: opts.logger ?? makeLogger(),
     accountDb: opts.accountDb ?? makeAccountDb(),
+    exchangesDb: opts.exchangesDb ?? makeExchangesDb(),
     adapters: opts.adapters ?? {},
   });
 }
@@ -236,7 +245,7 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     const adapter = makeGmailAdapter(ok({ providerMessageId: "gmail-msg-1", messageId: "abc@mail.gmail.com" }));
     const handler = makeSender({
       emailService,
-      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, exchange: ACTIVE_GMAIL_EXCHANGE }),
+      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE }), exchangesDb: makeExchangesDb({ exchange: ACTIVE_GMAIL_EXCHANGE }),
       adapters: { gmail: adapter },
     });
 
@@ -256,7 +265,8 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     const adapter = makeGmailAdapter(ok({ providerMessageId: "gmail-msg-1" }));
     const handler = makeSender({
       emailService: makeEmailService(),
-      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, exchange }),
+      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE }),
+      exchangesDb: makeExchangesDb({ exchange }),
       adapters: { gmail: adapter },
     });
 
@@ -272,7 +282,7 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     delete legacy.connectionId;
     const handler = makeSender({
       emailService,
-      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, exchange: legacy }),
+      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE }), exchangesDb: makeExchangesDb({ exchange: legacy }),
       adapters: { gmail: makeGmailAdapter(ok({ providerMessageId: "unused" })) },
     });
 
@@ -286,7 +296,7 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     const adapter = makeGmailAdapter(ok({ providerMessageId: "gmail-msg-1" }));
     const handler = makeSender({
       emailService: makeEmailService(),
-      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, exchange: ACTIVE_GMAIL_EXCHANGE }),
+      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE }), exchangesDb: makeExchangesDb({ exchange: ACTIVE_GMAIL_EXCHANGE }),
       adapters: { gmail: adapter },
     });
 
@@ -299,7 +309,7 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     const adapter = makeGmailAdapter(ok({ providerMessageId: "gmail-msg-1" }));
     const handler = makeSender({
       emailService: makeEmailService(),
-      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, exchange: ACTIVE_GMAIL_EXCHANGE }),
+      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE }), exchangesDb: makeExchangesDb({ exchange: ACTIVE_GMAIL_EXCHANGE }),
       adapters: { gmail: adapter },
     });
 
@@ -319,7 +329,7 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     const adapter = makeGmailAdapter(err({ kind: "provider_send_scope_missing", cause: "insufficient permissions" }));
     const handler = makeSender({
       emailService,
-      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, exchange: ACTIVE_GMAIL_EXCHANGE }),
+      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE }), exchangesDb: makeExchangesDb({ exchange: ACTIVE_GMAIL_EXCHANGE }),
       adapters: { gmail: adapter },
     });
 
@@ -337,7 +347,7 @@ describe("ReplySenderService — routing to an external mailbox", () => {
       emailService,
       logger,
       // Alias still points at emx-1, but the exchange has been deleted.
-      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, exchange: null }),
+      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE }), exchangesDb: makeExchangesDb({ exchange: null }),
       adapters: {},
     });
 
@@ -357,9 +367,9 @@ describe("ReplySenderService — routing to an external mailbox", () => {
       emailService,
       accountDb: makeAccountDb({
         alias: { ...ALIAS_WITH_EXCHANGE, aliasAddress: "me@owned.com", domain: "owned.com" },
-        exchange: { ...ACTIVE_GMAIL_EXCHANGE, platform: "imap" },
         senderSetupComplete: true,
       }),
+      exchangesDb: makeExchangesDb({ exchange: { ...ACTIVE_GMAIL_EXCHANGE, platform: "imap" } }),
       adapters: {},
     });
 
@@ -375,8 +385,9 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     const emailService = makeEmailService();
     (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "ses-1" }));
     (emailService as unknown as { platformTenant: string }).platformTenant = "platform-tenant";
-    const accountDb = makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, exchange: ACTIVE_GMAIL_EXCHANGE });
-    const handler = makeSender({ emailService, accountDb });
+    const accountDb = makeAccountDb({ alias: ALIAS_WITH_EXCHANGE });
+    const exchangesDb = makeExchangesDb({ exchange: ACTIVE_GMAIL_EXCHANGE });
+    const handler = makeSender({ emailService, accountDb, exchangesDb });
 
     const result = await handler.sendReply({
       to: "recipient@example.com",
@@ -402,9 +413,10 @@ describe("ReplySenderService — routing to an external mailbox", () => {
   });
 
   it("matches the alias on the bare address when From carries a display name", async () => {
-    const accountDb = makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, exchange: ACTIVE_GMAIL_EXCHANGE });
+    const accountDb = makeAccountDb({ alias: ALIAS_WITH_EXCHANGE });
+    const exchangesDb = makeExchangesDb({ exchange: ACTIVE_GMAIL_EXCHANGE });
     const adapter = makeGmailAdapter(ok({ providerMessageId: "gmail-msg-1" }));
-    const handler = makeSender({ emailService: makeEmailService(), accountDb, adapters: { gmail: adapter } });
+    const handler = makeSender({ emailService: makeEmailService(), accountDb, exchangesDb, adapters: { gmail: adapter } });
 
     await handler.sendReply({ ...REPLY, from: '"Ada Lovelace" <User@Gmail.com>' });
 

@@ -3,7 +3,7 @@ import { ok } from "neverthrow";
 import { JmapAdapter } from "../../src/external-exchanges/jmap-adapter.js";
 import type { ExternalMailExchange } from "../../src/types/index.js";
 import type { EncryptionManager } from "../../src/secrets/encryption-manager.js";
-import type { AccountDatabase } from "../../src/database/account-database.js";
+import type { ExchangesDatabase } from "../../src/database/exchanges-database.js";
 import type { SignalQueue } from "../../src/messaging/signal-queue.js";
 import type { Logger } from "../../src/logger.js";
 
@@ -19,10 +19,10 @@ function mockEncryptionManager(): EncryptionManager {
   } as unknown as EncryptionManager;
 }
 
-function mockDb(): AccountDatabase & { updateExternalExchange: ReturnType<typeof vi.fn> } {
+function mockDb(): ExchangesDatabase & { updateExternalExchange: ReturnType<typeof vi.fn> } {
   return {
     updateExternalExchange: vi.fn(async () => ({ isOk: () => true, isErr: () => false })),
-  } as unknown as AccountDatabase & { updateExternalExchange: ReturnType<typeof vi.fn> };
+  } as unknown as ExchangesDatabase & { updateExternalExchange: ReturnType<typeof vi.fn> };
 }
 
 function mockSignalQueue(): SignalQueue & { send: ReturnType<typeof vi.fn>; sendBatch: ReturnType<typeof vi.fn> } {

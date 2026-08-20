@@ -66,6 +66,7 @@ import { ImapAdapter } from "./external-exchanges/imap-adapter.js";
 import { JmapAdapter } from "./external-exchanges/jmap-adapter.js";
 import { EmxInboundWorker } from "./external-exchanges/emx-inbound-worker.js";
 import { EmxDispatchWorker } from "./external-exchanges/emx-dispatch-worker.js";
+import { ExchangesDatabase } from "./database/exchanges-database.js";
 import { EmxIdleWorker } from "./external-exchanges/emx-idle-worker.js";
 import type { ProviderAdapter } from "./external-exchanges/provider-adapter.js";
 import { EncryptionManager } from "./secrets/encryption-manager.js";
@@ -138,6 +139,7 @@ export class CompositeRoot {
     const embeddingGenerator = new BedrockEmbeddingGenerator(bedrock, logger);
 
     const accountDb = new AccountDatabase(logger);
+    const exchangesDb = new ExchangesDatabase();
     const threadDb = new ThreadDatabase(logger);
     const resourceDb = new ResourceDatabase();
     const processingDb = new ProcessingDatabase();
@@ -187,14 +189,14 @@ export class CompositeRoot {
     };
 
     const gmailProvider = new GmailProvider({
-      db: accountDb,
+      db: exchangesDb,
       signalQueue,
       logger,
       getProviderToken,
     });
 
     const outlookProvider = new OutlookProvider({
-      db: accountDb,
+      db: exchangesDb,
       signalQueue,
       logger,
       getProviderToken,
@@ -206,14 +208,14 @@ export class CompositeRoot {
 
     const imapAdapter = new ImapAdapter({
       encryptionManager,
-      db: accountDb,
+      db: exchangesDb,
       signalQueue,
       logger,
     });
 
     const jmapAdapter = new JmapAdapter({
       encryptionManager,
-      db: accountDb,
+      db: exchangesDb,
       signalQueue,
       logger,
     });
@@ -228,6 +230,7 @@ export class CompositeRoot {
     const externalEmailHandler = new ReplySenderService({
       emailService,
       accountDb,
+      exchangesDb,
       adapters: emxAdapters,
       logger,
     });
@@ -377,18 +380,19 @@ export class CompositeRoot {
       emailContentStore: new EmailContentStore(s3),
       adapters: emxAdapters,
       accountDb,
+      exchangesDb,
       processor,
     });
 
     const emxDispatchWorker = new EmxDispatchWorker({
       logger,
-      db: accountDb,
+      db: exchangesDb,
       adapters: emxAdapters,
     });
 
     const emxIdleWorker = new EmxIdleWorker({
       logger,
-      db: accountDb,
+      db: exchangesDb,
       imapAdapter,
       jmapAdapter,
     });
@@ -434,6 +438,7 @@ export class CompositeRoot {
       threadDb,
       resourceDb,
       accountDb,
+      exchangesDb,
       auditDb,
       auth: authService,
       access: new AuthressAccessService(),

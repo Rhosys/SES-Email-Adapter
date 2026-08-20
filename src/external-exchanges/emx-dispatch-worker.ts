@@ -2,12 +2,12 @@ import { DateTime } from "luxon";
 import { ok } from "../errors.js";
 import type { Result } from "../errors.js";
 import type { ProviderAdapter } from "./provider-adapter.js";
-import type { AccountDatabase } from "../database/account-database.js";
+import type { ExchangesDatabase } from "../database/exchanges-database.js";
 import type { Logger } from "../logger.js";
 
 interface EmxDispatchWorkerDeps {
   logger: Logger;
-  db: AccountDatabase;
+  db: ExchangesDatabase;
   adapters: Record<string, ProviderAdapter>;
 }
 
@@ -18,7 +18,7 @@ export interface EmxDispatchPayload {
 
 export class EmxDispatchWorker {
   private readonly logger: Logger;
-  private readonly db: AccountDatabase;
+  private readonly db: ExchangesDatabase;
   private readonly adapters: Record<string, ProviderAdapter>;
 
   constructor(deps: EmxDispatchWorkerDeps) {
@@ -47,7 +47,7 @@ export class EmxDispatchWorker {
     // Sweep dispatch: process all expiring exchanges
     const horizon = DateTime.utc().plus({ hours: 12 }).toISO()!;
 
-    const expiringResult = await this.db.listExpiringExchanges(horizon);
+    const expiringResult = await this.db.listExchangesDue(horizon);
     if (expiringResult.isErr()) {
       this.logger.error("emx_dispatch: failed to query expiring exchanges", { code: "emx.dispatch.query_failed", error: expiringResult.error });
       return ok(undefined);

@@ -8,6 +8,7 @@ export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
     threadDb: {} as never,
     resourceDb: {} as never,
     accountDb: {} as never,
+    exchangesDb: {} as never,
     auditDb: {} as never,
     auth: {} as never,
     access: { removeUser: async () => ok(undefined), checkAccess: async () => {}, createInvite: async () => ok({ inviteId: "mock" }) } as never,

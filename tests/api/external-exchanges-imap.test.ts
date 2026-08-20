@@ -63,7 +63,15 @@ function makeImapAdapter(): ProviderAdapter {
 
 function makeAccountDb() {
   return {
-    createImapExchange: vi.fn().mockImplementation(async (_accountId: string, data: Record<string, unknown>) => {
+    getAliasByGlobalAddress: vi.fn().mockResolvedValue(ok(null)),
+    ensureAlias: vi.fn().mockResolvedValue(ok({ alias: { id: "a", accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", aliasName: "user", unknownSenderPolicy: "allow_all", createdAt: "", updatedAt: "" }, created: true })),
+    updateAlias: vi.fn().mockResolvedValue(ok({ id: "a", accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", aliasName: "user", unknownSenderPolicy: "allow_all", createdAt: "", updatedAt: "" })),
+  };
+}
+
+function makeExchangesDb() {
+  return {
+    createExternalExchange: vi.fn().mockImplementation(async (_accountId: string, data: Record<string, unknown>) => {
       return ok(makeImapEmx({ status: data.status as ExternalMailExchange["status"], ...(data.errorReason ? { errorReason: data.errorReason as string } : {}) }));
     }),
     getExternalExchange: vi.fn().mockResolvedValue(ok(makeImapEmx())),
@@ -71,10 +79,6 @@ function makeAccountDb() {
     updateExternalExchangeImapConfig: vi.fn().mockResolvedValue(ok(makeImapEmx())),
     updateExternalExchange: vi.fn().mockResolvedValue(ok(makeImapEmx())),
     deleteExternalExchange: vi.fn().mockResolvedValue(ok(undefined)),
-    createExternalExchange: vi.fn().mockResolvedValue(ok(makeImapEmx())),
-    getAliasByGlobalAddress: vi.fn().mockResolvedValue(ok(null)),
-    ensureAlias: vi.fn().mockResolvedValue(ok({ alias: { id: "a", accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", aliasName: "user", unknownSenderPolicy: "allow_all", createdAt: "", updatedAt: "" }, created: true })),
-    updateAlias: vi.fn().mockResolvedValue(ok({ id: "a", accountId: TEST_ACCOUNT_ID, aliasAddress: "user@example.com", domain: "example.com", aliasName: "user", unknownSenderPolicy: "allow_all", createdAt: "", updatedAt: "" })),
   };
 }
 
@@ -112,6 +116,7 @@ async function req(
 
 describe("External Exchanges IMAP API", () => {
   let accountDb: ReturnType<typeof makeAccountDb>;
+  let exchangesDb: ReturnType<typeof makeExchangesDb>;
   let imapAdapter: ProviderAdapter;
   let encryptionManager: ReturnType<typeof makeEncryptionManager>;
   let app: ReturnType<typeof createApp>;
@@ -119,6 +124,7 @@ describe("External Exchanges IMAP API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     accountDb = makeAccountDb();
+    exchangesDb = makeExchangesDb();
     imapAdapter = makeImapAdapter();
     encryptionManager = makeEncryptionManager();
     mockClient.connect.mockResolvedValue(undefined);
@@ -127,6 +133,7 @@ describe("External Exchanges IMAP API", () => {
 
     app = createApp(makeAppDeps({
       accountDb: accountDb as never,
+      exchangesDb: exchangesDb as never,
       auth: { verify: vi.fn().mockResolvedValue(ok({ userId: "user-1" })) },
       access: { checkAccess: async () => {} } as never,
       logger: createMockLogger(),
@@ -149,7 +156,7 @@ describe("External Exchanges IMAP API", () => {
       expect(res.status).toBe(201);
       expect(imapAdapter.activate).toHaveBeenCalledOnce();
       expect(encryptionManager.encrypt).toHaveBeenCalledWith("secret123");
-      expect(accountDb.createImapExchange).toHaveBeenCalledWith(
+      expect(exchangesDb.createExternalExchange).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         expect.objectContaining({
           emailAddress: "user@example.com",
@@ -172,7 +179,7 @@ describe("External Exchanges IMAP API", () => {
       expect(res.status).toBe(201);
       const body = await res.json() as { status: string };
       expect(body.status).toBe("activation_failed");
-      expect(accountDb.createImapExchange).toHaveBeenCalledWith(
+      expect(exchangesDb.createExternalExchange).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         expect.objectContaining({ status: "activation_failed", errorReason: "host unreachable" }),
       );
@@ -186,7 +193,7 @@ describe("External Exchanges IMAP API", () => {
 
       // IMAP schema fails (host too long), falls through to OAuth schema which throws on missing emailAddress
       expect(res.status).toBeGreaterThanOrEqual(400);
-      expect(accountDb.createImapExchange).not.toHaveBeenCalled();
+      expect(exchangesDb.createExternalExchange).not.toHaveBeenCalled();
     });
 
     it("rejects invalid tlsConfig value", async () => {
@@ -195,7 +202,7 @@ describe("External Exchanges IMAP API", () => {
       });
 
       expect(res.status).toBeGreaterThanOrEqual(400);
-      expect(accountDb.createImapExchange).not.toHaveBeenCalled();
+      expect(exchangesDb.createExternalExchange).not.toHaveBeenCalled();
     });
   });
 
@@ -227,7 +234,7 @@ describe("External Exchanges IMAP API", () => {
     });
 
     it("returns 404 when target EMX is not IMAP platform", async () => {
-      accountDb.getExternalExchange.mockResolvedValue(ok({
+      exchangesDb.getExternalExchange.mockResolvedValue(ok({
         ...makeImapEmx(),
         platform: "gmail",
         imapConfig: undefined,
@@ -241,7 +248,7 @@ describe("External Exchanges IMAP API", () => {
     });
 
     it("returns 404 when EMX does not exist", async () => {
-      accountDb.getExternalExchange.mockResolvedValue(ok(null));
+      exchangesDb.getExternalExchange.mockResolvedValue(ok(null));
 
       const res = await req(app, "PATCH", `${A}/external-exchanges/emx_abc123xyz`, {
         body: { imapConfig: { host: "new-host.example.com" } },

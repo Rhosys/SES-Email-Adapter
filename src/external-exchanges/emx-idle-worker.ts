@@ -1,7 +1,7 @@
 import { DateTime } from "luxon";
 import { ok } from "../errors.js";
 import type { Result } from "../errors.js";
-import type { AccountDatabase } from "../database/account-database.js";
+import type { ExchangesDatabase } from "../database/exchanges-database.js";
 import type { Logger } from "../logger.js";
 import type { ImapAdapter } from "./imap-adapter.js";
 import type { JmapAdapter } from "./jmap-adapter.js";
@@ -25,14 +25,14 @@ export interface EmxIdlePayload {
 
 interface EmxIdleWorkerDeps {
   logger: Logger;
-  db: AccountDatabase;
+  db: ExchangesDatabase;
   imapAdapter: ImapAdapter;
   jmapAdapter: JmapAdapter;
 }
 
 export class EmxIdleWorker {
   private readonly logger: Logger;
-  private readonly db: AccountDatabase;
+  private readonly db: ExchangesDatabase;
   private readonly imapAdapter: ImapAdapter;
   private readonly jmapAdapter: JmapAdapter;
 

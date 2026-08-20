@@ -16,6 +16,7 @@
 import type { ReplySender, ReplySendError } from "../processor/processor.js";
 import type { EmailService } from "../email/email-service.js";
 import type { AccountDatabase } from "../database/account-database.js";
+import type { ExchangesDatabase } from "../database/exchanges-database.js";
 import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js";
 import { exchangeCredentials } from "../external-exchanges/provider-adapter.js";
 import type { ExternalMailExchange } from "../types/index.js";
@@ -29,6 +30,7 @@ import type { Logger } from "../logger.js";
 interface ReplySenderDeps {
   emailService: EmailService;
   accountDb: AccountDatabase;
+  exchangesDb: ExchangesDatabase;
   adapters: Record<string, ProviderAdapter>;
   logger: Logger;
 }
@@ -36,12 +38,14 @@ interface ReplySenderDeps {
 export class ReplySenderService implements ReplySender {
   private readonly emailService: EmailService;
   private readonly accountDb: AccountDatabase;
+  private readonly exchangesDb: ExchangesDatabase;
   private readonly adapters: Record<string, ProviderAdapter>;
   private readonly logger: Logger;
 
   constructor(deps: ReplySenderDeps) {
     this.emailService = deps.emailService;
     this.accountDb = deps.accountDb;
+    this.exchangesDb = deps.exchangesDb;
     this.adapters = deps.adapters;
     this.logger = deps.logger;
   }
@@ -104,7 +108,7 @@ export class ReplySenderService implements ReplySender {
     const alias = aliasResult.value;
     if (!alias?.emxId) return ok(null);
 
-    const emxResult = await this.accountDb.getExternalExchange(accountId, alias.emxId);
+    const emxResult = await this.exchangesDb.getExternalExchange(accountId, alias.emxId);
     if (emxResult.isErr()) return err(emxResult.error);
     const emx = emxResult.value;
 

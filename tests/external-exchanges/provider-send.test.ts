@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
 import { GmailProvider } from "../../src/external-exchanges/gmail-provider.js";
-import type { AccountDatabase } from "../../src/database/account-database.js";
+import type { ExchangesDatabase } from "../../src/database/exchanges-database.js";
 import type { SignalQueue } from "../../src/messaging/signal-queue.js";
 import type { ExternalMailExchange } from "../../src/types/index.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
@@ -53,7 +53,7 @@ function errorResponse(status: number, text: string): Response {
 
 function deps(getProviderToken: () => Promise<string> = async () => "token") {
   return {
-    db: {} as AccountDatabase,
+    db: {} as ExchangesDatabase,
     signalQueue: {} as SignalQueue,
     logger: createMockLogger(),
     getProviderToken,

@@ -23,7 +23,7 @@ import type {
 import { exchangeCredentials } from "./provider-adapter.js";
 import { createVerifier } from "./jwks-verifier.js";
 import { extractMsgId } from "../processor/message-id.js";
-import type { AccountDatabase } from "../database/account-database.js";
+import type { ExchangesDatabase } from "../database/exchanges-database.js";
 import type { SignalQueue } from "../messaging/signal-queue.js";
 import type { Logger } from "../logger.js";
 
@@ -54,7 +54,7 @@ interface GraphNotificationBody {
 // ---------------------------------------------------------------------------
 
 interface OutlookProviderDeps {
-  db: AccountDatabase;
+  db: ExchangesDatabase;
   signalQueue: SignalQueue;
   logger: Logger;
   getProviderToken: (userId: string, connectionId: string, connectionUserId: string) => Promise<string>;
@@ -68,7 +68,7 @@ export class OutlookProvider implements ProviderAdapter {
   private publicKeyBase64Cache: string | null = null;
   private readonly kms = new KMSClient({});
   private readonly verifier;
-  private readonly db: AccountDatabase;
+  private readonly db: ExchangesDatabase;
   private readonly signalQueue: SignalQueue;
   private readonly logger: Logger;
   private readonly getProviderToken: OutlookProviderDeps["getProviderToken"];

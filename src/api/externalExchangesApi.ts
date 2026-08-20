@@ -2,6 +2,7 @@ import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
 import { DateTime } from "luxon";
 import type { AccountDatabase } from "../database/account-database.js";
+import type { ExchangesDatabase } from "../database/exchanges-database.js";
 import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js";
 import type { EncryptionManager } from "../secrets/encryption-manager.js";
 import type { Logger } from "../logger.js";
@@ -114,6 +115,7 @@ function serializeEmx(emx: ExternalMailExchange) {
 export class ExternalExchangesApi {
   constructor(
     private readonly accountDb: AccountDatabase,
+    private readonly exchangesDb: ExchangesDatabase,
     private readonly adapters: Record<string, ProviderAdapter>,
     private readonly getLinkedIdentity: AccessService["getLinkedIdentity"],
     private readonly encryptionManager: EncryptionManager,
@@ -122,7 +124,7 @@ export class ExternalExchangesApi {
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { accountDb, adapters, getLinkedIdentity, encryptionManager, signalQueue, logger } = this;
+    const { accountDb, exchangesDb, adapters, getLinkedIdentity, encryptionManager, signalQueue, logger } = this;
 
 
 
@@ -144,7 +146,7 @@ export class ExternalExchangesApi {
       responses: { 200: { content: { "application/json": { schema: ListExternalExchangesResponse } }, description: "List external exchanges" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
-      const result = await accountDb.listExternalExchanges(accountId);
+      const result = await exchangesDb.listExternalExchanges(accountId);
       if (result.isErr()) { logger.error("Failed to list external exchanges", { code: "api.emx.list_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
       return c.json({ exchanges: result.value.map(serializeEmx) }, 200);
     });
@@ -189,7 +191,7 @@ export class ExternalExchangesApi {
         const activateResult = await adapter.activate(tempEmx);
         if (activateResult.isErr()) {
           const errorReason = String(activateResult.error.cause);
-          const result = await accountDb.createExternalExchange(accountId, {
+          const result = await exchangesDb.createExternalExchange(accountId, {
             platform: "imap", emailAddress: imapConfig.username, status: "activation_failed", errorReason,
             imapConfig: { host: imapConfig.host, tlsConfig: imapConfig.tlsConfig, username: imapConfig.username, encryptedPassword },
             lastSyncAt: DateTime.utc().toISO()!,
@@ -201,7 +203,7 @@ export class ExternalExchangesApi {
 
         const { syncCursor, syncState, expiresAt } = activateResult.value;
         const now = DateTime.utc().toISO()!;
-        const result = await accountDb.createExternalExchange(accountId, {
+        const result = await exchangesDb.createExternalExchange(accountId, {
           platform: "imap", emailAddress: imapConfig.username, status: "active",
           imapConfig: { host: imapConfig.host, tlsConfig: imapConfig.tlsConfig, username: imapConfig.username, encryptedPassword },
           syncCursor: syncCursor!, syncState: syncState!, lastSyncAt: now, nextSyncTime: expiresAt,
@@ -241,7 +243,7 @@ export class ExternalExchangesApi {
         const activateResult = await adapter.activate(tempEmx);
         if (activateResult.isErr()) {
           const errorReason = String(activateResult.error.cause);
-          const result = await accountDb.createExternalExchange(accountId, {
+          const result = await exchangesDb.createExternalExchange(accountId, {
             platform: "jmap", emailAddress: jmapConfig.username, status: "activation_failed", errorReason,
             jmapConfig: { sessionUrl: jmapConfig.sessionUrl, username: jmapConfig.username, encryptedPassword, apiUrl: "", downloadUrl: "", jmapAccountId: "", inboxId: "" },
             syncCursor: "", lastSyncAt: DateTime.utc().toISO()!,
@@ -253,7 +255,7 @@ export class ExternalExchangesApi {
 
         const { syncCursor, expiresAt } = activateResult.value;
         // activate() populates apiUrl, downloadUrl, jmapAccountId, inboxId on tempEmx.jmapConfig
-        const result = await accountDb.createExternalExchange(accountId, {
+        const result = await exchangesDb.createExternalExchange(accountId, {
           platform: "jmap", emailAddress: jmapConfig.username, status: "active",
           jmapConfig: { sessionUrl: jmapConfig.sessionUrl, username: jmapConfig.username, encryptedPassword, apiUrl: tempEmx.jmapConfig!.apiUrl, downloadUrl: tempEmx.jmapConfig!.downloadUrl, jmapAccountId: tempEmx.jmapConfig!.jmapAccountId, inboxId: tempEmx.jmapConfig!.inboxId },
           syncCursor: syncCursor!, lastSyncAt: DateTime.utc().toISO()!, nextSyncTime: expiresAt,
@@ -323,12 +325,12 @@ export class ExternalExchangesApi {
       // Idempotency: find existing exchange for same platform + emailAddress. The address is
       // only known now, post-activation, so this check has to come after — an idempotency key
       // is only meaningful once it's the real address, not a guess at one.
-      const listResult = await accountDb.listExternalExchanges(accountId);
+      const listResult = await exchangesDb.listExternalExchanges(accountId);
       const existing = listResult.isOk()
         ? listResult.value.find((e) => e.platform === body.platform && e.emailAddress === emailAddress)
         : undefined;
       if (existing) {
-        const updateResult = await accountDb.updateExternalExchange(accountId, existing.id, { status: "active", syncCursor: syncCursor!, expiresAt, providerSubscriptionId, userId, connectionUserId, connectionId, consecutiveFailures: 0 }, ["errorReason"]);
+        const updateResult = await exchangesDb.updateExternalExchange(accountId, existing.id, { status: "active", syncCursor: syncCursor!, expiresAt, providerSubscriptionId, userId, connectionUserId, connectionId, consecutiveFailures: 0 }, ["errorReason"]);
         if (updateResult.isErr()) { logger.error("Failed to update exchange record", { code: "api.emx.create_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
         const reactivateEnsureResult = await accountDb.ensureAlias(accountId, emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined, existing.id);
         if (reactivateEnsureResult.isErr()) { logger.warn("Failed to ensure alias for reactivated exchange", { code: "api.emx.oauth.reactivate_ensure_alias_failed", accountId, error: reactivateEnsureResult.error }); }
@@ -336,7 +338,7 @@ export class ExternalExchangesApi {
         logger.info("OAuth exchange reactivated", { code: "api.emx.oauth.reactivated", accountId, emxId: existing.id, platform: body.platform });
         return c.json(serializeEmx(updateResult.value), 200);
       }
-      const result = await accountDb.createExternalExchange(accountId, { platform: body.platform, emailAddress, status: "active", syncCursor: syncCursor!, lastSyncAt: DateTime.utc().toISO()!, expiresAt, providerSubscriptionId, userId, connectionUserId, connectionId });
+      const result = await exchangesDb.createExternalExchange(accountId, { platform: body.platform, emailAddress, status: "active", syncCursor: syncCursor!, lastSyncAt: DateTime.utc().toISO()!, expiresAt, providerSubscriptionId, userId, connectionUserId, connectionId });
       if (result.isErr()) { logger.error("Failed to create exchange record", { code: "api.emx.create_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
       const oauthEnsureResult = await accountDb.ensureAlias(accountId, emailAddress, "allow_all", oauthAliasCheck.isOk() ? oauthAliasCheck.value : undefined, result.value.id);
       if (oauthEnsureResult.isErr()) { logger.warn("Failed to ensure alias for new OAuth exchange", { code: "api.emx.oauth.ensure_alias_failed", accountId, error: oauthEnsureResult.error }); }
@@ -356,7 +358,7 @@ export class ExternalExchangesApi {
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const emxId = c.req.param("emxId")!;
-      const result = await accountDb.getExternalExchange(accountId, emxId);
+      const result = await exchangesDb.getExternalExchange(accountId, emxId);
       if (result.isErr()) { logger.error("Failed to get external exchange", { code: "api.emx.get_failed", error: result.error }); return err(c, 500, "Internal Server Error"); }
       if (!result.value) return err(c, 404, "Exchange not found");
       return c.json(serializeEmx(result.value), 200);
@@ -379,7 +381,7 @@ export class ExternalExchangesApi {
       logger.info("Patching external exchange", { code: "api.emx.patch", accountId, emxId });
 
       // Fetch existing EMX
-      const getResult = await accountDb.getExternalExchange(accountId, emxId);
+      const getResult = await exchangesDb.getExternalExchange(accountId, emxId);
       if (getResult.isErr()) { logger.error("Failed to get exchange for patch", { code: "api.emx.patch.get_failed", error: getResult.error }); return err(c, 500, "Internal Server Error"); }
       const emx = getResult.value;
       if (!emx) return err(c, 404, "Exchange not found");
@@ -431,7 +433,7 @@ export class ExternalExchangesApi {
         const { syncCursor: newSyncCursor, expiresAt: newExpiresAt } = testResult.value;
         const patchNow = DateTime.utc().toISO()!;
 
-        const updateResult = await accountDb.updateExternalExchangeJmapConfig(accountId, emxId, {
+        const updateResult = await exchangesDb.updateExternalExchangeJmapConfig(accountId, emxId, {
           sessionUrl: tempEmx.jmapConfig!.sessionUrl,
           username: tempEmx.jmapConfig!.username,
           encryptedPassword,
@@ -443,7 +445,7 @@ export class ExternalExchangesApi {
         if (updateResult.isErr()) { logger.error("Failed to update JMAP exchange", { code: "api.emx.patch.jmap_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
 
         // Always persist fresh syncCursor and timing from the activation test
-        const jmapTimingResult = await accountDb.updateExternalExchange(accountId, emxId, { syncCursor: newSyncCursor!, lastSyncAt: patchNow, nextSyncTime: newExpiresAt });
+        const jmapTimingResult = await exchangesDb.updateExternalExchange(accountId, emxId, { syncCursor: newSyncCursor!, lastSyncAt: patchNow, nextSyncTime: newExpiresAt });
         if (jmapTimingResult.isErr()) { logger.warn("Failed to update JMAP sync timing", { code: "api.emx.patch.jmap.timing_failed", accountId, emxId, error: jmapTimingResult.error }); }
 
         // Ensure alias exists for the EMX email address (may have been missed or deleted)
@@ -452,12 +454,12 @@ export class ExternalExchangesApi {
 
         // Re-activate if previously failed — connection test just proved creds work
         if (emx.status === "activation_failed") {
-          const reactivateResult = await accountDb.updateExternalExchange(accountId, emxId, { status: "active", nextSyncTime: newExpiresAt, consecutiveFailures: 0 }, ["errorReason"]);
+          const reactivateResult = await exchangesDb.updateExternalExchange(accountId, emxId, { status: "active", nextSyncTime: newExpiresAt, consecutiveFailures: 0 }, ["errorReason"]);
           if (reactivateResult.isErr()) { logger.error("Failed to reactivate JMAP exchange", { code: "api.emx.patch.jmap.reactivate_failed", accountId, emxId, error: reactivateResult.error }); return err(c, 500, "Internal Server Error"); }
         }
 
         await triggerDispatch(accountId, emxId);
-        const freshResult = await accountDb.getExternalExchange(accountId, emxId);
+        const freshResult = await exchangesDb.getExternalExchange(accountId, emxId);
         logger.info("JMAP exchange patched", { code: "api.emx.patch.jmap.done", accountId, emxId, previousStatus: emx.status, reactivated: emx.status === "activation_failed" });
         if (freshResult.isOk() && freshResult.value) { return c.json(serializeEmx(freshResult.value), 200); }
         return c.json(serializeEmx(updateResult.value), 200);
@@ -513,13 +515,13 @@ export class ExternalExchangesApi {
       const { syncCursor: newSyncCursor, syncState: newSyncState, expiresAt: newExpiresAt } = testResult.value;
       const patchNow = DateTime.utc().toISO()!;
 
-      const updateResult = await accountDb.updateExternalExchangeImapConfig(accountId, emxId, {
+      const updateResult = await exchangesDb.updateExternalExchangeImapConfig(accountId, emxId, {
         host: mergedHost, tlsConfig: mergedTlsConfig, username: mergedUsername, encryptedPassword,
       });
       if (updateResult.isErr()) { logger.error("Failed to update exchange", { code: "api.emx.patch_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
 
       // Always persist fresh syncCursor + syncState and timing from the activation test
-      const imapTimingResult = await accountDb.updateExternalExchange(accountId, emxId, { syncCursor: newSyncCursor!, syncState: newSyncState!, lastSyncAt: patchNow, nextSyncTime: newExpiresAt });
+      const imapTimingResult = await exchangesDb.updateExternalExchange(accountId, emxId, { syncCursor: newSyncCursor!, syncState: newSyncState!, lastSyncAt: patchNow, nextSyncTime: newExpiresAt });
       if (imapTimingResult.isErr()) { logger.warn("Failed to update IMAP sync timing", { code: "api.emx.patch.imap.timing_failed", accountId, emxId, error: imapTimingResult.error }); }
 
       // Ensure alias exists for the EMX email address (may have been missed or deleted)
@@ -528,12 +530,12 @@ export class ExternalExchangesApi {
 
       // Re-activate if previously failed — connection test just proved creds work
       if (emx.status === "activation_failed") {
-        const imapReactivateResult = await accountDb.updateExternalExchange(accountId, emxId, { status: "active", nextSyncTime: newExpiresAt, consecutiveFailures: 0 }, ["errorReason"]);
+        const imapReactivateResult = await exchangesDb.updateExternalExchange(accountId, emxId, { status: "active", nextSyncTime: newExpiresAt, consecutiveFailures: 0 }, ["errorReason"]);
         if (imapReactivateResult.isErr()) { logger.error("Failed to reactivate IMAP exchange", { code: "api.emx.patch.imap.reactivate_failed", accountId, emxId, error: imapReactivateResult.error }); return err(c, 500, "Internal Server Error"); }
       }
 
       await triggerDispatch(accountId, emxId);
-      const freshResult = await accountDb.getExternalExchange(accountId, emxId);
+      const freshResult = await exchangesDb.getExternalExchange(accountId, emxId);
       logger.info("IMAP exchange patched", { code: "api.emx.patch.imap.done", accountId, emxId, previousStatus: emx.status, reactivated: emx.status === "activation_failed" });
       if (freshResult.isOk() && freshResult.value) { return c.json(serializeEmx(freshResult.value), 200); }
       return c.json(serializeEmx(updateResult.value), 200);
@@ -551,7 +553,7 @@ export class ExternalExchangesApi {
       const accountId = c.req.param("accountId")!;
       const emxId = c.req.param("emxId")!;
       logger.info("Deleting external exchange", { code: "api.emx.delete", accountId, emxId });
-      const getResult = await accountDb.getExternalExchange(accountId, emxId);
+      const getResult = await exchangesDb.getExternalExchange(accountId, emxId);
       if (getResult.isErr()) { logger.error("Failed to get exchange for delete", { code: "api.emx.delete.get_failed", error: getResult.error }); return err(c, 500, "Internal Server Error"); }
       const emx = getResult.value;
       if (!emx) return err(c, 404, "Exchange not found");
@@ -576,7 +578,7 @@ export class ExternalExchangesApi {
         logger.error("Failed to unlink alias from deleted exchange — outbound mail from this address will not route through SES.", { code: "api.emx.alias_unlink_failed", accountId, aliasAddress: emx.emailAddress, error: unlinkResult.error });
       }
 
-      const deleteResult = await accountDb.deleteExternalExchange(accountId, emxId);
+      const deleteResult = await exchangesDb.deleteExternalExchange(accountId, emxId);
       if (deleteResult.isErr()) { logger.error("Failed to delete exchange", { code: "api.emx.delete_failed", error: deleteResult.error }); return err(c, 500, "Internal Server Error"); }
       logger.info("Exchange deleted", { code: "api.emx.deleted", accountId, emxId, platform: emx.platform });
       return new Response(null, { status: 204 });

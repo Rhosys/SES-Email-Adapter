@@ -21,7 +21,7 @@ const mockLogger: Logger = {
 };
 
 const mockDb = {
-  listExpiringExchanges: vi.fn(),
+  listExchangesDue: vi.fn(),
   getExternalExchange: vi.fn(),
 };
 
@@ -76,7 +76,7 @@ beforeEach(() => {
 describe("dispatch worker delegates renewal to the adapter", () => {
   it("calls renew(emx) directly for JMAP", async () => {
     const emx = makeJmapEmx();
-    mockDb.listExpiringExchanges.mockResolvedValue(ok([emx]));
+    mockDb.listExchangesDue.mockResolvedValue(ok([emx]));
     vi.mocked(mockJmapAdapter.renew).mockResolvedValue(ok(undefined));
 
     const worker = createWorker();
@@ -94,7 +94,7 @@ describe("dispatch worker delegates renewal to the adapter", () => {
 describe("dispatch worker logs JMAP adapter errors", () => {
   it("logs error when JMAP renewal fails", async () => {
     const emx = makeJmapEmx();
-    mockDb.listExpiringExchanges.mockResolvedValue(ok([emx]));
+    mockDb.listExchangesDue.mockResolvedValue(ok([emx]));
     vi.mocked(mockJmapAdapter.renew).mockResolvedValue(
       err({ kind: "provider_renewal_failed", cause: "invalid credentials" }),
     );
@@ -111,7 +111,7 @@ describe("dispatch worker logs JMAP adapter errors", () => {
 
   it("logs success when JMAP renewal succeeds", async () => {
     const emx = makeJmapEmx();
-    mockDb.listExpiringExchanges.mockResolvedValue(ok([emx]));
+    mockDb.listExchangesDue.mockResolvedValue(ok([emx]));
     vi.mocked(mockJmapAdapter.renew).mockResolvedValue(ok(undefined));
 
     const worker = createWorker();

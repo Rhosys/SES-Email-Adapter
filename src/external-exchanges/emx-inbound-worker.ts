@@ -6,6 +6,7 @@ import type { InboundSignalMessage } from "../processor/processor.js";
 import type { Logger } from "../logger.js";
 import type { EmailContentStore } from "../content-store.js";
 import type { AccountDatabase } from "../database/account-database.js";
+import type { ExchangesDatabase } from "../database/exchanges-database.js";
 
 export interface EmxInboundPayload {
   source: "gmail" | "outlook" | "imap" | "jmap";
@@ -23,6 +24,7 @@ interface EmxInboundWorkerDeps {
   emailContentStore: EmailContentStore;
   adapters: Record<string, ProviderAdapter>;
   accountDb: AccountDatabase;
+  exchangesDb: ExchangesDatabase;
   processor: EmxProcessor;
 }
 
@@ -31,6 +33,7 @@ export class EmxInboundWorker {
   private readonly emailContentStore: EmailContentStore;
   private readonly adapters: Record<string, ProviderAdapter>;
   private readonly accountDb: AccountDatabase;
+  private readonly exchangesDb: ExchangesDatabase;
   private readonly processor: EmxProcessor;
 
   constructor(deps: EmxInboundWorkerDeps) {
@@ -38,6 +41,7 @@ export class EmxInboundWorker {
     this.emailContentStore = deps.emailContentStore;
     this.adapters = deps.adapters;
     this.accountDb = deps.accountDb;
+    this.exchangesDb = deps.exchangesDb;
     this.processor = deps.processor;
   }
 
@@ -55,7 +59,7 @@ export class EmxInboundWorker {
       return ok(undefined);
     }
 
-    const emxResult = await this.accountDb.getExternalExchange(accountId, emxId);
+    const emxResult = await this.exchangesDb.getExternalExchange(accountId, emxId);
     if (emxResult.isErr()) {
       this.logger.error("emx_inbound: failed to load EMX record", { code: "emx.inbound.emx_load_failed", source, emxId, error: emxResult.error });
       return err({ kind: "provider_fetch_failed", cause: emxResult.error });

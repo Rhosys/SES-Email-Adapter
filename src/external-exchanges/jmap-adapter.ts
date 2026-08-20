@@ -14,7 +14,7 @@ import type {
   ProviderFetchError,
 } from "./provider-adapter.js";
 import type { EncryptionManager } from "../secrets/encryption-manager.js";
-import type { AccountDatabase } from "../database/account-database.js";
+import type { ExchangesDatabase } from "../database/exchanges-database.js";
 import type { SignalQueue } from "../messaging/signal-queue.js";
 import type { Logger } from "../logger.js";
 
@@ -133,14 +133,14 @@ export async function jmapCall(apiUrl: string, auth: string, using: readonly str
 
 interface JmapAdapterDeps {
   encryptionManager: EncryptionManager;
-  db: AccountDatabase;
+  db: ExchangesDatabase;
   signalQueue: SignalQueue;
   logger: Logger;
 }
 
 export class JmapAdapter implements ProviderAdapter {
   private readonly encryptionManager: EncryptionManager;
-  private readonly db: AccountDatabase;
+  private readonly db: ExchangesDatabase;
   private readonly signalQueue: SignalQueue;
   private readonly logger: Logger;
 

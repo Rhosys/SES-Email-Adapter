@@ -40,13 +40,18 @@ const LINKED_GOOGLE_ID = "google-sub-12345";
 
 function makeAccountDb() {
   return {
-    listExternalExchanges: vi.fn().mockResolvedValue(ok([])),
     getAliasByGlobalAddress: vi.fn().mockResolvedValue(ok(null)),
+    ensureAlias: vi.fn().mockResolvedValue(ok({ alias: { aliasAddress: "user@gmail.com" }, created: true })),
+    updateAlias: vi.fn().mockResolvedValue(ok({ aliasAddress: "user@gmail.com" })),
+  };
+}
+
+function makeExchangesDb() {
+  return {
+    listExternalExchanges: vi.fn().mockResolvedValue(ok([])),
     createExternalExchange: vi.fn().mockImplementation((accountId: string, data: Record<string, unknown>) =>
       Promise.resolve(ok({ id: "emx-1", accountId, ...data, createdAt: "", updatedAt: "" }))),
     updateExternalExchange: vi.fn().mockResolvedValue(ok({ id: "emx-1", accountId: "acct-1", platform: "gmail", emailAddress: "user@gmail.com", status: "active", createdAt: "", updatedAt: "" })),
-    ensureAlias: vi.fn().mockResolvedValue(ok({ alias: { aliasAddress: "user@gmail.com" }, created: true })),
-    updateAlias: vi.fn().mockResolvedValue(ok({ aliasAddress: "user@gmail.com" })),
   };
 }
 
@@ -62,6 +67,7 @@ function makeGmailAdapter(activateResult: unknown = ok({ syncCursor: "1", expire
 
 function build(overrides: { linkedIdentity?: unknown; activateResult?: unknown } = {}) {
   const accountDb = makeAccountDb();
+  const exchangesDb = makeExchangesDb();
   const logger = createMockLogger();
   const adapter = makeGmailAdapter(overrides.activateResult);
   const getLinkedIdentity = vi.fn().mockResolvedValue(
@@ -69,12 +75,13 @@ function build(overrides: { linkedIdentity?: unknown; activateResult?: unknown }
   );
   const app = createApp(makeAppDeps({
     accountDb: accountDb as never,
+    exchangesDb: exchangesDb as never,
     auth: { verify: vi.fn().mockResolvedValue(ok({ userId: CALLER_USER_ID })) },
     access: { checkAccess: async () => {}, getLinkedIdentity } as never,
     logger,
     adapters: { gmail: adapter },
   }));
-  return { app, accountDb, adapter, logger: logger as MockLogger, getLinkedIdentity };
+  return { app, accountDb, exchangesDb, adapter, logger: logger as MockLogger, getLinkedIdentity };
 }
 
 describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
@@ -91,7 +98,7 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     });
 
     expect(res.status).toBe(201);
-    const stored = ctx.accountDb.createExternalExchange.mock.calls[0]![1];
+    const stored = ctx.exchangesDb.createExternalExchange.mock.calls[0]![1];
     expect(stored.userId).toBe(CALLER_USER_ID);
     expect(ctx.getLinkedIdentity).toHaveBeenCalledWith(CALLER_USER_ID, "google");
   });
@@ -102,7 +109,7 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     });
 
     expect(res.status).toBe(201);
-    expect(ctx.accountDb.createExternalExchange.mock.calls[0]![1].connectionUserId).toBe(LINKED_GOOGLE_ID);
+    expect(ctx.exchangesDb.createExternalExchange.mock.calls[0]![1].connectionUserId).toBe(LINKED_GOOGLE_ID);
   });
 
   it("refuses the connection when the caller has no identity linked under this connection", async () => {
@@ -113,7 +120,7 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     });
 
     expect(res.status).toBe(422);
-    expect(unlinked.accountDb.createExternalExchange).not.toHaveBeenCalled();
+    expect(unlinked.exchangesDb.createExternalExchange).not.toHaveBeenCalled();
   });
 
   // activate() resolving its own credentials is the real test of whether this connection is
@@ -126,7 +133,7 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     });
 
     expect(res.status).toBe(422);
-    expect(noCredentials.accountDb.createExternalExchange).not.toHaveBeenCalled();
+    expect(noCredentials.exchangesDb.createExternalExchange).not.toHaveBeenCalled();
   });
 
   it("passes the caller's identity to activate() and persists the address activate() reports, never the request's", async () => {
@@ -138,7 +145,7 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
 
     expect(res.status).toBe(201);
     expect(ctx.adapter.activate.mock.calls[0]![1]).toEqual({ userId: CALLER_USER_ID, connectionId: "google", connectionUserId: LINKED_GOOGLE_ID });
-    expect(ctx.accountDb.createExternalExchange.mock.calls[0]![1].emailAddress).toBe("user@gmail.com");
+    expect(ctx.exchangesDb.createExternalExchange.mock.calls[0]![1].emailAddress).toBe("user@gmail.com");
     expect(ctx.accountDb.ensureAlias.mock.calls[0]![1]).toBe("user@gmail.com");
   });
 
@@ -150,6 +157,6 @@ describe("POST /accounts/:accountId/external-exchanges (OAuth)", () => {
     });
 
     expect(res.status).toBe(503);
-    expect(unreachable.accountDb.createExternalExchange).not.toHaveBeenCalled();
+    expect(unreachable.exchangesDb.createExternalExchange).not.toHaveBeenCalled();
   });
 });

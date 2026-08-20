@@ -63,7 +63,15 @@ function makeJmapAdapter(): ProviderAdapter {
 
 function makeAccountDb() {
   return {
-    createJmapExchange: vi.fn().mockImplementation(async (_accountId: string, data: Record<string, unknown>) => {
+    getAliasByGlobalAddress: vi.fn().mockResolvedValue(ok(null)),
+    ensureAlias: vi.fn().mockResolvedValue(ok({ alias: { id: "a", accountId: TEST_ACCOUNT_ID, aliasAddress: "user@fastmail.com", domain: "fastmail.com", aliasName: "user", unknownSenderPolicy: "allow_all", createdAt: "", updatedAt: "" }, created: true })),
+    updateAlias: vi.fn().mockResolvedValue(ok({ id: "a", accountId: TEST_ACCOUNT_ID, aliasAddress: "user@fastmail.com", domain: "fastmail.com", aliasName: "user", unknownSenderPolicy: "allow_all", createdAt: "", updatedAt: "" })),
+  };
+}
+
+function makeExchangesDb() {
+  return {
+    createExternalExchange: vi.fn().mockImplementation(async (_accountId: string, data: Record<string, unknown>) => {
       return ok(makeJmapEmx({ status: data.status as ExternalMailExchange["status"], ...(data.errorReason ? { errorReason: data.errorReason as string } : {}) }));
     }),
     getExternalExchange: vi.fn().mockResolvedValue(ok(makeJmapEmx())),
@@ -71,10 +79,6 @@ function makeAccountDb() {
     updateExternalExchangeJmapConfig: vi.fn().mockResolvedValue(ok(makeJmapEmx())),
     updateExternalExchange: vi.fn().mockResolvedValue(ok(makeJmapEmx())),
     deleteExternalExchange: vi.fn().mockResolvedValue(ok(undefined)),
-    createExternalExchange: vi.fn().mockResolvedValue(ok(makeJmapEmx())),
-    getAliasByGlobalAddress: vi.fn().mockResolvedValue(ok(null)),
-    ensureAlias: vi.fn().mockResolvedValue(ok({ alias: { id: "a", accountId: TEST_ACCOUNT_ID, aliasAddress: "user@fastmail.com", domain: "fastmail.com", aliasName: "user", unknownSenderPolicy: "allow_all", createdAt: "", updatedAt: "" }, created: true })),
-    updateAlias: vi.fn().mockResolvedValue(ok({ id: "a", accountId: TEST_ACCOUNT_ID, aliasAddress: "user@fastmail.com", domain: "fastmail.com", aliasName: "user", unknownSenderPolicy: "allow_all", createdAt: "", updatedAt: "" })),
   };
 }
 
@@ -112,6 +116,7 @@ async function req(
 
 describe("External Exchanges JMAP API", () => {
   let accountDb: ReturnType<typeof makeAccountDb>;
+  let exchangesDb: ReturnType<typeof makeExchangesDb>;
   let jmapAdapter: ProviderAdapter;
   let encryptionManager: ReturnType<typeof makeEncryptionManager>;
   let app: ReturnType<typeof createApp>;
@@ -119,12 +124,14 @@ describe("External Exchanges JMAP API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     accountDb = makeAccountDb();
+    exchangesDb = makeExchangesDb();
     jmapAdapter = makeJmapAdapter();
     encryptionManager = makeEncryptionManager();
     mockFetchSession.mockResolvedValue(ok({ apiUrl: "https://api.fastmail.com/jmap/api/", downloadUrl: "https://dl.fastmail.com/{accountId}/{blobId}/{name}", primaryAccounts: { "urn:ietf:params:jmap:mail": "u1234567" } }));
 
     app = createApp(makeAppDeps({
       accountDb: accountDb as never,
+      exchangesDb: exchangesDb as never,
       auth: { verify: vi.fn().mockResolvedValue(ok({ userId: "user-1" })) },
       access: { checkAccess: async () => {} } as never,
       logger: createMockLogger(),
@@ -147,7 +154,7 @@ describe("External Exchanges JMAP API", () => {
       expect(res.status).toBe(201);
       expect(jmapAdapter.activate).toHaveBeenCalledOnce();
       expect(encryptionManager.encrypt).toHaveBeenCalledWith("app-pass-123");
-      expect(accountDb.createJmapExchange).toHaveBeenCalledWith(
+      expect(exchangesDb.createExternalExchange).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         expect.objectContaining({
           emailAddress: "user@fastmail.com",
@@ -169,7 +176,7 @@ describe("External Exchanges JMAP API", () => {
       expect(res.status).toBe(201);
       const body = await res.json() as { status: string };
       expect(body.status).toBe("activation_failed");
-      expect(accountDb.createJmapExchange).toHaveBeenCalledWith(
+      expect(exchangesDb.createExternalExchange).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
         expect.objectContaining({ status: "activation_failed", errorReason: "invalid credentials" }),
       );
@@ -202,7 +209,7 @@ describe("External Exchanges JMAP API", () => {
     });
 
     it("returns 404 when target EMX is not JMAP platform", async () => {
-      accountDb.getExternalExchange.mockResolvedValue(ok({
+      exchangesDb.getExternalExchange.mockResolvedValue(ok({
         ...makeJmapEmx(),
         platform: "gmail",
         jmapConfig: undefined,

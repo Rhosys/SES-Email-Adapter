@@ -18,7 +18,7 @@ import type {
 import { createVerifier } from "./jwks-verifier.js";
 import { exchangeCredentials } from "./provider-adapter.js";
 import { extractMsgId } from "../processor/message-id.js";
-import type { AccountDatabase } from "../database/account-database.js";
+import type { ExchangesDatabase } from "../database/exchanges-database.js";
 import type { SignalQueue } from "../messaging/signal-queue.js";
 import type { Logger } from "../logger.js";
 
@@ -26,7 +26,7 @@ const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const PUBSUB_TOPIC = "projects/numaeel-mail/topics/gmail-notifications";
 
 interface GmailProviderDeps {
-  db: AccountDatabase;
+  db: ExchangesDatabase;
   signalQueue: SignalQueue;
   logger: Logger;
   getProviderToken: (userId: string, connectionId: string, connectionUserId: string) => Promise<string>;
@@ -34,7 +34,7 @@ interface GmailProviderDeps {
 
 export class GmailProvider implements ProviderAdapter {
   private readonly verifier;
-  private readonly db: AccountDatabase;
+  private readonly db: ExchangesDatabase;
   private readonly signalQueue: SignalQueue;
   private readonly logger: Logger;
   private readonly getProviderToken: GmailProviderDeps["getProviderToken"];
@@ -305,7 +305,7 @@ export class GmailProvider implements ProviderAdapter {
 
     const { emailAddress, historyId } = decoded;
 
-    const allActiveResult = await this.db.listExpiringExchanges("9999-12-31T23:59:59Z");
+    const allActiveResult = await this.db.listExchangesDue("9999-12-31T23:59:59Z");
     if (allActiveResult.isErr()) {
       this.logger.error("Gmail webhook: DB query failed", { code: "emx.gmail.db_error", error: allActiveResult.error });
       return c.json({}, 200);
