@@ -1,4 +1,5 @@
 import type { APIGatewayProxyEventV2, SQSEvent, Context, APIGatewayProxyResultV2, EventBridgeEvent, APIGatewayProxyWebsocketEventV2 } from "aws-lambda";
+import { PostToConnectionCommand } from "@aws-sdk/client-apigatewaymanagementapi";
 import { SQS_MESSAGE_TYPES } from "./types/index.js";
 import { ok, err, processorError } from "./errors.js";
 import type { Result } from "./errors.js";
@@ -17,7 +18,7 @@ const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND, MSG_TYPE_SIG
 const RETRY_TRACK_THRESHOLD = 30;
 
 const root = new CompositeRoot();
-const { logger, processor, onboardingHandler, domainHealthJob, healthcheckJob, reindexWorker, draftSendWorker, followupHandler, rsvpReminderHandler, digestDispatcher, digestWorker, sesFeedbackProcessor, authService, deviceStore, emxInboundWorker, emxDispatchWorker, emxIdleWorker, app } = root;
+const { logger, processor, onboardingHandler, domainHealthJob, healthcheckJob, reindexWorker, draftSendWorker, followupHandler, rsvpReminderHandler, digestDispatcher, digestWorker, sesFeedbackProcessor, authService, deviceStore, emxInboundWorker, emxDispatchWorker, emxIdleWorker, wsApiClient, app } = root;
 // ---------------------------------------------------------------------------
 // Wiring lives in CompositeRoot (see composite-root.ts).
 // ---------------------------------------------------------------------------
@@ -462,6 +463,17 @@ async function handleWebSocket(event: APIGatewayProxyWebsocketEventV2): Promise<
         ttl: Math.floor(Date.now() / 1000) + 7200,
       });
       if (saveResult.isErr()) { logger.warn("Failed to save WebSocket device", { code: "handler.ws.save_device_failed", accountId, connectionId, error: saveResult.error }); }
+
+      // Send confirmation so the client knows the connection is fully established
+      try {
+        await wsApiClient.send(new PostToConnectionCommand({
+          ConnectionId: connectionId,
+          Data: new TextEncoder().encode(JSON.stringify({ type: "connected", accountId, connectionId, timestamp: DateTime.utc().toISO() })),
+        }));
+      } catch (e) {
+        logger.warn("Failed to send WS connect confirmation", { code: "handler.ws.confirm_failed", connectionId, error: e });
+      }
+
       return { statusCode: 200 };
     }
 

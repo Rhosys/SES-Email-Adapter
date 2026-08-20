@@ -101,6 +101,7 @@ export class CompositeRoot {
   public readonly emxDispatchWorker: EmxDispatchWorker;
   public readonly emxIdleWorker: EmxIdleWorker;
   public readonly app: ReturnType<typeof createApp>;
+  public readonly wsApiClient: ApiGatewayManagementApiClient;
 
   constructor() {
     // -----------------------------------------------------------------------
@@ -247,7 +248,8 @@ export class CompositeRoot {
 
     const draftSendDispatcher = new DraftSendDispatcher(signalQueue, logger);
 
-    const wsDeliverer = new WsDeliverer(new ApiGatewayManagementApiClient({ endpoint: WS_ENDPOINT }));
+    const wsApiClient = new ApiGatewayManagementApiClient({ endpoint: WS_ENDPOINT });
+    const wsDeliverer = new WsDeliverer(wsApiClient);
     const authHandler = new AuthWorkflowHandler(deviceStore, wsDeliverer, threadDb, logger);
     const handlerRegistry = new HandlerRegistry([authHandler]);
 
@@ -498,5 +500,6 @@ export class CompositeRoot {
     this.emxDispatchWorker = emxDispatchWorker;
     this.emxIdleWorker = emxIdleWorker;
     this.app = app;
+    this.wsApiClient = wsApiClient;
   }
 }
