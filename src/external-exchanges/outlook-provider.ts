@@ -217,7 +217,7 @@ export class OutlookProvider implements ProviderAdapter {
       const expiresAt = data.expirationDateTime;
 
       // Update subscription expiry and next sync time (same value for Outlook)
-      const updateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { expiresAt, nextSyncTime: expiresAt });
+      const updateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, expiresAt, { expiresAt });
       if (updateResult.isErr()) { this.logger.warn("Failed to update Outlook exchange expiry", { code: "emx.outlook.update_expiry_failed", emxId: emx.id, error: updateResult.error }); }
 
       this.logger.info("Outlook subscription renewed", { code: "emx.outlook.renewed", emxId: emx.id, expiresAt });
@@ -389,7 +389,7 @@ export class OutlookProvider implements ProviderAdapter {
     // may assume there's only one exchange involved.
     const notifications = body.value ?? [];
     const messageEntries: Array<{ id: string; payload: unknown }> = [];
-    const touchedExchanges = new Map<string, { accountId: string; id: string }>();
+    const touchedExchanges = new Map<string, { accountId: string; id: string; status: ExternalMailExchange["status"]; nextSyncTime: string | undefined }>();
 
     for (const notification of notifications) {
       if (notification.changeType !== "created") continue;
@@ -414,7 +414,7 @@ export class OutlookProvider implements ProviderAdapter {
         continue;
       }
 
-      touchedExchanges.set(emx.id, { accountId: emx.accountId, id: emx.id });
+      touchedExchanges.set(emx.id, { accountId: emx.accountId, id: emx.id, status: emx.status, nextSyncTime: emx.nextSyncTime });
       messageEntries.push({
         id: `outlook-${messageEntries.length}`,
         payload: { source: "outlook", providerMessageId, emxId: emx.id, accountId: emx.accountId },
@@ -434,7 +434,7 @@ export class OutlookProvider implements ProviderAdapter {
     // rather than one at a time.
     const now = DateTime.utc().toISO()!;
     await Promise.all(Array.from(touchedExchanges.values(), async (emx) => {
-      const syncUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { lastSyncAt: now });
+      const syncUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, emx.nextSyncTime!, { lastSyncAt: now });
       if (syncUpdateResult.isErr()) { this.logger.warn("Failed to update Outlook lastSyncAt after webhook", { code: "emx.outlook.webhook_sync_update_failed", emxId: emx.id, error: syncUpdateResult.error }); }
     }));
 

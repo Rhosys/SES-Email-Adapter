@@ -75,6 +75,8 @@ describe("GmailProvider webhook — lastSyncAt", () => {
     expect(db.updateExternalExchange).toHaveBeenCalledWith(
       "acct-1",
       "emx_gmail1",
+      "active",
+      undefined,
       expect.objectContaining({ lastSyncAt: "2026-06-15T12:00:00.000Z" }),
     );
   });

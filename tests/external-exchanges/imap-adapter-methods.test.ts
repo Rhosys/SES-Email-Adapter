@@ -190,6 +190,8 @@ describe("ImapAdapter.renew", () => {
     expect(mockDb.updateExternalExchange).toHaveBeenCalledWith(
       "acct-1",
       "emx_testABC123",
+      "active",
+      expect.any(String),
       expect.objectContaining({ syncCursor: "123:500", syncState: { uidvalidity: 123, lastUid: 500 } }),
     );
   });
@@ -208,6 +210,8 @@ describe("ImapAdapter.renew", () => {
     expect(mockDb.updateExternalExchange).toHaveBeenCalledWith(
       "acct-1",
       "emx_testABC123",
+      "active",
+      expect.any(String),
       expect.objectContaining({ syncCursor: "123:45", syncState: { uidvalidity: 123, lastUid: 45 } }),
     );
   });
@@ -226,6 +230,8 @@ describe("ImapAdapter.renew", () => {
     expect(mockDb.updateExternalExchange).toHaveBeenCalledWith(
       "acct-1",
       "emx_testABC123",
+      "active",
+      expect.any(String),
       expect.objectContaining({ lastSyncAt: "2026-06-15T12:00:00.000Z" }),
     );
     vi.useRealTimers();

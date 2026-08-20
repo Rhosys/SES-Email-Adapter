@@ -65,8 +65,8 @@ describe("OutlookProvider webhook — lastSyncAt", () => {
 
     expect(res.status).toBe(202);
     expect(db.updateExternalExchange).toHaveBeenCalledTimes(2);
-    expect(db.updateExternalExchange).toHaveBeenCalledWith("acct-1", "emx_outlook1", { lastSyncAt: "2026-06-15T12:00:00.000Z" });
-    expect(db.updateExternalExchange).toHaveBeenCalledWith("acct-2", "emx_outlook2", { lastSyncAt: "2026-06-15T12:00:00.000Z" });
+    expect(db.updateExternalExchange).toHaveBeenCalledWith("acct-1", "emx_outlook1", "active", undefined, { lastSyncAt: "2026-06-15T12:00:00.000Z" });
+    expect(db.updateExternalExchange).toHaveBeenCalledWith("acct-2", "emx_outlook2", "active", undefined, { lastSyncAt: "2026-06-15T12:00:00.000Z" });
   });
 
   it("updates lastSyncAt only once when a batch carries several notifications for the same subscription", async () => {
@@ -99,7 +99,7 @@ describe("OutlookProvider webhook — lastSyncAt", () => {
 
     expect(res.status).toBe(202);
     expect(db.updateExternalExchange).toHaveBeenCalledTimes(1);
-    expect(db.updateExternalExchange).toHaveBeenCalledWith("acct-1", "emx_outlook1", { lastSyncAt: "2026-06-15T12:00:00.000Z" });
+    expect(db.updateExternalExchange).toHaveBeenCalledWith("acct-1", "emx_outlook1", "active", undefined, { lastSyncAt: "2026-06-15T12:00:00.000Z" });
   });
 
   it("does not touch the database when the batch carries no processable notification", async () => {

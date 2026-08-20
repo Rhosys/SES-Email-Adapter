@@ -380,7 +380,7 @@ describe("JmapAdapter.renew", () => {
     const result = await adapter.renew(emx);
 
     expect(result.isOk()).toBe(true);
-    expect(db.updateExternalExchange).toHaveBeenCalledWith("acct-1", "emx_test123", expect.objectContaining({
+    expect(db.updateExternalExchange).toHaveBeenCalledWith("acct-1", "emx_test123", "active", expect.any(String), expect.objectContaining({
       syncCursor: "state-advanced",
     }));
   });

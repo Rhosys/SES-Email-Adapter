@@ -134,7 +134,7 @@ export class GmailProvider implements ProviderAdapter {
       const expiresAt = DateTime.fromMillis(Number(data.expiration)).toISO()!;
 
       // Update subscription expiry and next sync time (same value for Gmail)
-      const renewUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { expiresAt, nextSyncTime: expiresAt });
+      const renewUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, expiresAt, { expiresAt });
       if (renewUpdateResult.isErr()) { this.logger.warn("Failed to update Gmail exchange after renewal", { code: "emx.gmail.renewal_update_failed", emxId: emx.id, error: renewUpdateResult.error }); }
 
       return ok(undefined);
@@ -367,7 +367,7 @@ export class GmailProvider implements ProviderAdapter {
     // above only extends the watch subscription, it never observes mail, so this webhook is
     // the only place Gmail's sync activity is real. Set unconditionally (new-mail or not),
     // same as IMAP/JMAP polling — a health signal, not a "found something new" signal.
-    const webhookUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { syncCursor: newCursor, lastSyncAt: DateTime.utc().toISO()! });
+    const webhookUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, emx.nextSyncTime!, { syncCursor: newCursor, lastSyncAt: DateTime.utc().toISO()! });
     if (webhookUpdateResult.isErr()) { this.logger.warn("Failed to update Gmail sync cursor after webhook", { code: "emx.gmail.webhook_cursor_update_failed", emxId: emx.id, error: webhookUpdateResult.error }); }
 
     return c.json({}, 200);

@@ -5,18 +5,21 @@ import { dbError, ok, err } from "../errors.js";
 import type { Result, DbError } from "../errors.js";
 import { generateId } from "../utils/id.js";
 import type { ExternalMailExchange } from "../types/index.js";
+import type { Logger } from "../logger.js";
 
 const pk = (accountId: string) => `ACCT#${accountId}`;
 
 export class ExchangesDatabase {
+  constructor(private readonly logger: Logger) {}
+
   async createExternalExchange(accountId: string, data: {
     platform: ExternalMailExchange["platform"];
     emailAddress: string;
     status: ExternalMailExchange["status"];
+    nextSyncTime: string;
     syncCursor?: string;
     syncState?: Record<string, unknown>;
     lastSyncAt: string;
-    nextSyncTime?: string;
     expiresAt?: string;
     providerSubscriptionId?: string;
     userId?: string;
@@ -34,10 +37,10 @@ export class ExchangesDatabase {
       platform: data.platform,
       emailAddress: data.emailAddress,
       status: data.status,
+      nextSyncTime: data.nextSyncTime,
       lastSyncAt: data.lastSyncAt,
       ...(data.syncCursor !== undefined ? { syncCursor: data.syncCursor } : {}),
       ...(data.syncState !== undefined ? { syncState: data.syncState } : {}),
-      ...(data.nextSyncTime !== undefined ? { nextSyncTime: data.nextSyncTime } : {}),
       ...(data.expiresAt !== undefined ? { expiresAt: data.expiresAt } : {}),
       ...(data.providerSubscriptionId !== undefined ? { providerSubscriptionId: data.providerSubscriptionId } : {}),
       ...(data.userId !== undefined ? { userId: data.userId } : {}),
@@ -49,14 +52,13 @@ export class ExchangesDatabase {
       createdAt: now,
       updatedAt: now,
     };
-    const dynamoItem: Record<string, unknown> = { ...item, pk: pk(accountId), sk: `EMX#${id}` };
-    if (data.status === "active") {
-      const sortValue = data.nextSyncTime ?? data.expiresAt;
-      if (sortValue) {
-        dynamoItem.gsi1pk = "EMX#active";
-        dynamoItem.gsi1sk = `${sortValue}#${id}`;
-      }
-    }
+    const dynamoItem: Record<string, unknown> = {
+      ...item,
+      pk: pk(accountId),
+      sk: `EMX#${id}`,
+      gsi1pk: "EMX#active",
+      gsi1sk: `${data.nextSyncTime}#${id}`,
+    };
     try {
       await dynamo.send(new PutCommand({ TableName: ACCOUNTS_TABLE, Item: dynamoItem }));
       return ok(item);
@@ -91,11 +93,11 @@ export class ExchangesDatabase {
     }
   }
 
-  async updateExternalExchange(accountId: string, emxId: string, fields: Partial<Pick<ExternalMailExchange, "status" | "syncCursor" | "syncState" | "expiresAt" | "lastSyncAt" | "nextSyncTime" | "userId" | "connectionUserId" | "connectionId" | "consecutiveFailures">> & { errorReason?: string; pushSubscriptionId?: string; providerSubscriptionId?: string; encryptionCertificateId?: string }, clearFields?: Array<"errorReason" | "providerSubscriptionId" | "pushSubscriptionId" | "encryptionCertificateId">): Promise<Result<ExternalMailExchange, DbError>> {
+  async updateExternalExchange(accountId: string, emxId: string, status: ExternalMailExchange["status"], nextSyncTime: string, fields: Partial<Pick<ExternalMailExchange, "syncCursor" | "syncState" | "expiresAt" | "lastSyncAt" | "userId" | "connectionUserId" | "connectionId" | "consecutiveFailures" | "imapConfig" | "jmapConfig">> & { errorReason?: string; pushSubscriptionId?: string; providerSubscriptionId?: string; encryptionCertificateId?: string }, clearFields?: Array<"errorReason" | "providerSubscriptionId" | "pushSubscriptionId" | "encryptionCertificateId">): Promise<Result<ExternalMailExchange, DbError>> {
     const now = DateTime.utc().toISO()!;
-    const names: Record<string, string> = { "#updatedAt": "updatedAt" };
-    const values: Record<string, unknown> = { ":updatedAt": now };
-    const setParts = ["#updatedAt = :updatedAt"];
+    const names: Record<string, string> = { "#updatedAt": "updatedAt", "#status": "status", "#nextSyncTime": "nextSyncTime" };
+    const values: Record<string, unknown> = { ":updatedAt": now, ":status": status, ":nextSyncTime": nextSyncTime };
+    const setParts = ["#updatedAt = :updatedAt", "#status = :status", "#nextSyncTime = :nextSyncTime"];
     const removeParts: string[] = [];
 
     for (const [key, value] of Object.entries(fields)) {
@@ -115,24 +117,17 @@ export class ExchangesDatabase {
       }
     }
 
-    // GSI1 management: populate when active, remove otherwise
-    if (fields.status === "active" && (fields.expiresAt || fields.nextSyncTime)) {
-      const sortValue = fields.nextSyncTime ?? fields.expiresAt!;
+    // GSI1 management: always reflect status + nextSyncTime
+    if (status === "active") {
       names["#gsi1pk"] = "gsi1pk";
       names["#gsi1sk"] = "gsi1sk";
       values[":gsi1pk"] = "EMX#active";
-      values[":gsi1sk"] = `${sortValue}#${emxId}`;
+      values[":gsi1sk"] = `${nextSyncTime}#${emxId}`;
       setParts.push("#gsi1pk = :gsi1pk", "#gsi1sk = :gsi1sk");
-    } else if (fields.status && fields.status !== "active") {
+    } else {
       names["#gsi1pk"] = "gsi1pk";
       names["#gsi1sk"] = "gsi1sk";
       removeParts.push("#gsi1pk", "#gsi1sk");
-    } else if ((fields.expiresAt || fields.nextSyncTime) && !fields.status) {
-      // Renewal: update gsi1sk with new time (keep gsi1pk)
-      const sortValue = fields.nextSyncTime ?? fields.expiresAt!;
-      names["#gsi1sk"] = "gsi1sk";
-      values[":gsi1sk"] = `${sortValue}#${emxId}`;
-      setParts.push("#gsi1sk = :gsi1sk");
     }
 
     let expression = `SET ${setParts.join(", ")}`;
@@ -147,40 +142,6 @@ export class ExchangesDatabase {
         UpdateExpression: expression,
         ExpressionAttributeNames: names,
         ExpressionAttributeValues: values,
-        ReturnValues: "ALL_NEW",
-      }));
-      return ok(res.Attributes as ExternalMailExchange);
-    } catch (e) {
-      return err(dbError(e));
-    }
-  }
-
-  async updateExternalExchangeImapConfig(accountId: string, emxId: string, config: { host: string; tlsConfig: "TLS" | "DISABLED"; username: string; encryptedPassword: string }): Promise<Result<ExternalMailExchange, DbError>> {
-    const now = DateTime.utc().toISO()!;
-    try {
-      const res = await dynamo.send(new UpdateCommand({
-        TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `EMX#${emxId}` },
-        UpdateExpression: "SET #updatedAt = :updatedAt, #imapConfig = :config",
-        ExpressionAttributeNames: { "#updatedAt": "updatedAt", "#imapConfig": "imapConfig" },
-        ExpressionAttributeValues: { ":updatedAt": now, ":config": config },
-        ReturnValues: "ALL_NEW",
-      }));
-      return ok(res.Attributes as ExternalMailExchange);
-    } catch (e) {
-      return err(dbError(e));
-    }
-  }
-
-  async updateExternalExchangeJmapConfig(accountId: string, emxId: string, config: { sessionUrl: string; username: string; encryptedPassword: string; apiUrl: string; downloadUrl: string; jmapAccountId: string; inboxId: string }): Promise<Result<ExternalMailExchange, DbError>> {
-    const now = DateTime.utc().toISO()!;
-    try {
-      const res = await dynamo.send(new UpdateCommand({
-        TableName: ACCOUNTS_TABLE,
-        Key: { pk: pk(accountId), sk: `EMX#${emxId}` },
-        UpdateExpression: "SET #updatedAt = :updatedAt, #jmapConfig = :config",
-        ExpressionAttributeNames: { "#updatedAt": "updatedAt", "#jmapConfig": "jmapConfig" },
-        ExpressionAttributeValues: { ":updatedAt": now, ":config": config },
         ReturnValues: "ALL_NEW",
       }));
       return ok(res.Attributes as ExternalMailExchange);
@@ -216,34 +177,35 @@ export class ExchangesDatabase {
     }
   }
 
-  async findExternalExchangeByEmail(accountId: string, emailAddress: string): Promise<Result<ExternalMailExchange | null, DbError>> {
-    try {
-      const res = await dynamo.send(new QueryCommand({
-        TableName: ACCOUNTS_TABLE,
-        KeyConditionExpression: "#pk = :pk AND begins_with(#sk, :prefix)",
-        FilterExpression: "#emailAddress = :emailAddress",
-        ExpressionAttributeNames: { "#pk": "pk", "#sk": "sk", "#emailAddress": "emailAddress" },
-        ExpressionAttributeValues: { ":pk": pk(accountId), ":prefix": "EMX#", ":emailAddress": emailAddress },
-      }));
-      const items = (res.Items ?? []) as ExternalMailExchange[];
-      return ok(items[0] ?? null);
-    } catch (e) {
-      return err(dbError(e));
-    }
-  }
-
   async findExternalExchangeBySubscriptionId(subscriptionId: string): Promise<Result<ExternalMailExchange | null, DbError>> {
+    let lastEvaluatedKey: Record<string, unknown> | undefined;
+    let pageCount = 0;
     try {
-      const res = await dynamo.send(new QueryCommand({
-        TableName: ACCOUNTS_TABLE,
-        IndexName: "gsi1",
-        KeyConditionExpression: "#gsi1pk = :pk",
-        FilterExpression: "#providerSubscriptionId = :subId",
-        ExpressionAttributeNames: { "#gsi1pk": "gsi1pk", "#providerSubscriptionId": "providerSubscriptionId" },
-        ExpressionAttributeValues: { ":pk": "EMX#active", ":subId": subscriptionId },
-      }));
-      const items = (res.Items ?? []) as ExternalMailExchange[];
-      return ok(items[0] ?? null);
+      do {
+        pageCount++;
+        const res = await dynamo.send(new QueryCommand({
+          TableName: ACCOUNTS_TABLE,
+          IndexName: "gsi1",
+          KeyConditionExpression: "#gsi1pk = :pk",
+          FilterExpression: "#providerSubscriptionId = :subId",
+          ExpressionAttributeNames: { "#gsi1pk": "gsi1pk", "#providerSubscriptionId": "providerSubscriptionId" },
+          ExpressionAttributeValues: { ":pk": "EMX#active", ":subId": subscriptionId },
+          ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
+        }));
+        const items = (res.Items ?? []) as ExternalMailExchange[];
+        if (items.length > 0) {
+          if (pageCount > 3) {
+            this.logger.warn("findExternalExchangeBySubscriptionId required excessive pagination", { code: "emx.db.subscription_scan_slow", subscriptionId, pageCount, found: true });
+          }
+          return ok(items[0]!);
+        }
+        lastEvaluatedKey = res.LastEvaluatedKey as Record<string, unknown> | undefined;
+      } while (lastEvaluatedKey);
+
+      if (pageCount > 3) {
+        this.logger.warn("findExternalExchangeBySubscriptionId required excessive pagination", { code: "emx.db.subscription_scan_slow", subscriptionId, pageCount, found: false });
+      }
+      return ok(null);
     } catch (e) {
       return err(dbError(e));
     }

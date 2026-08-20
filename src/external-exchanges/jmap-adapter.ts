@@ -288,10 +288,9 @@ export class JmapAdapter implements ProviderAdapter {
       return err({ kind: "provider_renewal_failed", cause: "SQS batch send failed" });
     }
 
-    const cursorResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
+    const cursorResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, DateTime.utc().plus({ minutes: 15 }).toISO()!, {
       syncCursor: newQueryState,
       lastSyncAt: DateTime.utc().toISO()!,
-      nextSyncTime: DateTime.utc().plus({ minutes: 15 }).toISO()!,
       consecutiveFailures: 0,
     });
     if (cursorResult.isErr()) { this.logger.warn("Failed to update JMAP sync cursor", { code: "jmap.renew.cursor_update_failed", emxId: emx.id, error: cursorResult.error }); }
@@ -642,9 +641,8 @@ export class JmapAdapter implements ProviderAdapter {
       }
 
       // Registration succeeded — store subscription ID, set nextSyncTime to +4 days
-      const updateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
+      const updateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, DateTime.utc().plus({ days: 4 }).toISO()!, {
         pushSubscriptionId: pushId,
-        nextSyncTime: DateTime.utc().plus({ days: 4 }).toISO()!,
         consecutiveFailures: 0,
       });
       if (updateResult.isErr()) {
@@ -664,7 +662,7 @@ export class JmapAdapter implements ProviderAdapter {
 
       if (verifyResult.isErr()) {
         // Cannot verify — clear subscription, fall through to polling
-        const clearResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {}, ["pushSubscriptionId"]);
+        const clearResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, emx.nextSyncTime!, {}, ["pushSubscriptionId"]);
         if (clearResult.isErr()) {
           this.logger.warn("Failed to clear unverifiable push subscription", { code: "jmap.push.clear_failed", emxId: emx.id, error: clearResult.error });
         }
@@ -676,7 +674,7 @@ export class JmapAdapter implements ProviderAdapter {
 
       if (pgResponse && pgResponse[0] === "error" || (notFound && notFound.includes(emx.pushSubscriptionId))) {
         // Subscription gone — clear and fall through
-        const clearResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {}, ["pushSubscriptionId"]);
+        const clearResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, emx.nextSyncTime!, {}, ["pushSubscriptionId"]);
         if (clearResult.isErr()) {
           this.logger.warn("Failed to clear gone push subscription", { code: "jmap.push.clear_failed", emxId: emx.id, error: clearResult.error });
         }
@@ -684,8 +682,7 @@ export class JmapAdapter implements ProviderAdapter {
       }
 
       // Subscription still active — renew nextSyncTime, do queryChanges sync
-      const renewResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
-        nextSyncTime: DateTime.utc().plus({ days: 4 }).toISO()!,
+      const renewResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, DateTime.utc().plus({ days: 4 }).toISO()!, {
         consecutiveFailures: 0,
       });
       if (renewResult.isErr()) {
@@ -744,7 +741,7 @@ export class JmapAdapter implements ProviderAdapter {
       }
     }
 
-    const cursorResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
+    const cursorResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, emx.nextSyncTime!, {
       syncCursor: newQueryState,
       lastSyncAt: DateTime.utc().toISO()!,
     });
@@ -764,11 +761,11 @@ export class JmapAdapter implements ProviderAdapter {
     this.logger.info("JMAP renewal failed", { code: "jmap.renew.failed", emxId: emx.id, cause: causeStr });
     const failures = (emx.consecutiveFailures ?? 0) + 1;
     if (failures >= 3) {
-      const deactivateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { status: "activation_failed", errorReason: causeStr, consecutiveFailures: failures });
+      const deactivateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, "activation_failed", emx.nextSyncTime!, { errorReason: causeStr, consecutiveFailures: failures });
       if (deactivateResult.isErr()) { this.logger.warn("Failed to deactivate JMAP exchange", { code: "jmap.renew.deactivate_write_failed", emxId: emx.id, error: deactivateResult.error }); }
       this.logger.error("JMAP deactivated after 3 consecutive failures", { code: "jmap.renew.deactivated", emxId: emx.id, failures });
     } else {
-      const failureResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { consecutiveFailures: failures });
+      const failureResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, emx.nextSyncTime!, { consecutiveFailures: failures });
       if (failureResult.isErr()) { this.logger.warn("Failed to update JMAP consecutive failures", { code: "jmap.renew.failure_write_failed", emxId: emx.id, error: failureResult.error }); }
     }
     return err({ kind: "provider_renewal_failed", cause: causeStr });
@@ -813,10 +810,9 @@ export class JmapAdapter implements ProviderAdapter {
       return err({ kind: "provider_renewal_failed", cause: "SQS batch send failed" });
     }
 
-    const fallbackCursorResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
+    const fallbackCursorResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, DateTime.utc().plus({ minutes: 15 }).toISO()!, {
       syncCursor: newQueryState,
       lastSyncAt: DateTime.utc().toISO()!,
-      nextSyncTime: DateTime.utc().plus({ minutes: 15 }).toISO()!,
       consecutiveFailures: 0,
     });
     if (fallbackCursorResult.isErr()) { this.logger.warn("Failed to update JMAP fallback sync cursor", { code: "jmap.renew.fallback_cursor_update_failed", emxId: emx.id, error: fallbackCursorResult.error }); }

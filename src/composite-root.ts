@@ -139,7 +139,7 @@ export class CompositeRoot {
     const embeddingGenerator = new BedrockEmbeddingGenerator(bedrock, logger);
 
     const accountDb = new AccountDatabase(logger);
-    const exchangesDb = new ExchangesDatabase();
+    const exchangesDb = new ExchangesDatabase(logger);
     const threadDb = new ThreadDatabase(logger);
     const resourceDb = new ResourceDatabase();
     const processingDb = new ProcessingDatabase();

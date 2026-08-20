@@ -396,11 +396,10 @@ export class ImapAdapter implements ProviderAdapter {
 
       // Update syncCursor + syncState to highest UID in batch
       const highestUid = batch[batch.length - 1]!;
-      const cursorUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
+      const cursorUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, DateTime.utc().plus({ minutes: 15 }).toISO()!, {
         syncCursor: formatSyncCursor(currentUidvalidity, highestUid),
         syncState: { uidvalidity: currentUidvalidity, lastUid: highestUid } satisfies ImapSyncState,
         lastSyncAt: DateTime.utc().toISO()!,
-        nextSyncTime: DateTime.utc().plus({ minutes: 15 }).toISO()!,
         consecutiveFailures: 0,
       });
       if (cursorUpdateResult.isErr()) { this.logger.warn("Failed to update IMAP sync cursor after batch", { code: "imap.renew.cursor_update_failed", emxId: emx.id, error: cursorUpdateResult.error }); }
@@ -410,9 +409,8 @@ export class ImapAdapter implements ProviderAdapter {
       // No new messages — still update lastSyncAt. It reflects "last time we successfully
       // polled", not "last time we found mail" (same as JMAP's performQueryChanges) — the UI
       // uses it as a connection-health signal, so it must move on every successful cycle.
-      const timingUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
+      const timingUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, DateTime.utc().plus({ minutes: 15 }).toISO()!, {
         lastSyncAt: DateTime.utc().toISO()!,
-        nextSyncTime: DateTime.utc().plus({ minutes: 15 }).toISO()!,
         consecutiveFailures: 0,
       });
       if (timingUpdateResult.isErr()) { this.logger.warn("Failed to update IMAP timing after empty sync", { code: "imap.renew.timing_update_failed", emxId: emx.id, error: timingUpdateResult.error }); }
@@ -549,15 +547,14 @@ export class ImapAdapter implements ProviderAdapter {
     this.logger.error("IMAP renewal failed", { code: "imap.renew.failed", emxId: emx.id, cause });
     const failures = (emx.consecutiveFailures ?? 0) + 1;
     if (failures >= 3) {
-      const deactivateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, {
-        status: "activation_failed",
+      const deactivateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, "activation_failed", emx.nextSyncTime!, {
         errorReason: cause,
         consecutiveFailures: failures,
       });
       if (deactivateResult.isErr()) { this.logger.warn("Failed to deactivate IMAP exchange", { code: "imap.renew.deactivate_write_failed", emxId: emx.id, error: deactivateResult.error }); }
       this.logger.error("IMAP deactivated after 3 consecutive failures", { code: "imap.renew.deactivated", emxId: emx.id, failures });
     } else {
-      const failureResult = await this.db.updateExternalExchange(emx.accountId, emx.id, { consecutiveFailures: failures });
+      const failureResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, emx.nextSyncTime!, { consecutiveFailures: failures });
       if (failureResult.isErr()) { this.logger.warn("Failed to update IMAP consecutive failures", { code: "imap.renew.failure_write_failed", emxId: emx.id, error: failureResult.error }); }
     }
     return err({ kind: "provider_renewal_failed", cause });

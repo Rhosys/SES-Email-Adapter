@@ -131,9 +131,10 @@ describe("JMAP push subscription registration", () => {
     const firstUpdate = db.updateExternalExchange.mock.calls[0]!;
     expect(firstUpdate[0]).toBe("acct-1");
     expect(firstUpdate[1]).toBe("emx_jmap1");
-    expect(firstUpdate[2]).toMatchObject({ pushSubscriptionId: "new-push-id" });
+    expect(firstUpdate[2]).toBe("active");
+    expect(firstUpdate[4]).toMatchObject({ pushSubscriptionId: "new-push-id" });
 
-    const nextSyncTime = new Date(firstUpdate[2].nextSyncTime).getTime();
+    const nextSyncTime = new Date(firstUpdate[3] as string).getTime();
     const fourDaysMs = 4 * 24 * 60 * 60 * 1000;
     const now = Date.now();
     expect(nextSyncTime).toBeGreaterThan(now + fourDaysMs - 10_000);
@@ -178,12 +179,12 @@ describe("JMAP push subscription registration", () => {
 
     // Polling path updates syncCursor with 15-min nextSyncTime
     const pollingUpdate = db.updateExternalExchange.mock.calls.find((call: unknown[]) => {
-      const fields = call[2] as Record<string, unknown>;
+      const fields = call[4] as Record<string, unknown>;
       return fields.syncCursor !== undefined;
     });
     expect(pollingUpdate).toBeDefined();
 
-    const pollingNextSync = new Date((pollingUpdate![2] as Record<string, string>).nextSyncTime!).getTime();
+    const pollingNextSync = new Date(pollingUpdate![3] as string).getTime();
     const fifteenMinMs = 15 * 60 * 1000;
     const now = Date.now();
     expect(pollingNextSync).toBeGreaterThan(now + fifteenMinMs - 10_000);
@@ -220,12 +221,11 @@ describe("JMAP push subscription registration", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     // db updated with 15-min nextSyncTime
-    expect(db.updateExternalExchange).toHaveBeenCalledWith("acct-1", "emx_jmap1", expect.objectContaining({
+    expect(db.updateExternalExchange).toHaveBeenCalledWith("acct-1", "emx_jmap1", "active", expect.any(String), expect.objectContaining({
       syncCursor: "state-no-push",
     }));
 
-    const fields = db.updateExternalExchange.mock.calls[0]![2] as Record<string, string>;
-    const nextSync = new Date(fields.nextSyncTime!).getTime();
+    const nextSync = new Date(db.updateExternalExchange.mock.calls[0]![3] as string).getTime();
     const fifteenMinMs = 15 * 60 * 1000;
     const now = Date.now();
     expect(nextSync).toBeGreaterThan(now + fifteenMinMs - 10_000);
@@ -267,9 +267,10 @@ describe("JMAP push subscription registration", () => {
     const firstUpdate = db.updateExternalExchange.mock.calls[0]!;
     expect(firstUpdate[0]).toBe("acct-1");
     expect(firstUpdate[1]).toBe("emx_jmap1");
-    expect(firstUpdate[2]).toMatchObject({ consecutiveFailures: 0 });
+    expect(firstUpdate[2]).toBe("active");
+    expect(firstUpdate[4]).toMatchObject({ consecutiveFailures: 0 });
 
-    const nextSyncTime = new Date(firstUpdate[2].nextSyncTime).getTime();
+    const nextSyncTime = new Date(firstUpdate[3] as string).getTime();
     const fourDaysMs = 4 * 24 * 60 * 60 * 1000;
     const now = Date.now();
     expect(nextSyncTime).toBeGreaterThan(now + fourDaysMs - 10_000);
@@ -309,14 +310,14 @@ describe("JMAP push subscription registration", () => {
 
     // First db call clears pushSubscriptionId
     const clearCall = db.updateExternalExchange.mock.calls[0]!;
-    expect(clearCall[2]).toMatchObject({});
-    expect(clearCall[3]).toEqual(["pushSubscriptionId"]);
+    expect(clearCall[4]).toMatchObject({});
+    expect(clearCall[5]).toEqual(["pushSubscriptionId"]);
 
     // Second db call is normal polling sync with 15-min nextSyncTime
     const pollingCall = db.updateExternalExchange.mock.calls[1]!;
-    expect(pollingCall[2]).toMatchObject({ syncCursor: "state-after-clear" });
+    expect(pollingCall[4]).toMatchObject({ syncCursor: "state-after-clear" });
 
-    const nextSync = new Date(pollingCall[2].nextSyncTime).getTime();
+    const nextSync = new Date(pollingCall[3] as string).getTime();
     const fifteenMinMs = 15 * 60 * 1000;
     const now = Date.now();
     expect(nextSync).toBeGreaterThan(now + fifteenMinMs - 10_000);
