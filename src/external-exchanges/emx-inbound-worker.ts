@@ -109,7 +109,7 @@ export class EmxInboundWorker {
       return err({ kind: "provider_fetch_failed", cause: "Alias missing — self-heal attempted, retrying" });
     }
     if (processResult.isErr()) return err(processResult.error as ProcessorError);
-    this.logger.info("emx_inbound: processed successfully", { code: "emx.inbound.processed", source, providerMessageId, emxId, accountId });
+    this.logger.info("emx_inbound: processed successfully", { code: "emx.inbound.processed", source, providerMessageId, emxId, accountId, processResult: processResult.value });
     return ok(undefined);
   }
 }
