@@ -3,15 +3,16 @@ import { timingSafeEqual } from "node:crypto";
 import { ok, err } from "../errors.js";
 import type { Result } from "../errors.js";
 import type { ExternalMailExchange } from "../types/index.js";
-import type {
-  ProviderAdapter,
-  ActivationResult,
-  ActivationIdentity,
-  RawMimeResult,
-  ProviderActivationError,
-  ProviderRenewalError,
-  ProviderDeactivationError,
-  ProviderFetchError,
+import {
+  POLL_INTERVAL_MINUTES,
+  type ProviderAdapter,
+  type ActivationResult,
+  type ActivationIdentity,
+  type RawMimeResult,
+  type ProviderActivationError,
+  type ProviderRenewalError,
+  type ProviderDeactivationError,
+  type ProviderFetchError,
 } from "./provider-adapter.js";
 import type { EncryptionManager } from "../secrets/encryption-manager.js";
 import type { ExchangesDatabase } from "../database/exchanges-database.js";
@@ -210,7 +211,7 @@ export class JmapAdapter implements ProviderAdapter {
 
     return ok({
       syncCursor: queryState,
-      expiresAt: DateTime.utc().plus({ minutes: 15 }).toISO()!,
+      expiresAt: DateTime.utc().plus({ minutes: POLL_INTERVAL_MINUTES }).toISO()!,
       providerSubscriptionId: "poll",
       emailAddress: jmapConfig.username,
     });
@@ -288,7 +289,7 @@ export class JmapAdapter implements ProviderAdapter {
       return err({ kind: "provider_renewal_failed", cause: "SQS batch send failed" });
     }
 
-    const cursorResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, DateTime.utc().plus({ minutes: 15 }).toISO()!, {
+    const cursorResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, DateTime.utc().plus({ minutes: POLL_INTERVAL_MINUTES }).toISO()!, {
       syncCursor: newQueryState,
       lastSyncAt: DateTime.utc().toISO()!,
       consecutiveFailures: 0,
@@ -810,7 +811,7 @@ export class JmapAdapter implements ProviderAdapter {
       return err({ kind: "provider_renewal_failed", cause: "SQS batch send failed" });
     }
 
-    const fallbackCursorResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, DateTime.utc().plus({ minutes: 15 }).toISO()!, {
+    const fallbackCursorResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, DateTime.utc().plus({ minutes: POLL_INTERVAL_MINUTES }).toISO()!, {
       syncCursor: newQueryState,
       lastSyncAt: DateTime.utc().toISO()!,
       consecutiveFailures: 0,

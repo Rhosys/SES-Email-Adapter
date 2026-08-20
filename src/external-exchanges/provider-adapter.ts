@@ -2,6 +2,12 @@ import type { Result } from "../errors.js"
 import type { ExternalMailExchange } from "../types/index.js"
 
 // ---------------------------------------------------------------------------
+// Polling interval — how far in the future the next sync is scheduled.
+// Force-loads on page open/refresh bypass this; it only governs background polling.
+// ---------------------------------------------------------------------------
+export const POLL_INTERVAL_MINUTES = 60;
+
+// ---------------------------------------------------------------------------
 // Provider adapter errors — discriminated by `kind` field
 // ---------------------------------------------------------------------------
 

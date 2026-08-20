@@ -3,15 +3,16 @@ import { DateTime } from "luxon";
 import { ok, err } from "../errors.js";
 import type { Result } from "../errors.js";
 import type { ExternalMailExchange } from "../types/index.js";
-import type {
-  ProviderAdapter,
-  ActivationResult,
-  ActivationIdentity,
-  RawMimeResult,
-  ProviderActivationError,
-  ProviderRenewalError,
-  ProviderDeactivationError,
-  ProviderFetchError,
+import {
+  POLL_INTERVAL_MINUTES,
+  type ProviderAdapter,
+  type ActivationResult,
+  type ActivationIdentity,
+  type RawMimeResult,
+  type ProviderActivationError,
+  type ProviderRenewalError,
+  type ProviderDeactivationError,
+  type ProviderFetchError,
 } from "./provider-adapter.js";
 import type { EncryptionManager } from "../secrets/encryption-manager.js";
 import type { ExchangesDatabase } from "../database/exchanges-database.js";
@@ -320,7 +321,7 @@ export class ImapAdapter implements ProviderAdapter {
     const { uidvalidity, uidNext } = stateResult.value;
     const lastUid = uidNext > 1 ? uidNext - 1 : 0;
     const syncState: ImapSyncState = { uidvalidity, lastUid };
-    const expiresAt = DateTime.utc().plus({ minutes: 15 }).toISO()!;
+    const expiresAt = DateTime.utc().plus({ minutes: POLL_INTERVAL_MINUTES }).toISO()!;
     this.logger.info("IMAP activation succeeded", { code: "imap.activate.success", host: imapConfig.host, username: imapConfig.username, uidvalidity, lastUid });
     return ok({ syncCursor: formatSyncCursor(uidvalidity, lastUid), syncState, expiresAt, providerSubscriptionId: "poll", emailAddress: imapConfig.username });
   }
@@ -396,7 +397,7 @@ export class ImapAdapter implements ProviderAdapter {
 
       // Update syncCursor + syncState to highest UID in batch
       const highestUid = batch[batch.length - 1]!;
-      const cursorUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, DateTime.utc().plus({ minutes: 15 }).toISO()!, {
+      const cursorUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, DateTime.utc().plus({ minutes: POLL_INTERVAL_MINUTES }).toISO()!, {
         syncCursor: formatSyncCursor(currentUidvalidity, highestUid),
         syncState: { uidvalidity: currentUidvalidity, lastUid: highestUid } satisfies ImapSyncState,
         lastSyncAt: DateTime.utc().toISO()!,
@@ -409,7 +410,7 @@ export class ImapAdapter implements ProviderAdapter {
       // No new messages — still update lastSyncAt. It reflects "last time we successfully
       // polled", not "last time we found mail" (same as JMAP's performQueryChanges) — the UI
       // uses it as a connection-health signal, so it must move on every successful cycle.
-      const timingUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, DateTime.utc().plus({ minutes: 15 }).toISO()!, {
+      const timingUpdateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, DateTime.utc().plus({ minutes: POLL_INTERVAL_MINUTES }).toISO()!, {
         lastSyncAt: DateTime.utc().toISO()!,
         consecutiveFailures: 0,
       });
@@ -463,7 +464,7 @@ export class ImapAdapter implements ProviderAdapter {
   //
   // IDLE only observes live IMAP EXISTS events — mail that arrived before this session opened
   // (the gap since the last renew()) produces no EXISTS and would otherwise go unnoticed until
-  // the next 15-minute sweep. So every call also fires an immediate catch-up dispatch up front,
+  // the next 60-minute sweep. So every call also fires an immediate catch-up dispatch up front,
   // independent of whatever IDLE itself observes during the session.
   // ---------------------------------------------------------------------------
 
