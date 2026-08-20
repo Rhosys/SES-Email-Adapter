@@ -189,8 +189,8 @@ export class ExternalExchangesApi {
         const activateResult = await adapter.activate(tempEmx);
         if (activateResult.isErr()) {
           const errorReason = String(activateResult.error.cause);
-          const result = await accountDb.createImapExchange(accountId, {
-            emailAddress: imapConfig.username, status: "activation_failed", errorReason,
+          const result = await accountDb.createExternalExchange(accountId, {
+            platform: "imap", emailAddress: imapConfig.username, status: "activation_failed", errorReason,
             imapConfig: { host: imapConfig.host, tlsConfig: imapConfig.tlsConfig, username: imapConfig.username, encryptedPassword },
             lastSyncAt: DateTime.utc().toISO()!,
           });
@@ -201,8 +201,8 @@ export class ExternalExchangesApi {
 
         const { syncCursor, syncState, expiresAt } = activateResult.value;
         const now = DateTime.utc().toISO()!;
-        const result = await accountDb.createImapExchange(accountId, {
-          emailAddress: imapConfig.username, status: "active",
+        const result = await accountDb.createExternalExchange(accountId, {
+          platform: "imap", emailAddress: imapConfig.username, status: "active",
           imapConfig: { host: imapConfig.host, tlsConfig: imapConfig.tlsConfig, username: imapConfig.username, encryptedPassword },
           syncCursor: syncCursor!, syncState: syncState!, lastSyncAt: now, nextSyncTime: expiresAt,
         });
@@ -241,8 +241,8 @@ export class ExternalExchangesApi {
         const activateResult = await adapter.activate(tempEmx);
         if (activateResult.isErr()) {
           const errorReason = String(activateResult.error.cause);
-          const result = await accountDb.createJmapExchange(accountId, {
-            emailAddress: jmapConfig.username, status: "activation_failed", errorReason,
+          const result = await accountDb.createExternalExchange(accountId, {
+            platform: "jmap", emailAddress: jmapConfig.username, status: "activation_failed", errorReason,
             jmapConfig: { sessionUrl: jmapConfig.sessionUrl, username: jmapConfig.username, encryptedPassword, apiUrl: "", downloadUrl: "", jmapAccountId: "", inboxId: "" },
             syncCursor: "", lastSyncAt: DateTime.utc().toISO()!,
           });
@@ -253,8 +253,8 @@ export class ExternalExchangesApi {
 
         const { syncCursor, expiresAt } = activateResult.value;
         // activate() populates apiUrl, downloadUrl, jmapAccountId, inboxId on tempEmx.jmapConfig
-        const result = await accountDb.createJmapExchange(accountId, {
-          emailAddress: jmapConfig.username, status: "active",
+        const result = await accountDb.createExternalExchange(accountId, {
+          platform: "jmap", emailAddress: jmapConfig.username, status: "active",
           jmapConfig: { sessionUrl: jmapConfig.sessionUrl, username: jmapConfig.username, encryptedPassword, apiUrl: tempEmx.jmapConfig!.apiUrl, downloadUrl: tempEmx.jmapConfig!.downloadUrl, jmapAccountId: tempEmx.jmapConfig!.jmapAccountId, inboxId: tempEmx.jmapConfig!.inboxId },
           syncCursor: syncCursor!, lastSyncAt: DateTime.utc().toISO()!, nextSyncTime: expiresAt,
         });
