@@ -56,7 +56,7 @@ export class ExchangesDatabase {
       ...item,
       pk: pk(accountId),
       sk: `EMX#${id}`,
-      gsi1pk: "EMX#active",
+      gsi1pk: `EMX#${data.status}`,
       gsi1sk: `${data.nextSyncTime}#${id}`,
     };
     try {
@@ -118,17 +118,11 @@ export class ExchangesDatabase {
     }
 
     // GSI1 management: always reflect status + nextSyncTime
-    if (status === "active") {
-      names["#gsi1pk"] = "gsi1pk";
-      names["#gsi1sk"] = "gsi1sk";
-      values[":gsi1pk"] = "EMX#active";
-      values[":gsi1sk"] = `${nextSyncTime}#${emxId}`;
-      setParts.push("#gsi1pk = :gsi1pk", "#gsi1sk = :gsi1sk");
-    } else {
-      names["#gsi1pk"] = "gsi1pk";
-      names["#gsi1sk"] = "gsi1sk";
-      removeParts.push("#gsi1pk", "#gsi1sk");
-    }
+    names["#gsi1pk"] = "gsi1pk";
+    names["#gsi1sk"] = "gsi1sk";
+    values[":gsi1pk"] = `EMX#${status}`;
+    values[":gsi1sk"] = `${nextSyncTime}#${emxId}`;
+    setParts.push("#gsi1pk = :gsi1pk", "#gsi1sk = :gsi1sk");
 
     let expression = `SET ${setParts.join(", ")}`;
     if (removeParts.length > 0) {
