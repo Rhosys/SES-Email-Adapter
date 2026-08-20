@@ -781,6 +781,7 @@ export class SignalProcessor {
         }
         // First delivery seeing an existing signal — true duplicate, already fully
         // processed (including dispatch). Dedup and return.
+        this.logger.warn("Signal already processed — dedup skip.", { code: "processor.dedup_skip", signalId: existing.id, accountId, compositeMailMessageId: msg.compositeMailMessageId });
         return ok(undefined);
       }
     }
