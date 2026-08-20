@@ -341,7 +341,10 @@ async function handleWsAuthorizer(event: WsAuthorizerEvent): Promise<WsAuthorize
   if (!token) return wsDeny(event.methodArn);
 
   const verifyResult = await authService.verify(token);
-  if (verifyResult.isErr()) return wsDeny(event.methodArn);
+  if (verifyResult.isErr()) {
+    logger.warn("WS authorizer denied: token verification failed", { code: "handler.ws_authorizer.verify_failed", error: verifyResult.error });
+    return wsDeny(event.methodArn);
+  }
   const { userId } = verifyResult.value;
 
   // Extract accountId from connection path: /accounts/{accountId}
