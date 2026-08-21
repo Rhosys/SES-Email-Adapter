@@ -123,7 +123,7 @@ describe("DraftSendWorker", () => {
   });
 
   // threadId now always comes from the dispatch payload (DraftSendPayload.threadId: string,
-  // required — it's the DynamoDB GSI1 partition key getSignalById queried with, so the
+  // required — it's the DynamoDB gsi1 partition key getSignalById queried with, so the
   // returned signal can only ever belong to that threadId). There is no longer a code path
   // where it's omitted; the old "signal has no threadId" branch was dead defensive code
   // reading a weaker, coincidentally-optional field off the fetched signal instead of the

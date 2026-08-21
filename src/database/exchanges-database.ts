@@ -117,7 +117,7 @@ export class ExchangesDatabase {
       }
     }
 
-    // GSI1 management: always reflect status + nextSyncTime
+    // gsi1 management: always reflect status + nextSyncTime
     names["#gsi1pk"] = "gsi1pk";
     names["#gsi1sk"] = "gsi1sk";
     values[":gsi1pk"] = `EMX#${status}`;

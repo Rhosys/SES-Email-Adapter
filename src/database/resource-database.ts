@@ -6,13 +6,13 @@ import type { DbError, Result } from "../errors.js";
 import type { Resource, ResourceAsset, ResourceStatus, Workflow, Page, PageParams } from "../types/index.js";
 
 // Key design:
-// PK  = ACCT#<accountId>#THREAD#<threadId>
-// SK  = <workflow>#<resourceKey>                (deterministic — no read-before-write needed)
-// GSI1PK = ACCT#<accountId>#STATUS#<status>      (not split by workflow — resource volume per
+// pk  = ACCT#<accountId>#THREAD#<threadId>
+// sk  = <workflow>#<resourceKey>                (deterministic — no read-before-write needed)
+// gsi1pk = ACCT#<accountId>#STATUS#<status>      (not split by workflow — resource volume per
 //          account+status+date-range is small; a "what's due today across all workflows" query
 //          fans in for free, and a single-workflow view filters the (small) result set in the
 //          API layer instead of paying for a narrower key)
-// GSI1SK = <expectedResolutionDate>              (ISO 8601 — sorts/ranges correctly as a string)
+// gsi1sk = <expectedResolutionDate>              (ISO 8601 — sorts/ranges correctly as a string)
 
 const threadPk = (accountId: string, threadId: string) => `ACCT#${accountId}#THREAD#${threadId}`;
 const buildGsi1pk = (accountId: string, status: ResourceStatus) => `ACCT#${accountId}#STATUS#${status}`;

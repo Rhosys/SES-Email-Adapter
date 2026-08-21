@@ -1807,7 +1807,7 @@ export class SignalProcessor {
     }
 
     // Re-fetch by primary key — reprocessing may reassign the signal to a different
-    // thread, so the GSI1-based getSignalById (scoped to the original threadId) would miss it.
+    // thread, so the gsi1-based getSignalById (scoped to the original threadId) would miss it.
     const freshResult = await this.threadDb.getSignalByMessageId(accountId, compositeMailMessageId);
     if (freshResult.isErr()) return err(processorError(freshResult.error));
     if (!freshResult.value) return err(processorError("Signal not found after reprocess"));

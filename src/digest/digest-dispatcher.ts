@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Digest Dispatcher
-// Receives `digest_dispatch` SQS message, queries all accounts via GSI1,
+// Receives `digest_dispatch` SQS message, queries all accounts via gsi1,
 // filters by frequency + current date, enqueues `digest_send` per qualifying
 // account. All-or-nothing — quits on any SQS batch send failure.
 // ---------------------------------------------------------------------------

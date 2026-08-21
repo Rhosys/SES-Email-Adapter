@@ -1264,7 +1264,7 @@ export class AccountDatabase {
   }
 
   // ---------------------------------------------------------------------------
-  // Account Metas (GSI1 query for digest dispatcher)
+  // Account Metas (gsi1 query for digest dispatcher)
   // ---------------------------------------------------------------------------
 
   async queryAllAccountMetas(): Promise<Result<Array<{ id: string; digest?: { frequency: string; forwardingTargetId: string } | null }>, DbError>> {

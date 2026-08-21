@@ -34,8 +34,8 @@ export interface AuditEvent {
 // Key design:
 // PK  = AUDIT#<accountId>
 // SK  = <resourceType>#<resourceId>#<timestamp>#<eventId>   (resource-scoped range; use begins_with for history)
-// GSI1PK = AUDIT#<accountId>
-// GSI1SK = <timestamp>#<eventId>                            (time-ordered account activity feed)
+// gsi1pk = AUDIT#<accountId>
+// gsi1sk = <timestamp>#<eventId>                            (time-ordered account activity feed)
 
 export class AuditDatabase {
   async saveAuditEvent(event: Omit<AuditEvent, "eventId" | "timestamp">): Promise<Result<void, DbError>> {
@@ -59,7 +59,7 @@ export class AuditDatabase {
     }
   }
 
-  // Time-ordered feed for the account — uses GSI1
+  // Time-ordered feed for the account — uses gsi1
   async listAuditEvents(accountId: string, params: PageParams): Promise<Result<Page<AuditEvent>, DbError>> {
     const limit = Math.min(params.limit ?? 50, 200);
     try {
