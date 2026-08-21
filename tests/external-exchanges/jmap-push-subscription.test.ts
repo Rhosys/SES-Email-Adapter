@@ -141,7 +141,7 @@ describe("JMAP push subscription registration", () => {
     expect(nextSyncTime).toBeLessThan(now + fourDaysMs + 10_000);
   });
 
-  it("registration fails (HTTP error) → fall through to 15-min polling, WARN logged", async () => {
+  it("registration fails (HTTP error) → fall through to 60-min polling, WARN logged", async () => {
     const fetchMock = vi.fn<typeof fetch>();
 
     // 1. Session fetch
@@ -185,13 +185,13 @@ describe("JMAP push subscription registration", () => {
     expect(pollingUpdate).toBeDefined();
 
     const pollingNextSync = new Date(pollingUpdate![3] as string).getTime();
-    const fifteenMinMs = 15 * 60 * 1000;
+    const oneHourMs = 60 * 60 * 1000;
     const now = Date.now();
-    expect(pollingNextSync).toBeGreaterThan(now + fifteenMinMs - 10_000);
-    expect(pollingNextSync).toBeLessThan(now + fifteenMinMs + 10_000);
+    expect(pollingNextSync).toBeGreaterThan(now + oneHourMs - 10_000);
+    expect(pollingNextSync).toBeLessThan(now + oneHourMs + 10_000);
   });
 
-  it("server does not support push → no registration, 15-min polling", async () => {
+  it("server does not support push → no registration, 60-min polling", async () => {
     const fetchMock = vi.fn<typeof fetch>();
 
     // 1. Session fetch — capabilities lack push indicators
@@ -226,10 +226,10 @@ describe("JMAP push subscription registration", () => {
     }));
 
     const nextSync = new Date(db.updateExternalExchange.mock.calls[0]![3] as string).getTime();
-    const fifteenMinMs = 15 * 60 * 1000;
+    const oneHourMs = 60 * 60 * 1000;
     const now = Date.now();
-    expect(nextSync).toBeGreaterThan(now + fifteenMinMs - 10_000);
-    expect(nextSync).toBeLessThan(now + fifteenMinMs + 10_000);
+    expect(nextSync).toBeGreaterThan(now + oneHourMs - 10_000);
+    expect(nextSync).toBeLessThan(now + oneHourMs + 10_000);
   });
 
   it("existing pushSubscriptionId still active → renewed, nextSyncTime +4d", async () => {
@@ -318,9 +318,9 @@ describe("JMAP push subscription registration", () => {
     expect(pollingCall[4]).toMatchObject({ syncCursor: "state-after-clear" });
 
     const nextSync = new Date(pollingCall[3] as string).getTime();
-    const fifteenMinMs = 15 * 60 * 1000;
+    const oneHourMs = 60 * 60 * 1000;
     const now = Date.now();
-    expect(nextSync).toBeGreaterThan(now + fifteenMinMs - 10_000);
-    expect(nextSync).toBeLessThan(now + fifteenMinMs + 10_000);
+    expect(nextSync).toBeGreaterThan(now + oneHourMs - 10_000);
+    expect(nextSync).toBeLessThan(now + oneHourMs + 10_000);
   });
 });

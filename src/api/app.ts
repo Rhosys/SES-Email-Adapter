@@ -119,7 +119,13 @@ export interface AppDeps {
 
 export function createApp({ threadDb, resourceDb, accountDb, exchangesDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, emailContentStore, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator, gmailProvider, outlookProvider, adapters, encryptionManager, signalQueue, jmapAdapter }: AppDeps) {
   type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
-  const app = new OpenAPIHono<AppEnv>();
+  const app = new OpenAPIHono<AppEnv>({
+    defaultHook: (result, c) => {
+      if (!result.success) {
+        return c.json({ title: "Invalid request", errorCode: "INVALID_REQUEST", details: result.error.flatten() }, 400);
+      }
+    },
+  });
 
   // Shared error responses
   const errResponses = {
@@ -136,12 +142,12 @@ export function createApp({ threadDb, resourceDb, accountDb, exchangesDb, auditD
 
   type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 500 | 501 | 503;
   type ErrorCodeLiteral = z.infer<typeof ErrorCode>;
-  type ErrorBody = { title: string; errorCode?: ErrorCodeLiteral; details?: unknown; errorId: string };
+  type ErrorBody = { title: string; errorCode?: ErrorCodeLiteral; details?: unknown };
 
   function err<S extends ErrorStatus>(c: Context<AppEnv>, status: S, title: string, errorCode?: ErrorCodeLiteral, details?: unknown) {
     logger.info("API error response", { code: "api.error", method: c.req.method, path: c.req.path, status, title, errorCode, details });
     return c.json(
-      { title, ...(errorCode ? { errorCode } : {}), ...(details !== undefined ? { details } : {}), errorId: logger.getInvocationId() } as ErrorBody,
+      { title, ...(errorCode ? { errorCode } : {}), ...(details !== undefined ? { details } : {}) } as ErrorBody,
       status,
     );
   }
@@ -181,16 +187,10 @@ export function createApp({ threadDb, resourceDb, accountDb, exchangesDb, auditD
     const requestId = logger.getInvocationId();
     c.res.headers.set("x-request-id", requestId);
 
-    const status = c.res.status;
-    if (status >= 400 && c.res.headers.get("content-type")?.includes("application/json")) {
-      const clone = c.res.clone();
-      const body = await clone.json();
-      if (body && typeof body === "object" && !("errorId" in body)) {
-        c.res = new Response(JSON.stringify({ ...body, errorId: requestId }), {
-          status,
-          headers: c.res.headers,
-        });
-      }
+    if (c.res.status >= 400 && c.res.headers.get("content-type")?.includes("application/json")) {
+      const body = await c.res.json() as Record<string, unknown>;
+      body["errorId"] = requestId;
+      c.res = Response.json(body, { status: c.res.status, headers: c.res.headers });
     }
   });
 

@@ -122,8 +122,8 @@ describe("ImapAdapter.activate", () => {
     expect(value.providerSubscriptionId).toBe("poll");
     // Read off imapConfig.username directly — IMAP has no separate identity to verify against.
     expect(value.emailAddress).toBe("user@example.com");
-    // expiresAt should be pinned time + 15min polling interval
-    expect(value.expiresAt).toBe("2026-06-15T12:15:00.000Z");
+    // expiresAt should be pinned time + 60min polling interval
+    expect(value.expiresAt).toBe("2026-06-15T13:00:00.000Z");
     vi.useRealTimers();
   });
 
