@@ -122,7 +122,13 @@ export function createApp({ threadDb, resourceDb, accountDb, exchangesDb, auditD
   const app = new OpenAPIHono<AppEnv>({
     defaultHook: (result, c) => {
       if (!result.success) {
-        return c.json({ title: "Invalid request", errorCode: "INVALID_REQUEST", details: result.error.flatten() }, 400);
+        const flat = result.error.flatten();
+        const fieldErrors = flat.fieldErrors;
+        const fields = Object.keys(fieldErrors);
+        const title = fields.length > 0
+          ? `Invalid ${result.target}: ${fields.join(", ")} ${fields.length === 1 ? "is" : "are"} invalid`
+          : `Invalid ${result.target}`;
+        return c.json({ title, errorCode: "INVALID_REQUEST", details: flat }, 400);
       }
     },
   });
