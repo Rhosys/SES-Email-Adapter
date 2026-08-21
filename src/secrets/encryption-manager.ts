@@ -30,7 +30,7 @@ export class EncryptionManager {
   async init(): Promise<void> {
     const result = await this.ensureReady();
     if (result.isErr()) {
-      this.logger.error("[EncryptionManager] KMS init failed — operations will retry on first use", { code: "encryption.init_failed", error: result.error });
+      this.logger.warn("[EncryptionManager] KMS init failed — operations will retry on first use", { code: "encryption.init_failed", error: result.error });
     }
   }
 
