@@ -108,11 +108,11 @@ export class EventBridgeSchedulerClient implements SchedulerClient {
           this.logger.info("Schedule updated (re-snooze)", { code: "scheduler.updated", scheduleName });
           return ok(undefined);
         } catch (updateErr) {
-          this.logger.info("Schedule update failed", { code: "scheduler.update_failed", scheduleName, error: updateErr });
+          this.logger.warn("Schedule update failed", { code: "scheduler.update_failed", scheduleName, error: updateErr });
           return err(dbError(updateErr));
         }
       }
-      this.logger.info("Schedule creation failed", { code: "scheduler.create_failed", scheduleName, error: e });
+      this.logger.warn("Schedule creation failed", { code: "scheduler.create_failed", scheduleName, error: e });
       return err(dbError(e));
     }
   }
