@@ -44,13 +44,29 @@ export class EncryptionManager {
   }
 
   private async doInit(): Promise<Result<Buffer, EncryptionError>> {
+    const ciphertext = Buffer.from(encryptionSecret.ciphertext, "base64");
+    const command = new DecryptCommand({ CiphertextBlob: ciphertext });
     try {
-      const ciphertext = Buffer.from(encryptionSecret.ciphertext, "base64");
-      const result = await this.kms.send(new DecryptCommand({ CiphertextBlob: ciphertext }));
+      const result = await this.kms.send(command);
       const key = Buffer.from(result.Plaintext!);
       this.key = key;
       return ok(key);
     } catch (e) {
+      // Clock skew after Lambda thaw — the SDK's systemClockOffset correction kicks in after the
+      // first failure, so a short delay + single retry is enough to let it self-heal.
+      if (e instanceof Error && e.name === "InvalidSignatureException") {
+        try {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          const result = await this.kms.send(command);
+          const key = Buffer.from(result.Plaintext!);
+          this.key = key;
+          return ok(key);
+        } catch (retryErr) {
+          this.initPromise = null;
+          return err({ kind: "kms_unavailable", cause: { original: e, retry: retryErr } });
+        }
+      }
+
       // Reset so a later call retries KMS rather than replaying the failed promise
       this.initPromise = null;
       if (e instanceof Error && e.name === "InvalidCiphertextException") {
