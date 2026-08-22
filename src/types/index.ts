@@ -57,6 +57,7 @@ export interface ConversationData {
   workflow: "conversation";
   sentiment: "positive" | "neutral" | "negative" | "urgent";
   requiresReply: boolean;
+  muteUrl?: string;
 }
 
 export interface CrmData {

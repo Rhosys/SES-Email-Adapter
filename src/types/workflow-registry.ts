@@ -70,6 +70,7 @@ export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
         e("urgent", "time-sensitive or pressing tone requiring immediate attention"),
       ] },
       { name: "requiresReply", type: "boolean", required: true },
+      { name: "muteUrl", type: "string", required: false, notes: "Link to mute/pause notifications for this thread or sender (e.g. \"Mute this thread\", \"Pause notifications\", \"Notification preferences\")" },
     ],
   },
   {

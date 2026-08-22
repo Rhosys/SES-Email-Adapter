@@ -197,7 +197,7 @@ export class SignalClassifier {
       : [];
 
     // Sanitize URL fields in workflowData — nullify non-URL values (skip [link-N] references for later resolution)
-    const urlFields = ["trackingUrl", "downloadUrl", "managementUrl", "paymentUrl", "documentUrl", "portalUrl", "responseUrl", "ticketUrl", "actionUrl"] as const;
+    const urlFields = ["trackingUrl", "downloadUrl", "managementUrl", "paymentUrl", "documentUrl", "portalUrl", "responseUrl", "ticketUrl", "actionUrl", "muteUrl"] as const;
     const LINK_REF_PATTERN = /^\[link-\d+\]$/;
     const workflowData = { ...raw.workflowData } as Record<string, unknown>;
     for (const field of urlFields) {
