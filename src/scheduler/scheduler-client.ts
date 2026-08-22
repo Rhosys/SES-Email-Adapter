@@ -1,8 +1,10 @@
 import {
   SchedulerClient as AwsSchedulerClient,
   CreateScheduleCommand,
+  UpdateScheduleCommand,
   DeleteScheduleCommand,
   GetScheduleCommand,
+  ConflictException,
   ResourceNotFoundException,
 } from "@aws-sdk/client-scheduler";
 import { ok, err, dbError } from "../errors.js";
@@ -16,8 +18,9 @@ import { buildScheduleName } from "./schedule-name.js";
 
 export interface FollowupScheduleParams {
   accountId: string;
-  signalId: string;
   threadId: string;
+  /** The ID used in the schedule name — threadId for snooze (one per thread), signalId for calendar (one per event). */
+  scheduleKeyId: string;
   fireAt: string;   // ISO 8601
   suffix: string;   // schedule name suffix
   sqsMessageAttributeMessageType: string; // body-level routing discriminator (e.g. "signal_followup", "rsvp_reminder")
@@ -49,7 +52,7 @@ export class EventBridgeSchedulerClient implements SchedulerClient {
   }
 
   async createFollowup(params: FollowupScheduleParams): Promise<Result<void, DbError>> {
-    const scheduleName = buildScheduleName(params.accountId, params.signalId, params.suffix);
+    const scheduleName = buildScheduleName(params.accountId, params.scheduleKeyId, params.suffix);
     const fireAt = params.fireAt.replace(/Z$/, "").replace(/\.\d+$/, "");
     const scheduleExpression = `at(${fireAt})`;
 
@@ -75,7 +78,6 @@ export class EventBridgeSchedulerClient implements SchedulerClient {
           Input: JSON.stringify({
             sqsMessageAttributeMessageType: params.sqsMessageAttributeMessageType,
             accountId: params.accountId,
-            signalId: params.signalId,
             threadId: params.threadId,
           }),
         },
@@ -83,6 +85,33 @@ export class EventBridgeSchedulerClient implements SchedulerClient {
       this.logger.info("Schedule created", { code: "scheduler.created", scheduleName });
       return ok(undefined);
     } catch (e) {
+      if (e instanceof ConflictException) {
+        // Schedule already exists (re-snooze) — update it with new fire time
+        try {
+          await this.client.send(new UpdateScheduleCommand({
+            Name: scheduleName,
+            GroupName: this.groupName,
+            ScheduleExpression: scheduleExpression,
+            ScheduleExpressionTimezone: "UTC",
+            ActionAfterCompletion: "DELETE",
+            FlexibleTimeWindow: { Mode: "OFF" },
+            Target: {
+              Arn: this.queueArn,
+              RoleArn: this.roleArn,
+              Input: JSON.stringify({
+                sqsMessageAttributeMessageType: params.sqsMessageAttributeMessageType,
+                accountId: params.accountId,
+                threadId: params.threadId,
+              }),
+            },
+          }));
+          this.logger.info("Schedule updated (re-snooze)", { code: "scheduler.updated", scheduleName });
+          return ok(undefined);
+        } catch (updateErr) {
+          this.logger.info("Schedule update failed", { code: "scheduler.update_failed", scheduleName, error: updateErr });
+          return err(dbError(updateErr));
+        }
+      }
       this.logger.info("Schedule creation failed", { code: "scheduler.create_failed", scheduleName, error: e });
       return err(dbError(e));
     }

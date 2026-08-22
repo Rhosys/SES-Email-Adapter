@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { ok, err, dbError } from "../../src/errors.js";
 import { FollowupHandler } from "../../src/scheduler/followup-handler.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
-import type { Thread, Signal, ThreadStatus } from "../../src/types/index.js";
+import type { Thread, ThreadStatus } from "../../src/types/index.js";
 import type { Notifier } from "../../src/notifier/types.js";
 import type { FollowupMessage } from "../../src/scheduler/followup-handler.js";
 
@@ -12,7 +12,6 @@ import type { FollowupMessage } from "../../src/scheduler/followup-handler.js";
 
 const ACCOUNT_ID = "acc-test-001";
 const ARC_ID = "arc-test-001";
-const SIGNAL_ID = "sgn-test-001";
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {
@@ -33,44 +32,14 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
   };
 }
 
-function makeSignal(overrides: Partial<Signal> = {}): Signal {
-  return {
-    id: SIGNAL_ID,
-    signalLookupId: SIGNAL_ID,
-    threadId: ARC_ID,
-    accountId: ACCOUNT_ID,
-    source: "email",
-    type: "email",
-    status: "active",
-    createdAt: "2024-06-01T12:00:00Z",
-    data: {
-      receivedAt: "2024-06-01T12:00:00Z",
-      summary: "Test signal",
-      from: { address: "sender@example.com", name: "Sender" },
-      to: [{ address: "me@example.com" }],
-      cc: [],
-      subject: "Test subject",
-      textBody: "Hello",
-      attachments: [],
-      headers: {},
-      recipientAddress: "me@example.com",
-      workflow: "conversation",
-      workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: false },
-      tags: [],
-      s3Key: "emails/test.eml",
-    },
-    ...overrides,
-  } as Signal;
-}
-
-const MESSAGE: FollowupMessage = { accountId: ACCOUNT_ID, signalId: SIGNAL_ID, threadId: ARC_ID };
+const MESSAGE: FollowupMessage = { accountId: ACCOUNT_ID, threadId: ARC_ID };
 
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 
 function setup() {
-  const threadDb = { getThread: vi.fn(), updateThread: vi.fn(), getSignalById: vi.fn() };
+  const threadDb = { getThread: vi.fn(), updateThread: vi.fn() };
   const notifier: Notifier = { notify: vi.fn(), notifyBlocked: vi.fn() };
   const logger = createMockLogger();
 
@@ -92,7 +61,6 @@ describe("FollowupHandler", () => {
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(threadDb.getSignalById).not.toHaveBeenCalled();
       expect(notifier.notify).not.toHaveBeenCalled();
     });
 
@@ -116,7 +84,6 @@ describe("FollowupHandler", () => {
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(threadDb.getSignalById).not.toHaveBeenCalled();
       expect(notifier.notify).not.toHaveBeenCalled();
     });
 
@@ -137,7 +104,6 @@ describe("FollowupHandler", () => {
       const { handler, threadDb, notifier } = setup();
       const arc = makeThread({ status: "active", urgency: "high" });
       threadDb.getThread.mockResolvedValue(ok(arc));
-      threadDb.getSignalById.mockResolvedValue(ok(makeSignal()));
       vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
 
       const result = await handler.process(MESSAGE);
@@ -150,7 +116,6 @@ describe("FollowupHandler", () => {
     it("passes reason: followup to notifier", async () => {
       const { handler, threadDb, notifier } = setup();
       threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "active" })));
-      threadDb.getSignalById.mockResolvedValue(ok(makeSignal()));
       vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
 
       await handler.process(MESSAGE);
@@ -158,7 +123,7 @@ describe("FollowupHandler", () => {
       expect(notifier.notify).toHaveBeenCalledWith(
         ACCOUNT_ID,
         expect.objectContaining({ status: "active" }),
-        expect.objectContaining({ id: SIGNAL_ID }),
+        undefined,
         expect.any(String),
         "followup",
       );
@@ -169,7 +134,6 @@ describe("FollowupHandler", () => {
     it("updates thread status to active and sends notification", async () => {
       const { handler, threadDb, notifier } = setup();
       threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "archived" })));
-      threadDb.getSignalById.mockResolvedValue(ok(makeSignal()));
       threadDb.updateThread.mockResolvedValue(ok(makeThread({ status: "active" })));
       vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
 
@@ -185,7 +149,6 @@ describe("FollowupHandler", () => {
     it("passes reason: followup to notifier after reactivation", async () => {
       const { handler, threadDb, notifier } = setup();
       threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "archived" })));
-      threadDb.getSignalById.mockResolvedValue(ok(makeSignal()));
       threadDb.updateThread.mockResolvedValue(ok(makeThread({ status: "active" })));
       vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
 
@@ -194,7 +157,7 @@ describe("FollowupHandler", () => {
       expect(notifier.notify).toHaveBeenCalledWith(
         ACCOUNT_ID,
         expect.objectContaining({ status: "active" }),
-        expect.objectContaining({ id: SIGNAL_ID }),
+        undefined,
         expect.any(String),
         "followup",
       );
@@ -203,7 +166,6 @@ describe("FollowupHandler", () => {
     it("returns error if updateArc fails", async () => {
       const { handler, threadDb, notifier } = setup();
       threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "archived" })));
-      threadDb.getSignalById.mockResolvedValue(ok(makeSignal()));
       threadDb.updateThread.mockResolvedValue(err(dbError("DynamoDB timeout")));
 
       const result = await handler.process(MESSAGE);
@@ -227,27 +189,6 @@ describe("FollowupHandler", () => {
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().kind).toBe("db_error");
     });
-
-    it("returns error when getSignalById fails", async () => {
-      const { handler, threadDb } = setup();
-      threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "active" })));
-      threadDb.getSignalById.mockResolvedValue(err(dbError("timeout")));
-
-      const result = await handler.process(MESSAGE);
-
-      expect(result.isErr()).toBe(true);
-    });
-
-    it("discards when signal is not found (stale reference)", async () => {
-      const { handler, threadDb, notifier } = setup();
-      threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "active" })));
-      threadDb.getSignalById.mockResolvedValue(ok(null));
-
-      const result = await handler.process(MESSAGE);
-
-      expect(result.isOk()).toBe(true);
-      expect(notifier.notify).not.toHaveBeenCalled();
-    });
   });
 
   // ---------------------------------------------------------------------------
@@ -258,7 +199,6 @@ describe("FollowupHandler", () => {
     it("active arc → reason is followup", async () => {
       const { handler, threadDb, notifier } = setup();
       threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "active" })));
-      threadDb.getSignalById.mockResolvedValue(ok(makeSignal()));
       vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
 
       await handler.process(MESSAGE);
@@ -270,7 +210,6 @@ describe("FollowupHandler", () => {
     it("archived arc → reason is followup", async () => {
       const { handler, threadDb, notifier } = setup();
       threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "archived" })));
-      threadDb.getSignalById.mockResolvedValue(ok(makeSignal()));
       threadDb.updateThread.mockResolvedValue(ok(makeThread({ status: "active" })));
       vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
 
@@ -308,7 +247,6 @@ describe("FollowupHandler", () => {
       async ({ arc, shouldReactivate, shouldNotify }) => {
         const { handler, threadDb, notifier } = setup();
         threadDb.getThread.mockResolvedValue(ok(arc));
-        threadDb.getSignalById.mockResolvedValue(ok(makeSignal()));
         threadDb.updateThread.mockResolvedValue(ok(makeThread({ status: "active" })));
         vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
 
@@ -338,7 +276,6 @@ describe("FollowupHandler", () => {
     it("report_violation status → discard without modification", async () => {
       const { handler, threadDb, notifier } = setup();
       threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "report_violation" as ThreadStatus })));
-      threadDb.getSignalById.mockResolvedValue(ok(makeSignal()));
 
       const result = await handler.process(MESSAGE);
 

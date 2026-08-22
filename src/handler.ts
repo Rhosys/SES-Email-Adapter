@@ -180,7 +180,7 @@ async function processSqsRecord(
 
   if (messageType === MSG_TYPE_SIGNAL_FOLLOWUP) {
     const message = body as FollowupMessage;
-    if (!message.accountId || !message.signalId || !message.threadId) {
+    if (!message.accountId || !message.threadId) {
       logger.error("Malformed signal_followup payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_followup", sqsMessageId });
       return ok(undefined);
     }

@@ -251,21 +251,19 @@ export class ThreadsApi {
         const followupTime = new Date(body.followupAt).getTime();
         const now = Date.now();
         const deltaMs = followupTime - now;
-        const signalsResult = await threadDb.listSignals(accountId, thread.id, { limit: 1 });
-        const signalId = signalsResult.isOk() ? signalsResult.value.items[0]?.id ?? thread.id : thread.id;
 
         // SQS DelaySeconds max is 900s (15 min) — use direct SQS for near-future followups,
         // EventBridge Scheduler for anything beyond that threshold.
         if (deltaMs <= 900_000) {
           const delaySeconds = Math.max(0, Math.ceil(deltaMs / 1000));
-          const sqsResult = await signalQueue.send("signal_followup", { accountId, signalId, threadId: thread.id }, { delaySeconds });
+          const sqsResult = await signalQueue.send("signal_followup", { accountId, threadId: thread.id }, { delaySeconds });
           if (sqsResult.isErr()) {
             logger.error("Failed to enqueue near-future followup.", { code: "api.thread.followup_sqs_failed", error: sqsResult.error });
             return err(c, 500, "Failed to schedule followup");
           }
         } else {
           const scheduleResult = await schedulerClient.createFollowup({
-            accountId, signalId, threadId: thread.id, fireAt: body.followupAt,
+            accountId, threadId: thread.id, scheduleKeyId: thread.id, fireAt: body.followupAt,
             suffix: "followup", sqsMessageAttributeMessageType: "signal_followup",
           });
           if (scheduleResult.isErr()) {

@@ -1682,8 +1682,8 @@ export class SignalProcessor {
         const suffix = `calendar.${eventStart.toFormat("yyyyMMdd")}`;
         const scheduleResult = await this.schedulerClient.createFollowup({
           accountId,
-          signalId: calendarSignalId,
           threadId: thread.id,
+          scheduleKeyId: calendarSignalId,
           fireAt,
           suffix,
           sqsMessageAttributeMessageType: "signal_followup",
@@ -1710,8 +1710,8 @@ export class SignalProcessor {
             const suffix = `rsvp.${eventStart.toFormat("yyyyMMdd")}`;
             const rsvpResult = await this.schedulerClient.createFollowup({
               accountId,
-              signalId: calendarSignalId,
               threadId: thread.id,
+              scheduleKeyId: calendarSignalId,
               fireAt,
               suffix,
               sqsMessageAttributeMessageType: "rsvp_reminder",
@@ -2013,6 +2013,52 @@ function buildSignal(opts: {
         storedBytes: Buffer.byteLength(htmlBody, "utf-8"),
         s3Key,
       });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Link overlap validation — ensure no URL appears in multiple classification buckets.
+  // Priority: unsubscribe > workflowData URL fields > actions.
+  // If overlap found, log TRACK for follow-up investigation.
+  // ---------------------------------------------------------------------------
+  const classifiedUrls = new Map<string, string>(); // url → first bucket that claimed it
+  if (unsubscribe) {
+    classifiedUrls.set(unsubscribe.url, "unsubscribe");
+  }
+
+  const workflowDataUrlFields = ["trackingUrl", "downloadUrl", "managementUrl", "paymentUrl", "documentUrl", "portalUrl", "responseUrl", "ticketUrl", "actionUrl", "muteUrl"] as const;
+  const workflowDataRecord = classification.workflowData as unknown as Record<string, unknown>;
+  for (const field of workflowDataUrlFields) {
+    const value = workflowDataRecord[field];
+    if (typeof value !== "string") continue;
+    const existing = classifiedUrls.get(value);
+    if (existing) {
+      logger?.track("Link overlap detected — same URL assigned to multiple classification buckets.", {
+        code: "processor.link_overlap",
+        url: value,
+        existingBucket: existing,
+        duplicateBucket: `workflowData.${field}`,
+        signalId,
+        accountId,
+      });
+    } else {
+      classifiedUrls.set(value, `workflowData.${field}`);
+    }
+  }
+
+  for (const action of classification.actions) {
+    const existing = classifiedUrls.get(action.url);
+    if (existing) {
+      logger?.track("Link overlap detected — same URL assigned to multiple classification buckets.", {
+        code: "processor.link_overlap",
+        url: action.url,
+        existingBucket: existing,
+        duplicateBucket: "actions",
+        signalId,
+        accountId,
+      });
+    } else {
+      classifiedUrls.set(action.url, "actions");
     }
   }
 

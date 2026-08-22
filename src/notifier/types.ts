@@ -34,7 +34,7 @@ export type NotificationReason = "new_signal" | "followup" | "rsvp_reminder";
 
 export interface NotificationPayload {
   type: "thread:updated";
-  signalId: string;
+  signalId?: string;
   threadId: string;
   from: { address: string; name?: string };
   subject: string;
@@ -61,7 +61,7 @@ export type DeliverablePayload = NotificationPayload | OtpPayload;
 // ─── Notifier Interface ──────────────────────────────────────────────────────
 
 export interface Notifier {
-  notify(accountId: string, thread: Thread, signal: Signal, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>>;
+  notify(accountId: string, thread: Thread, signal: Signal | undefined, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>>;
   notifyBlocked(accountId: string, signal: Signal): Promise<Result<void, DbError>>;
 }
 

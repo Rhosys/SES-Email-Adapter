@@ -21,7 +21,7 @@ export class DeviceNotifier implements Notifier {
     this.logger = opts.logger;
   }
 
-  async notify(accountId: string, thread: Thread, signal: Signal, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>> {
+  async notify(accountId: string, thread: Thread, signal: Signal | undefined, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>> {
     const effectiveUrgency: ThreadUrgency = urgency ?? "normal";
     const priority = urgencyToPushPriority(effectiveUrgency);
 
@@ -94,17 +94,16 @@ export class DeviceNotifier implements Notifier {
   }
 }
 
-function buildPayload(thread: Thread, signal: Signal, urgency: ThreadUrgency, reason?: NotificationReason): NotificationPayload {
-  const from: NotificationPayload["from"] = { address: signal.data.from.address };
-  if (signal.data.from.name) {
-    from.name = signal.data.from.name;
-  }
+function buildPayload(thread: Thread, signal: Signal | undefined, urgency: ThreadUrgency, reason?: NotificationReason): NotificationPayload {
+  const from: NotificationPayload["from"] = signal
+    ? { address: signal.data.from.address, ...(signal.data.from.name ? { name: signal.data.from.name } : {}) }
+    : { address: thread.sender.address, ...(thread.sender.name ? { name: thread.sender.name } : {}) };
   const payload: NotificationPayload = {
     type: "thread:updated",
-    signalId: signal.id,
+    ...(signal ? { signalId: signal.id } : {}),
     threadId: thread.id,
     from,
-    subject: signal.data.subject,
+    subject: signal ? signal.data.subject : thread.subject,
     workflow: thread.workflow,
     urgency,
   };

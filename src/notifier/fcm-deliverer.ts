@@ -40,7 +40,7 @@ function buildFcmMessage(token: string, payload: NotificationPayload, priority: 
       body: payload.subject,
     },
     data: {
-      signalId: payload.signalId,
+      signalId: payload.signalId ?? "",
       threadId: payload.threadId,
       senderName: displayName,
       subject: payload.subject,
