@@ -29,11 +29,11 @@
     <!-- Steps list -->
     <mj-section background-color="{{theme.mantle}}" border-radius="0" padding="0 28px">
       <mj-column>
-        {{#steps}}
+        <mj-raw>{{#steps}}</mj-raw>
         <mj-text font-size="14px" padding="6px 0" color="{{theme.text}}">
           <span style="display: inline-block; width: 24px; text-align: center;">{{{indicator}}}</span> {{label}}
         </mj-text>
-        {{/steps}}
+        <mj-raw>{{/steps}}</mj-raw>
       </mj-column>
     </mj-section>
 

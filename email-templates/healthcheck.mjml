@@ -52,14 +52,14 @@
         <mj-text font-size="13px" font-weight="600" color="{{theme.subtext}}" padding-bottom="8px" letter-spacing="0.04em" text-transform="uppercase">
           Validation Results (Yesterday)
         </mj-text>
-        {{#hasChecks}}
-        {{#checks}}
+        <mj-raw>{{#hasChecks}}</mj-raw>
+        <mj-raw>{{#checks}}</mj-raw>
         <mj-text font-size="14px" color="{{theme.text}}" line-height="1.8">{{icon}} {{label}}{{#hasDetail}} — {{detail}}{{/hasDetail}}</mj-text>
-        {{/checks}}
-        {{/hasChecks}}
-        {{^hasChecks}}
+        <mj-raw>{{/checks}}</mj-raw>
+        <mj-raw>{{/hasChecks}}</mj-raw>
+        <mj-raw>{{^hasChecks}}</mj-raw>
         <mj-text font-size="14px" color="{{theme.overlay}}">No validation results — first run or validation error occurred.</mj-text>
-        {{/hasChecks}}
+        <mj-raw>{{/hasChecks}}</mj-raw>
       </mj-column>
     </mj-section>
 
