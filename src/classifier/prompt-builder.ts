@@ -110,6 +110,9 @@ ${workflow.description}
 ${fieldRows.join("\n")}`);
   }
 
+  // Workflow constraint
+  sections.push(`The "workflow" field MUST be exactly one of the names listed above — never invent new values like "other" or "general". If no workflow fits the email, set workflow to \`<UNSPECIFIED>\`.`);
+
   // Actions section
   sections.push(`## Actions
 

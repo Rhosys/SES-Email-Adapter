@@ -156,7 +156,7 @@ export class SignalClassifier {
     }
 
     // Normalize sentinel workflow names to "unspecified"
-    if (typeof raw.workflow === "string" && isUnspecifiedSentinel(raw.workflow)) {
+    if (isUnspecifiedSentinel(raw.workflow)) {
       this.logger.track("Classifier returned sentinel workflow name — normalizing to unspecified.", {
         code: "classifier.sentinel_workflow",
         originalWorkflow: raw.workflow,
@@ -221,20 +221,19 @@ export class SignalClassifier {
       }
     }
 
+    // Strip sentinel/placeholder values — LLM sometimes outputs these instead of omitting
+    for (const [key, value] of Object.entries(workflowData)) {
+      if (typeof value === "string" && isUnspecifiedSentinel(value)) {
+        workflowData[key] = null;
+      }
+    }
+
     // Coerce workflowData field types (numeric → string, boolean normalization)
-    const rawWorkflowData = { ...workflowData };
     const coercedWorkflowData = coerceWorkflowData(workflowData, raw.workflow, this.logger, {
       signalId: input.signalId,
       accountId: input.accountId,
       workflow: raw.workflow,
     }, input.receivedAt);
-
-    // Strip sentinel/placeholder values — LLM sometimes outputs these instead of omitting
-    for (const [key, value] of Object.entries(coercedWorkflowData)) {
-      if (typeof value === "string" && isUnspecifiedSentinel(value)) {
-        coercedWorkflowData[key] = null;
-      }
-    }
 
     // Validate currency fields — must be a valid ISO 4217 code (3 uppercase letters)
     if (typeof coercedWorkflowData.currency === "string") {
@@ -258,7 +257,7 @@ export class SignalClassifier {
       signalId: input.signalId,
       accountId: input.accountId,
       workflow: raw.workflow,
-      rawWorkflowData,
+      rawWorkflowData: raw.workflowData,
       coercedWorkflowData,
     });
 
@@ -395,7 +394,8 @@ const UNSPECIFIED_PATTERNS = [
   "other",
 ];
 
-function isUnspecifiedSentinel(value: string): boolean {
+function isUnspecifiedSentinel(value: string | null | undefined): boolean {
+  if (value == null) return true;
   const lower = value.trim().toLowerCase();
   return UNSPECIFIED_PATTERNS.includes(lower);
 }
