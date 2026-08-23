@@ -155,9 +155,20 @@ export class SignalClassifier {
       return err(classificationError(e, text));
     }
 
+    // Normalize sentinel workflow names to "unspecified"
+    if (typeof raw.workflow === "string" && isUnspecifiedSentinel(raw.workflow)) {
+      this.logger.track("Classifier returned sentinel workflow name — normalizing to unspecified.", {
+        code: "classifier.sentinel_workflow",
+        originalWorkflow: raw.workflow,
+        signalId: input.signalId,
+        accountId: input.accountId,
+      });
+      raw.workflow = "unspecified";
+    }
+
     // Validate workflow ∈ WORKFLOWS
     if (!WORKFLOWS.includes(raw.workflow as Workflow)) {
-      this.logger.error("Classifier returned unknown workflow.", { code: "classifier.invalid_workflow", input, rawResponse: jsonText, workflow: raw.workflow });
+      this.logger.error(`Classifier returned unknown workflow [${raw.workflow}].`, { code: "classifier.invalid_workflow", input, rawResponse: jsonText, workflow: raw.workflow });
       return err(classificationError(`Unknown workflow: ${raw.workflow}`, jsonText));
     }
 
@@ -381,6 +392,7 @@ function isValidUrl(value: string): boolean {
 const UNSPECIFIED_PATTERNS = [
   "<unspecified>", "not specified", "not_specified", "unknown", "n/a", "na", "none",
   "unspecified", "null", "undefined", "not available", "not applicable", "—", "-", "tbd",
+  "other",
 ];
 
 function isUnspecifiedSentinel(value: string): boolean {

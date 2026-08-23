@@ -110,7 +110,7 @@ export class EmailService {
     const fromAddress = opts.fromOverride ?? this.from;
     const tenantMismatch = this.validateTenantDomainAlignment(opts.accountId, fromAddress);
     if (tenantMismatch.isErr()) {
-      this.logger.error("Tenant/domain alignment mismatch — from address does not match tenant type.", {
+      this.logger.error(`Tenant/domain alignment mismatch — from address does not match tenant type [${opts.subject}].`, {
         code: "email_service.tenant_domain_mismatch",
         accountId: opts.accountId,
         fromAddress,

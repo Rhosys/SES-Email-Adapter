@@ -71,6 +71,7 @@ function buildDeps(): TestDeps {
     accountDb: {
       getAccount: vi.fn().mockResolvedValue(ok(buildAccount())),
       getForwardingTarget: vi.fn().mockResolvedValue(ok(buildTarget())),
+      listDomains: vi.fn().mockResolvedValue(ok([{ domain: "customer.com", accountId: "acct_test1", senderSetupComplete: true, receivingSetupComplete: true, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z" }])),
     } as unknown as AccountDatabase,
     threadDb: {
       listActiveThreads: vi.fn().mockResolvedValue(ok([buildArc("arc_1"), buildArc("arc_2")])),
@@ -80,7 +81,7 @@ function buildDeps(): TestDeps {
       countQuarantined: vi.fn().mockResolvedValue(ok(3)),
       listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     } as unknown as ThreadDatabase,
-    emailService: { send: mockSend } as unknown as IDigestWorkerDeps["emailService"],
+    emailService: { send: mockSend, platformTenant: "platform-tenant" } as unknown as IDigestWorkerDeps["emailService"],
     unsubscribeTokenGenerator: { generate: vi.fn().mockResolvedValue("tok") } as unknown as IDigestWorkerDeps["unsubscribeTokenGenerator"],
     logger,
     mockSend,
@@ -240,7 +241,7 @@ describe("DigestWorker — REQ-1.1, REQ-1.4, REQ-0.7", () => {
         expect.objectContaining({ Name: "List-Unsubscribe" }),
         expect.objectContaining({ Name: "List-Unsubscribe-Post", Value: "List-Unsubscribe=One-Click" }),
       ]))
-      // AccountId passed for SES TenantName
+      // AccountId passed for SES TenantName — uses customer accountId when sender domain available
       expect(sendArgs.accountId).toBe("acct_test1")
     })
 

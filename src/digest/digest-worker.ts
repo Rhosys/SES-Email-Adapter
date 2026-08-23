@@ -135,6 +135,15 @@ export class DigestWorker {
 
     // 10. Send via EmailService — terminal operation, no post-send writes
     const textBody = `Your ${frequency} Numaeel digest is ready. ${threads.length} active conversations.${quarantineCount > 0 ? ` ${quarantineCount} emails awaiting review in quarantine.` : ""} View your dashboard: ${emailService.appBaseUrl}/a/`
+
+    // Resolve sender domain: prefer customer's own domain if sender setup is complete
+    const domainsResult = await accountDb.listDomains(accountId)
+    const senderDomain = domainsResult.isOk()
+      ? domainsResult.value.find(d => d.senderSetupComplete && d.status !== "deleted")
+      : null
+    const fromDomain = senderDomain ? senderDomain.domain : MAIL_DOMAIN
+    const sendAccountId = senderDomain ? accountId : emailService.platformTenant
+
     const sendResult = await emailService.send({
       to: target.target,
       subject,
@@ -142,8 +151,8 @@ export class DigestWorker {
       htmlBody,
       headers,
       tags,
-      fromOverride: `"Numaeel Digest" <digest@${MAIL_DOMAIN}>`,
-      accountId,
+      fromOverride: `"Numaeel Digest" <digest@${fromDomain}>`,
+      accountId: sendAccountId,
     })
 
     if (sendResult.isErr()) {
