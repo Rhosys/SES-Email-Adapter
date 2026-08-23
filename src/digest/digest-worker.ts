@@ -96,16 +96,16 @@ export class DigestWorker {
     if (threadsResult.isErr()) return err(threadsResult.error)
     const threads = threadsResult.value
 
-    // Suppress if zero threads
-    if (threads.length === 0) {
-      logger.info("Digest suppressed — zero active threads", { code: "digest.worker.no_threads", accountId })
+    // 6. Count visible quarantined signals
+    const quarantineResult = await signalDb.listPreThreadSignals(accountId, "quarantined", { limit: 100 })
+    if (quarantineResult.isErr()) return err(quarantineResult.error)
+    const quarantineCount = quarantineResult.value.items.filter(s => s.status === "quarantine_visible").length
+
+    // Suppress if nothing to report
+    if (threads.length === 0 && quarantineCount === 0) {
+      logger.info("Digest suppressed — zero active threads and zero visible quarantine", { code: "digest.worker.nothing_to_report", accountId })
       return ok(undefined)
     }
-
-    // 6. Count quarantined signals
-    const quarantineResult = await signalDb.countQuarantined(accountId)
-    if (quarantineResult.isErr()) return err(quarantineResult.error)
-    const quarantineCount = quarantineResult.value
 
     // 7. Generate unsubscribe JWT
     const unsubscribeCode = await this.deps.unsubscribeTokenGenerator.generate({ accountId, emailType: "digest" })

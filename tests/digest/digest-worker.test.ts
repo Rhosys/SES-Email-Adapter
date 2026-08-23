@@ -78,7 +78,12 @@ function buildDeps(): TestDeps {
       listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     } as unknown as ThreadDatabase,
     signalDb: {
-      countQuarantined: vi.fn().mockResolvedValue(ok(3)),
+      listPreThreadSignals: vi.fn().mockResolvedValue(ok({ items: [
+        { status: "quarantine_visible" },
+        { status: "quarantine_visible" },
+        { status: "quarantine_visible" },
+        { status: "quarantine_hidden" },
+      ] })),
       listSignals: vi.fn().mockResolvedValue(ok({ items: [] })),
     } as unknown as ThreadDatabase,
     emailService: { send: mockSend, platformTenant: "platform-tenant" } as unknown as IDigestWorkerDeps["emailService"],
@@ -95,8 +100,21 @@ describe("DigestWorker — REQ-1.1, REQ-1.4, REQ-0.7", () => {
     vi.clearAllMocks()
   })
 
-  describe("suppression: zero active arcs", () => {
-    it("does not send email when account has zero arcs", async () => {
+  describe("suppression: nothing to report", () => {
+    it("does not send email when account has zero arcs and zero visible quarantine", async () => {
+      const deps = buildDeps()
+      vi.mocked(deps.threadDb.listActiveThreads).mockResolvedValue(ok([]))
+      vi.mocked(deps.signalDb.listPreThreadSignals).mockResolvedValue(ok({ items: [] }))
+      const worker = new DigestWorker(deps)
+
+      const result = await worker.process(message, sunday)
+
+      expect(result.isOk()).toBe(true)
+      expect(deps.mockSend).not.toHaveBeenCalled()
+      expect(deps.logger.calls.some(c => c.context?.code === "digest.worker.nothing_to_report")).toBe(true)
+    })
+
+    it("sends email when zero arcs but has visible quarantine signals", async () => {
       const deps = buildDeps()
       vi.mocked(deps.threadDb.listActiveThreads).mockResolvedValue(ok([]))
       const worker = new DigestWorker(deps)
@@ -104,8 +122,7 @@ describe("DigestWorker — REQ-1.1, REQ-1.4, REQ-0.7", () => {
       const result = await worker.process(message, sunday)
 
       expect(result.isOk()).toBe(true)
-      expect(deps.mockSend).not.toHaveBeenCalled()
-      expect(deps.logger.calls.some(c => c.context?.code === "digest.worker.no_threads")).toBe(true)
+      expect(deps.mockSend).toHaveBeenCalled()
     })
   })
 

@@ -205,9 +205,9 @@ export class ThreadDatabase {
     }
   }
 
-  async listPreThreadSignals(accountId: string, status: "quarantined" | "blocked", params: PageParams): Promise<Result<Page<Signal>, DbError>> {
+  async listPreThreadSignals(accountId: string, partition: "quarantined" | "blocked", params: PageParams): Promise<Result<Page<Signal>, DbError>> {
     const limit = Math.min(params.limit ?? 20, 100);
-    const gsi1pk = status === "blocked" ? `ACCT#${accountId}#BLOCKED` : `ACCT#${accountId}#QUARANTINED`;
+    const gsi1pk = partition === "blocked" ? `ACCT#${accountId}#BLOCKED` : `ACCT#${accountId}#QUARANTINED`;
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: SIGNALS_TABLE,
@@ -689,18 +689,4 @@ export class ThreadDatabase {
     }
   }
 
-  async countQuarantined(accountId: string): Promise<Result<number, DbError>> {
-    try {
-      const res = await dynamo.send(new QueryCommand({
-        TableName: SIGNALS_TABLE,
-        IndexName: "gsi1",
-        KeyConditionExpression: "gsi1pk = :pk",
-        ExpressionAttributeValues: { ":pk": `ACCT#${accountId}#QUARANTINED` },
-        Select: "COUNT",
-      }));
-      return ok(res.Count ?? 0);
-    } catch (e) {
-      return err(dbError(e));
-    }
-  }
 }
