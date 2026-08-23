@@ -187,6 +187,18 @@ export function createApp({ threadDb, resourceDb, accountDb, exchangesDb, auditD
   // Well-known routes (before auth middleware)
   new WellKnownApi().register(app, helpers);
 
+  // Device ID cookie — generate and set if not present (httpOnly, Secure, 10yr, .numaeel.com)
+  const DEVICE_COOKIE = "numaeel-device-id";
+  app.use("*", async (c, next) => {
+    const cookies = c.req.header("cookie") ?? "";
+    const existing = cookies.match(new RegExp(`(?:^|;\\s*)${DEVICE_COOKIE}=([^;]+)`));
+    if (!existing) {
+      const deviceId = `dev_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+      c.header("Set-Cookie", `${DEVICE_COOKIE}=${deviceId}; Path=/; Domain=.numaeel.com; Max-Age=315360000; HttpOnly; Secure; SameSite=Lax`);
+    }
+    await next();
+  });
+
   // Attach x-request-id header to every response and errorId to 4XX/5XX JSON bodies
   app.use("*", async (c, next) => {
     await next();
