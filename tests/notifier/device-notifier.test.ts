@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { ok, err, dbError } from "../../src/errors.js";
+import type { Result } from "../../src/errors.js";
 import type { Logger } from "../../src/logger.js";
 import type { Thread, ThreadUrgency, Signal } from "../../src/types/index.js";
 import type { DeviceStore } from "../../src/notifier/device-store.js";
-import type { Deliverer, Device, DeviceType, DeliveryResult, NotificationPayload, PushPriority } from "../../src/notifier/types.js";
+import type { Deliverer, Device, DeviceType, DeliveryError, NotificationPayload, PushPriority } from "../../src/notifier/types.js";
 import { DeviceNotifier } from "../../src/notifier/device-notifier.js";
 
 // ─── Mock Factories ──────────────────────────────────────────────────────────
@@ -31,8 +32,11 @@ function mockDeviceStore(overrides: Partial<DeviceStore> = {}): DeviceStore {
   };
 }
 
-function mockDeliverer(result: DeliveryResult = { status: "delivered" }): Deliverer & { deliver: ReturnType<typeof vi.fn> } {
-  return { deliver: vi.fn(async () => result) };
+function mockDeliverer(result?: "ok" | { kind: "delivery_failed"; reason: string }): Deliverer & { deliver: ReturnType<typeof vi.fn> } {
+  const returnValue: Result<void, DeliveryError> = result === undefined || result === "ok"
+    ? ok(undefined)
+    : err({ ...result, cause: undefined });
+  return { deliver: vi.fn(async () => returnValue) };
 }
 
 function mockDeliverers(overrides: Partial<Record<DeviceType, Deliverer>> = {}): Record<DeviceType, Deliverer> {
@@ -123,8 +127,8 @@ describe("DeviceNotifier", () => {
 
   describe("Property 2: partial failure returns Ok", () => {
     it("returns Ok when one device succeeds and another fails", async () => {
-      const wsDeliverer = mockDeliverer({ status: "delivered" });
-      const fcmDeliverer = mockDeliverer({ status: "failed", reason: "timeout" });
+      const wsDeliverer = mockDeliverer("ok");
+      const fcmDeliverer = mockDeliverer({ kind: "delivery_failed", reason: "timeout" });
       const store = mockDeviceStore({ listDevices: vi.fn(async () => ok([wsDevice, fcmDevice])) });
       const notifier = new DeviceNotifier({
         deviceStore: store,
@@ -138,9 +142,9 @@ describe("DeviceNotifier", () => {
     });
 
     it("attempts delivery to all eligible devices", async () => {
-      const wsDeliverer = mockDeliverer({ status: "delivered" });
-      const fcmDeliverer = mockDeliverer({ status: "failed", reason: "timeout" });
-      const apnsDeliverer = mockDeliverer({ status: "failed", reason: "unavailable" });
+      const wsDeliverer = mockDeliverer("ok");
+      const fcmDeliverer = mockDeliverer({ kind: "delivery_failed", reason: "timeout" });
+      const apnsDeliverer = mockDeliverer({ kind: "delivery_failed", reason: "unavailable" });
       const store = mockDeviceStore({ listDevices: vi.fn(async () => ok([wsDevice, fcmDevice, apnsDevice])) });
       const notifier = new DeviceNotifier({
         deviceStore: store,
@@ -158,8 +162,8 @@ describe("DeviceNotifier", () => {
 
   describe("Property 6: all devices fail returns Err", () => {
     it("returns Err when every eligible device fails", async () => {
-      const wsDeliverer = mockDeliverer({ status: "failed", reason: "connection reset" });
-      const fcmDeliverer = mockDeliverer({ status: "failed", reason: "timeout" });
+      const wsDeliverer = mockDeliverer({ kind: "delivery_failed", reason: "connection reset" });
+      const fcmDeliverer = mockDeliverer({ kind: "delivery_failed", reason: "timeout" });
       const store = mockDeviceStore({ listDevices: vi.fn(async () => ok([wsDevice, fcmDevice])) });
       const notifier = new DeviceNotifier({
         deviceStore: store,
@@ -174,64 +178,6 @@ describe("DeviceNotifier", () => {
         expect(result.error.message).toContain("websocket: connection reset");
         expect(result.error.message).toContain("fcm: timeout");
       }
-    });
-
-    it("returns Err when all devices return stale (none succeed)", async () => {
-      const wsDeliverer = mockDeliverer({ status: "stale" });
-      const fcmDeliverer = mockDeliverer({ status: "stale" });
-      const store = mockDeviceStore({ listDevices: vi.fn(async () => ok([wsDevice, fcmDevice])) });
-      const notifier = new DeviceNotifier({
-        deviceStore: store,
-        deliverers: { websocket: wsDeliverer, fcm: fcmDeliverer, apns: mockDeliverer() },
-        logger: mockLogger(),
-      });
-
-      const result = await notifier.notify("acct-1", arc, signal, "normal");
-
-      expect(result.isErr()).toBe(true);
-    });
-  });
-
-  describe("Property 4: stale devices are deleted", () => {
-    it("deletes device when deliverer returns stale", async () => {
-      const wsDeliverer = mockDeliverer({ status: "stale" });
-      const fcmDeliverer = mockDeliverer({ status: "delivered" });
-      const deleteDevice = vi.fn(async () => ok(undefined));
-      const store = mockDeviceStore({
-        listDevices: vi.fn(async () => ok([wsDevice, fcmDevice])),
-        deleteDevice,
-      });
-      const notifier = new DeviceNotifier({
-        deviceStore: store,
-        deliverers: { websocket: wsDeliverer, fcm: fcmDeliverer, apns: mockDeliverer() },
-        logger: mockLogger(),
-      });
-
-      await notifier.notify("acct-1", arc, signal, "normal");
-
-      expect(deleteDevice).toHaveBeenCalledWith("acct-1", "ws-conn-1");
-    });
-
-    it("deletes multiple stale devices", async () => {
-      const wsDeliverer = mockDeliverer({ status: "stale" });
-      const fcmDeliverer = mockDeliverer({ status: "stale" });
-      const apnsDeliverer = mockDeliverer({ status: "delivered" });
-      const deleteDevice = vi.fn(async () => ok(undefined));
-      const store = mockDeviceStore({
-        listDevices: vi.fn(async () => ok([wsDevice, fcmDevice, apnsDevice])),
-        deleteDevice,
-      });
-      const notifier = new DeviceNotifier({
-        deviceStore: store,
-        deliverers: { websocket: wsDeliverer, fcm: fcmDeliverer, apns: apnsDeliverer },
-        logger: mockLogger(),
-      });
-
-      await notifier.notify("acct-1", arc, signal, "normal");
-
-      expect(deleteDevice).toHaveBeenCalledTimes(2);
-      expect(deleteDevice).toHaveBeenCalledWith("acct-1", "ws-conn-1");
-      expect(deleteDevice).toHaveBeenCalledWith("acct-1", "fcm-token-1");
     });
   });
 
@@ -304,12 +250,9 @@ describe("DeviceNotifier", () => {
 
       await notifier.notify("acct-1", arc, signal, "normal");
 
-      // The DeviceNotifier only calls deliverers for websocket/fcm/apns — no SES
-      // Verify only the three registered deliverers were called
       expect(wsDeliverer.deliver).toHaveBeenCalledTimes(1);
       expect(fcmDeliverer.deliver).toHaveBeenCalledTimes(1);
       expect(apnsDeliverer.deliver).toHaveBeenCalledTimes(1);
-      // No other external calls exist — the class has no SES dependency
     });
   });
 
@@ -420,26 +363,6 @@ describe("DeviceNotifier", () => {
       const result = await notifier.notify("acct-1", arc, signal, "normal");
 
       expect(result.isErr()).toBe(true);
-    });
-
-    it("logs warning when stale device deletion fails but still returns Ok", async () => {
-      const wsDeliverer = mockDeliverer({ status: "stale" });
-      const fcmDeliverer = mockDeliverer({ status: "delivered" });
-      const logger = mockLogger();
-      const store = mockDeviceStore({
-        listDevices: vi.fn(async () => ok([wsDevice, fcmDevice])),
-        deleteDevice: vi.fn(async () => err(dbError("delete failed"))),
-      });
-      const notifier = new DeviceNotifier({
-        deviceStore: store,
-        deliverers: { websocket: wsDeliverer, fcm: fcmDeliverer, apns: mockDeliverer() },
-        logger,
-      });
-
-      const result = await notifier.notify("acct-1", arc, signal, "normal");
-
-      expect(result.isOk()).toBe(true);
-      expect(logger.warn).toHaveBeenCalled();
     });
   });
 });

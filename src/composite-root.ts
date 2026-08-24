@@ -101,7 +101,7 @@ export class CompositeRoot {
   public readonly emxDispatchWorker: EmxDispatchWorker;
   public readonly emxIdleWorker: EmxIdleWorker;
   public readonly app: ReturnType<typeof createApp>;
-  public readonly wsApiClient: ApiGatewayManagementApiClient;
+  public readonly wsDeliverer: WsDeliverer;
 
   constructor() {
     // -----------------------------------------------------------------------
@@ -249,7 +249,7 @@ export class CompositeRoot {
     const draftSendDispatcher = new DraftSendDispatcher(signalQueue, logger);
 
     const wsApiClient = new ApiGatewayManagementApiClient({ endpoint: WS_ENDPOINT });
-    const wsDeliverer = new WsDeliverer(wsApiClient);
+    const wsDeliverer = new WsDeliverer(wsApiClient, deviceStore);
     const authHandler = new AuthWorkflowHandler(deviceStore, wsDeliverer, threadDb, logger);
     const handlerRegistry = new HandlerRegistry([authHandler]);
 
@@ -279,8 +279,8 @@ export class CompositeRoot {
         deviceStore: new DynamoDeviceStore(),
         deliverers: {
           websocket: wsDeliverer,
-          fcm: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger })),
-          apns: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger })),
+          fcm: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger }), new DynamoDeviceStore()),
+          apns: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger }), new DynamoDeviceStore()),
         },
         logger,
       }),
@@ -336,8 +336,8 @@ export class CompositeRoot {
         deviceStore,
         deliverers: {
           websocket: wsDeliverer,
-          fcm: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger })),
-          apns: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger })),
+          fcm: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger }), deviceStore),
+          apns: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger }), deviceStore),
         },
         logger,
       }),
@@ -350,8 +350,8 @@ export class CompositeRoot {
         deviceStore,
         deliverers: {
           websocket: wsDeliverer,
-          fcm: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger })),
-          apns: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger })),
+          fcm: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger }), deviceStore),
+          apns: new FcmDeliverer(new HttpFcmClient({ projectId: FCM_PROJECT_ID, credentials: FCM_SERVICE_ACCOUNT, logger }), deviceStore),
         },
         logger,
       }),
@@ -500,6 +500,6 @@ export class CompositeRoot {
     this.emxDispatchWorker = emxDispatchWorker;
     this.emxIdleWorker = emxIdleWorker;
     this.app = app;
-    this.wsApiClient = wsApiClient;
+    this.wsDeliverer = wsDeliverer;
   }
 }

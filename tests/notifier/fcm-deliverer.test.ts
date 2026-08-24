@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
+import { ok } from "../../src/errors.js";
 import type { FcmClient, FcmMessage, FcmSendResult } from "../../src/notifier/fcm-client.js";
 import { FcmDeliverer } from "../../src/notifier/fcm-deliverer.js";
+import type { DeviceStore } from "../../src/notifier/device-store.js";
 import type { Device, NotificationPayload, PushPriority } from "../../src/notifier/types.js";
 
 function makeMockFcmClient(result: FcmSendResult): { client: FcmClient; capturedMessage: () => FcmMessage } {
@@ -12,6 +14,15 @@ function makeMockFcmClient(result: FcmSendResult): { client: FcmClient; captured
     }),
   };
   return { client, capturedMessage: () => captured! };
+}
+
+function makeMockDeviceStore(): DeviceStore & { deleteDevice: ReturnType<typeof vi.fn> } {
+  return {
+    listDevices: vi.fn(async () => ok([])),
+    saveDevice: vi.fn(async () => ok(undefined)),
+    deleteDevice: vi.fn(async () => ok(undefined)),
+    countDevices: vi.fn(async () => ok(0)),
+  };
 }
 
 const device: Device = {
@@ -33,13 +44,14 @@ const payload: NotificationPayload = {
 };
 
 describe("FcmDeliverer", () => {
-  it("returns delivered on successful send", async () => {
+  it("returns ok on successful send", async () => {
     const { client } = makeMockFcmClient({ ok: true, messageId: "msg-123" });
-    const deliverer = new FcmDeliverer(client);
+    const store = makeMockDeviceStore();
+    const deliverer = new FcmDeliverer(client, store);
 
     const result = await deliverer.deliver(device, payload, "interrupt");
 
-    expect(result).toEqual({ status: "delivered" });
+    expect(result.isOk()).toBe(true);
   });
 
   describe("Property 5: push priority fields match PushPriority", () => {
@@ -70,7 +82,8 @@ describe("FcmDeliverer", () => {
       },
     ])("$label", async ({ priority, expected }) => {
       const { client, capturedMessage } = makeMockFcmClient({ ok: true, messageId: "msg-123" });
-      const deliverer = new FcmDeliverer(client);
+      const store = makeMockDeviceStore();
+      const deliverer = new FcmDeliverer(client, store);
 
       await deliverer.deliver(device, payload, priority);
 
@@ -81,40 +94,44 @@ describe("FcmDeliverer", () => {
   });
 
   describe("error handling", () => {
-    it("returns stale on UNREGISTERED error", async () => {
+    it("returns ok and deletes device on UNREGISTERED", async () => {
       const { client } = makeMockFcmClient({ ok: false, error: "UNREGISTERED", detail: "Token expired" });
-      const deliverer = new FcmDeliverer(client);
+      const store = makeMockDeviceStore();
+      const deliverer = new FcmDeliverer(client, store);
 
       const result = await deliverer.deliver(device, payload, "interrupt");
 
-      expect(result).toEqual({ status: "stale" });
+      expect(result.isOk()).toBe(true);
+      expect(store.deleteDevice).toHaveBeenCalledWith("acct-1", "fcm-token-abc");
     });
 
     it.each([
       {
-        label: "UNAVAILABLE → failed",
+        label: "UNAVAILABLE → delivery_failed",
         sendResult: { ok: false as const, error: "UNAVAILABLE" as const, detail: "Service down" },
       },
       {
-        label: "INTERNAL → failed",
+        label: "INTERNAL → delivery_failed",
         sendResult: { ok: false as const, error: "INTERNAL" as const, detail: "Server error" },
       },
     ])("$label", async ({ sendResult }) => {
       const { client } = makeMockFcmClient(sendResult);
-      const deliverer = new FcmDeliverer(client);
+      const store = makeMockDeviceStore();
+      const deliverer = new FcmDeliverer(client, store);
 
       const result = await deliverer.deliver(device, payload, "ambient");
 
-      expect(result).toEqual({
-        status: "failed",
-        reason: `${sendResult.error}: ${sendResult.detail}`,
-      });
+      expect(result.isErr()).toBe(true);
+      const e = result._unsafeUnwrapErr();
+      expect(e.kind).toBe("delivery_failed");
+      expect(e.reason).toBe(`${sendResult.error}: ${sendResult.detail}`);
     });
   });
 
   it("passes device token to FCM message", async () => {
     const { client, capturedMessage } = makeMockFcmClient({ ok: true, messageId: "msg-123" });
-    const deliverer = new FcmDeliverer(client);
+    const store = makeMockDeviceStore();
+    const deliverer = new FcmDeliverer(client, store);
 
     await deliverer.deliver(device, payload, "ambient");
 
@@ -123,7 +140,8 @@ describe("FcmDeliverer", () => {
 
   it("includes notification title and body from payload", async () => {
     const { client, capturedMessage } = makeMockFcmClient({ ok: true, messageId: "msg-123" });
-    const deliverer = new FcmDeliverer(client);
+    const store = makeMockDeviceStore();
+    const deliverer = new FcmDeliverer(client, store);
 
     await deliverer.deliver(device, payload, "ambient");
 
@@ -132,7 +150,8 @@ describe("FcmDeliverer", () => {
 
   it("includes data payload with signal fields", async () => {
     const { client, capturedMessage } = makeMockFcmClient({ ok: true, messageId: "msg-123" });
-    const deliverer = new FcmDeliverer(client);
+    const store = makeMockDeviceStore();
+    const deliverer = new FcmDeliverer(client, store);
 
     await deliverer.deliver(device, payload, "ambient");
 

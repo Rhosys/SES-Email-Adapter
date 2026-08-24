@@ -11,7 +11,7 @@ import type { DbError } from "../errors.js";
 import type { Signal, Thread, AuthData } from "../types/index.js";
 import type { WorkflowHandler } from "./types.js";
 import type { DeviceStore } from "../notifier/device-store.js";
-import type { Deliverer, DeliveryResult, OtpPayload } from "../notifier/types.js";
+import type { Deliverer, OtpPayload } from "../notifier/types.js";
 import type { ThreadDatabase } from "../database/thread-database.js";
 import type { Logger } from "../logger.js";
 import { getETLD1 } from "../processor/filter.js";
@@ -72,13 +72,10 @@ export class AuthWorkflowHandler implements WorkflowHandler {
     }
 
     for (const device of devicesResult.value) {
-      const result: DeliveryResult = await this.wsDeliverer.deliver(device, payload, "interrupt");
-      if (result.status === "stale") {
-        const deleteResult = await this.deviceStore.deleteDevice(accountId, device.token);
-        if (deleteResult.isErr()) { this.logger.warn("Failed to delete stale WebSocket device", { code: "workflow.auth.delete_device_failed", accountId, token: device.token, error: deleteResult.error }); }
-      } else if (result.status === "failed") {
-        this.logger.warn("OTP delivery failed", {
-          code: "workflow.auth.delivery_failed", accountId, token: device.token, reason: result.reason,
+      const result = await this.wsDeliverer.deliver(device, payload, "interrupt");
+      if (result.isErr()) {
+        this.logger.error("OTP delivery failed", {
+          code: "workflow.auth.delivery_failed", accountId, token: device.token, reason: result.error.reason, error: result.error.cause,
         });
       }
     }

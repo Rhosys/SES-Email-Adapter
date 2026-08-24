@@ -3,7 +3,7 @@ import { ok, err } from "../../src/errors.js";
 import type { DbError } from "../../src/errors.js";
 import type { Signal, Thread, AuthData } from "../../src/types/index.js";
 import type { DeviceStore } from "../../src/notifier/device-store.js";
-import type { Deliverer, DeliveryResult, Device } from "../../src/notifier/types.js";
+import type { Deliverer, Device } from "../../src/notifier/types.js";
 import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { Logger } from "../../src/logger.js";
 import { AuthWorkflowHandler, type OtpPayload } from "../../src/workflow/auth-handler.js";
@@ -110,7 +110,7 @@ describe("AuthWorkflowHandler", () => {
     ])("delivers correct OTP payload — $label", async ({ devices, authType, code, domain, expectedOrigin, expiresInMinutes }) => {
       const deviceList = Array.from({ length: devices }, (_, i) => makeDevice(`token-${i}`));
       vi.mocked(mocks.deviceStore.listDevices).mockResolvedValue(ok(deviceList));
-      vi.mocked(mocks.deliverer.deliver).mockResolvedValue({ status: "delivered" });
+      vi.mocked(mocks.deliverer.deliver).mockResolvedValue(ok(undefined));
 
       const workflowData: AuthData = { workflow: "auth", authType, code, service: "TestService", ...(expiresInMinutes !== undefined ? { expiresInMinutes } : {}) };
       const signal = makeSignal({ data: { from: { address: domain }, workflowData } });
@@ -140,10 +140,9 @@ describe("AuthWorkflowHandler", () => {
 
   describe("best-effort delivery invariant", () => {
     it.each([
-      { label: "all delivered", results: ["delivered", "delivered"] as const },
-      { label: "all stale", results: ["stale", "stale"] as const },
+      { label: "all delivered", results: ["ok", "ok"] as const },
       { label: "all failed", results: ["failed", "failed"] as const },
-      { label: "mixed outcomes", results: ["delivered", "stale", "failed"] as const },
+      { label: "mixed outcomes", results: ["ok", "failed"] as const },
       { label: "listDevices fails", listDevicesFails: true, results: [] as const },
     ])("returns ok() regardless of delivery outcome — $label", async ({ results, listDevicesFails }) => {
       const workflowData: AuthData = { workflow: "auth", authType: "verification", code: "111111", service: "Svc" };
@@ -154,12 +153,14 @@ describe("AuthWorkflowHandler", () => {
       } else {
         const deviceList = results.map((_, i) => makeDevice(`token-${i}`));
         vi.mocked(mocks.deviceStore.listDevices).mockResolvedValue(ok(deviceList));
-        vi.mocked(mocks.deviceStore.deleteDevice).mockResolvedValue(ok(undefined));
 
         const deliverMock = vi.mocked(mocks.deliverer.deliver);
         for (const r of results) {
-          const deliveryResult: DeliveryResult = r === "failed" ? { status: "failed", reason: "connection reset" } : { status: r };
-          deliverMock.mockResolvedValueOnce(deliveryResult);
+          if (r === "failed") {
+            deliverMock.mockResolvedValueOnce(err({ kind: "delivery_failed", reason: "connection reset", cause: undefined }));
+          } else {
+            deliverMock.mockResolvedValueOnce(ok(undefined));
+          }
         }
       }
 
@@ -181,27 +182,11 @@ describe("AuthWorkflowHandler", () => {
     expect(mocks.deliverer.deliver).not.toHaveBeenCalled();
   });
 
-  // ─── Deletes stale device ────────────────────────────────────────────────
-
-  it("deletes stale device on { status: 'stale' } response", async () => {
-    const device = makeDevice("stale-token");
-    vi.mocked(mocks.deviceStore.listDevices).mockResolvedValue(ok([device]));
-    vi.mocked(mocks.deliverer.deliver).mockResolvedValue({ status: "stale" });
-    vi.mocked(mocks.deviceStore.deleteDevice).mockResolvedValue(ok(undefined));
-
-    const workflowData: AuthData = { workflow: "auth", authType: "verification", code: "999999", service: "Svc" };
-    const signal = makeSignal({ data: { from: { address: "noreply@example.com" }, workflowData } });
-
-    await handler.execute(signal, stubArc, "acc-1");
-
-    expect(mocks.deviceStore.deleteDevice).toHaveBeenCalledWith("acc-1", "stale-token");
-  });
-
   // ─── Archives arc after processing ──────────────────────────────────────
 
   it("archives arc after processing (updateArc called with { status: 'archived' })", async () => {
     vi.mocked(mocks.deviceStore.listDevices).mockResolvedValue(ok([makeDevice("t1")]));
-    vi.mocked(mocks.deliverer.deliver).mockResolvedValue({ status: "delivered" });
+    vi.mocked(mocks.deliverer.deliver).mockResolvedValue(ok(undefined));
 
     const workflowData: AuthData = { workflow: "auth", authType: "verification", code: "123456", service: "Svc" };
     const signal = makeSignal({ data: { from: { address: "noreply@example.com" }, workflowData } });
@@ -215,7 +200,7 @@ describe("AuthWorkflowHandler", () => {
 
   it("logs warning when arc archive fails but still returns ok()", async () => {
     vi.mocked(mocks.deviceStore.listDevices).mockResolvedValue(ok([makeDevice("t1")]));
-    vi.mocked(mocks.deliverer.deliver).mockResolvedValue({ status: "delivered" });
+    vi.mocked(mocks.deliverer.deliver).mockResolvedValue(ok(undefined));
     const dbErr: DbError = { kind: "db_error", message: "connection lost", cause: new Error("connection lost") };
     vi.mocked(mocks.threadDatabase.updateThread).mockResolvedValue(err(dbErr));
 

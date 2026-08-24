@@ -38,7 +38,6 @@ export class DeviceNotifier implements Notifier {
     const payload = buildPayload(thread, signal, effectiveUrgency, reason);
 
     let successCount = 0;
-    const staleTokens: string[] = [];
     const failureReasons: string[] = [];
 
     for (const device of devices) {
@@ -53,30 +52,13 @@ export class DeviceNotifier implements Notifier {
         continue;
       }
 
-      try {
-        const result = await deliverer.deliver(device, payload, priority);
+      const result = await deliverer.deliver(device, payload, priority);
 
-        if (result.status === "delivered") {
-          successCount++;
-        } else if (result.status === "stale") {
-          staleTokens.push(device.token);
-          this.logger.info("Stale device connection cleaned up", { code: "notifier.stale_device", accountId, token: device.token, deviceType: device.type });
-        } else {
-          this.logger.warn("Device delivery failed", { code: "notifier.delivery_failed", signal, thread, deviceType: device.type, token: device.token, reason: result.reason });
-          failureReasons.push(`${device.type}: ${result.reason}`);
-        }
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        this.logger.error("Unexpected error delivering to device", { code: "notifier.delivery_error", signal, thread, deviceType: device.type, token: device.token, error: e });
-        failureReasons.push(`${device.type}: ${message}`);
-      }
-    }
-
-    // Delete stale devices
-    for (const token of staleTokens) {
-      const deleteResult = await this.deviceStore.deleteDevice(accountId, token);
-      if (deleteResult.isErr()) {
-        this.logger.warn("Failed to delete stale device", { code: "notifier.stale_delete_failed", signal, thread, token });
+      if (result.isOk()) {
+        successCount++;
+      } else {
+        this.logger.error("Device delivery failed", { code: "notifier.delivery_failed", signal, thread, deviceType: device.type, token: device.token, reason: result.error.reason, error: result.error.cause });
+        failureReasons.push(`${device.type}: ${result.error.reason}`);
       }
     }
 

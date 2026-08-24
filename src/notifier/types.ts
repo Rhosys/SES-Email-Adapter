@@ -19,13 +19,10 @@ export interface Device {
 
 // ─── Delivery ────────────────────────────────────────────────────────────────
 
-export type DeliveryResult =
-  | { status: "delivered" }
-  | { status: "stale" }
-  | { status: "failed"; reason: string };
+export type DeliveryError = { kind: "delivery_failed"; reason: string; cause: unknown };
 
 export interface Deliverer {
-  deliver(device: Device, payload: DeliverablePayload, priority: PushPriority): Promise<DeliveryResult>;
+  deliver(device: Device, payload: DeliverablePayload, priority: PushPriority): Promise<Result<void, DeliveryError>>;
 }
 
 // ─── Notification Payload ────────────────────────────────────────────────────

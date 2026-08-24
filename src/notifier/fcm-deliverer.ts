@@ -1,15 +1,21 @@
 import type { FcmClient, FcmMessage } from "./fcm-client.js";
-import type { Device, Deliverer, DeliverablePayload, DeliveryResult, NotificationPayload, PushPriority } from "./types.js";
+import { ok, err } from "../errors.js";
+import type { Result } from "../errors.js";
+import type { DeviceStore } from "./device-store.js";
+import type { Device, Deliverer, DeliverablePayload, DeliveryError, NotificationPayload, PushPriority } from "./types.js";
 
 export class FcmDeliverer implements Deliverer {
-  constructor(private readonly fcmClient: FcmClient) {}
+  constructor(
+    private readonly fcmClient: FcmClient,
+    private readonly deviceStore: DeviceStore,
+  ) {}
 
-  async deliver(device: Device, payload: DeliverablePayload, priority: PushPriority): Promise<DeliveryResult> {
+  async deliver(device: Device, payload: DeliverablePayload, priority: PushPriority): Promise<Result<void, DeliveryError>> {
     // FCM/APNs push is only wired up for thread:updated today — OTP delivery is WsDeliverer-only
     // (in-app banner, see AuthWorkflowHandler). Fail loudly rather than building a malformed
     // notification if that ever changes without updating buildFcmMessage below.
     if (payload.type !== "thread:updated") {
-      return { status: "failed", reason: `FcmDeliverer cannot build a notification for payload type "${payload.type}"` };
+      return err({ kind: "delivery_failed", reason: `FcmDeliverer cannot build a notification for payload type "${payload.type}"`, cause: undefined });
     }
 
     const effectivePriority = priority === "silent" ? "ambient" : priority;
@@ -18,14 +24,16 @@ export class FcmDeliverer implements Deliverer {
     const result = await this.fcmClient.send(message);
 
     if (result.ok) {
-      return { status: "delivered" };
+      return ok(undefined);
     }
 
     if (result.error === "UNREGISTERED") {
-      return { status: "stale" };
+      const deleteResult = await this.deviceStore.deleteDevice(device.accountId, device.token);
+      if (deleteResult.isErr()) { /* best-effort cleanup — device already unregistered */ }
+      return ok(undefined);
     }
 
-    return { status: "failed", reason: `${result.error}${result.detail ? `: ${result.detail}` : ""}` };
+    return err({ kind: "delivery_failed", reason: `${result.error}${result.detail ? `: ${result.detail}` : ""}`, cause: undefined });
   }
 }
 
