@@ -157,7 +157,7 @@ export class SignalClassifier {
 
     // Normalize sentinel workflow names to "unspecified"
     if (isUnspecifiedSentinel(raw.workflow)) {
-      this.logger.track("Classifier returned sentinel workflow name — normalizing to unspecified.", {
+      this.logger.info("Classifier returned sentinel workflow name — normalizing to unspecified.", {
         code: "classifier.sentinel_workflow",
         originalWorkflow: raw.workflow,
         signalId: input.signalId,
