@@ -75,6 +75,24 @@ const MAX_SINGLE_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10MB
 // Helpers
 // ---------------------------------------------------------------------------
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
+ * Renders a text/plain body as safe HTML for display when the message has no
+ * text/html part at all (e.g. plain-text-only newsletters). The result is
+ * already escaped, so it is not passed through sanitizeHtml/DOMPurify.
+ */
+function textToHtml(text: string): string {
+  return `<pre style="white-space:pre-wrap;font-family:inherit;">${escapeHtml(text)}</pre>`;
+}
+
 function parseAddress(addr: unknown): EmailAddress | undefined {
   if (!addr || typeof addr !== "object") return undefined;
   const obj = addr as { value?: Array<{ address?: string; name?: string }> };
@@ -274,6 +292,12 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
       seenUrls.add(href);
       extractedLinks.push({ url: href, text: null });
     }
+
+    // Text-only message (e.g. a plain-text newsletter) — the processor only persists
+    // htmlBody on inbound signals (see InboundEmailSignalData), so without this the
+    // message would be stored with no visible body at all. Render the plain text as
+    // escaped, pre-formatted HTML so it flows through the existing display pipeline.
+    htmlBody = textToHtml(parsed.text);
   }
 
   // 9. Build response
