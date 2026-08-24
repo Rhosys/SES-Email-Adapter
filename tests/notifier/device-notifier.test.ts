@@ -170,6 +170,10 @@ describe("DeviceNotifier", () => {
       const result = await notifier.notify("acct-1", arc, signal, "normal");
 
       expect(result.isErr()).toBe(true);
+      if (result.isErr()) {
+        expect(result.error.message).toContain("websocket: connection reset");
+        expect(result.error.message).toContain("fcm: timeout");
+      }
     });
 
     it("returns Err when all devices return stale (none succeed)", async () => {
