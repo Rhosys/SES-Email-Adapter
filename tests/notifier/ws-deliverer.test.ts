@@ -78,6 +78,7 @@ describe("WsDeliverer", () => {
           name: "InternalServerError",
           $metadata: { httpStatusCode: 500 },
         }),
+        expectedReason: "InternalServerError HTTP 500 Internal server error",
       },
       {
         label: "503 ServiceUnavailable",
@@ -85,18 +86,28 @@ describe("WsDeliverer", () => {
           name: "ServiceUnavailableException",
           $metadata: { httpStatusCode: 503 },
         }),
+        expectedReason: "ServiceUnavailableException HTTP 503 Service unavailable",
+      },
+      {
+        label: "403 Forbidden (e.g. missing execute-api:ManageConnections)",
+        error: Object.assign(new Error("Forbidden"), {
+          name: "ForbiddenException",
+          $metadata: { httpStatusCode: 403 },
+        }),
+        expectedReason: "ForbiddenException HTTP 403 Forbidden",
       },
       {
         label: "timeout (generic Error)",
         error: new Error("Connection timed out"),
+        expectedReason: "Error Connection timed out",
       },
-    ])("returns failed with reason when $label", async ({ error }) => {
+    ])("returns failed with reason when $label", async ({ error, expectedReason }) => {
       const client = makeMockClient(error);
       const deliverer = new WsDeliverer(client);
 
       const result = await deliverer.deliver(device, payload, "ambient");
 
-      expect(result).toEqual({ status: "failed", reason: error.message });
+      expect(result).toEqual({ status: "failed", reason: expectedReason });
     });
   });
 

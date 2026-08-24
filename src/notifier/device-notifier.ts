@@ -39,6 +39,7 @@ export class DeviceNotifier implements Notifier {
 
     let successCount = 0;
     const staleTokens: string[] = [];
+    const failureReasons: string[] = [];
 
     for (const device of devices) {
       // Skip mobile push devices when priority is silent
@@ -62,9 +63,12 @@ export class DeviceNotifier implements Notifier {
           this.logger.info("Stale device connection cleaned up", { code: "notifier.stale_device", accountId, token: device.token, deviceType: device.type });
         } else {
           this.logger.warn("Device delivery failed", { code: "notifier.delivery_failed", signal, thread, deviceType: device.type, token: device.token, reason: result.reason });
+          failureReasons.push(`${device.type}: ${result.reason}`);
         }
       } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
         this.logger.error("Unexpected error delivering to device", { code: "notifier.delivery_error", signal, thread, deviceType: device.type, token: device.token, error: e });
+        failureReasons.push(`${device.type}: ${message}`);
       }
     }
 
@@ -85,8 +89,9 @@ export class DeviceNotifier implements Notifier {
       return ok(undefined);
     }
 
-    this.logger.error("Total notification delivery failure", { code: "notifier.total_delivery_failure", accountId, threadId: thread.id });
-    return err(dbError("Total delivery failure: all device deliveries failed"));
+    const reasonSummary = failureReasons.length > 0 ? failureReasons.join("; ") : "no eligible devices attempted";
+    this.logger.error("Total notification delivery failure", { code: "notifier.total_delivery_failure", accountId, threadId: thread.id, reasons: failureReasons });
+    return err(dbError(`Total delivery failure: all device deliveries failed (${reasonSummary})`));
   }
 
   notifyBlocked(_accountId: string, _signal: Signal): Promise<Result<void, DbError>> {
