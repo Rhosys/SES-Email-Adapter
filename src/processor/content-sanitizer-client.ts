@@ -95,8 +95,11 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
       }));
 
       if (response.FunctionError) {
-        const errorDetail = this.extractInvocationErrorDetail(response.Payload);
-        return err(dbError(`Content Sanitizer Lambda error: ${response.FunctionError}${errorDetail ? ` — ${errorDetail}` : ""}`));
+        const { detail, lambdaRequestId } = this.extractInvocationErrorDetail(response.Payload);
+        return err(dbError(
+          `Content Sanitizer Lambda error: ${response.FunctionError}${detail ? ` — ${detail}` : ""}`,
+          lambdaRequestId ? { lambdaRequestId } : undefined,
+        ));
       }
 
       if (!response.Payload) {
@@ -117,14 +120,24 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
     }
   }
 
-  private extractInvocationErrorDetail(payload: Uint8Array | undefined): string | undefined {
-    if (!payload) return undefined;
+  private extractInvocationErrorDetail(payload: Uint8Array | undefined): { detail?: string; lambdaRequestId?: string } {
+    if (!payload) return {};
     try {
       const decoded = JSON.parse(new TextDecoder().decode(payload)) as { errorType?: string; errorMessage?: string };
-      if (!decoded.errorMessage && !decoded.errorType) return undefined;
-      return [decoded.errorType, decoded.errorMessage].filter(Boolean).join(": ");
+      if (!decoded.errorMessage && !decoded.errorType) return {};
+      // Lambda sandbox errors (e.g. Sandbox.Timedout) embed a per-invocation
+      // "RequestId: <uuid>" in errorMessage. Pull it out into its own field —
+      // it's still logged (as structured context, not string-concatenated),
+      // it just no longer varies the message text so aggregation still works.
+      const requestIdMatch = decoded.errorMessage?.match(/RequestId:\s*([0-9a-f-]{36})/i);
+      const errorMessage = decoded.errorMessage?.replace(/RequestId:\s*[0-9a-f-]{36}\s*/gi, "").trim();
+      const detail = [decoded.errorType, errorMessage].filter(Boolean).join(": ");
+      return {
+        ...(detail ? { detail } : {}),
+        ...(requestIdMatch ? { lambdaRequestId: requestIdMatch[1] } : {}),
+      };
     } catch {
-      return undefined;
+      return {};
     }
   }
 }
