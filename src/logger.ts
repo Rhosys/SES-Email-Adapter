@@ -19,7 +19,7 @@ export interface LogEntry {
   title: string;
   code?: string;
   timestamp: string;
-  invocationId: string;
+  invocationId?: string;
   containerId: string;
   trackPoints?: TrackPoint[];
   stack?: string;
@@ -193,6 +193,9 @@ export class RequestLogger implements Logger {
   private emit(level: LogLevel, title: string, context?: Record<string, unknown>): void {
     const includeTrackPoints = level === "track" || level === "error" || level === "critical";
     const includeStack = level === "error" || level === "critical";
+    // error/critical logs omit invocationId: it's unique per invocation, so including it
+    // defeats log-aggregation tools that group errors by identical fields.
+    const includeInvocationId = level !== "error" && level !== "critical";
 
     // Extract code from context if present
     let code: string | undefined;
@@ -214,7 +217,7 @@ export class RequestLogger implements Logger {
       title,
       ...(code !== undefined ? { code } : {}),
       timestamp: DateTime.utc().toISO()!,
-      invocationId: this.invocationId,
+      ...(includeInvocationId ? { invocationId: this.invocationId } : {}),
       containerId: this.containerId,
       ...(includeTrackPoints && this.trackPoints.length > 0 ? { trackPoints: this.trackPoints } : {}),
       ...(includeStack ? { stack: new Error().stack ?? "" } : {}),
@@ -223,7 +226,11 @@ export class RequestLogger implements Logger {
     // Re-assign required fields AFTER spread to guarantee context cannot overwrite them
     entry.level = level.toUpperCase() as unknown as LogLevel;
     entry.title = title;
-    entry.invocationId = this.invocationId;
+    if (includeInvocationId) {
+      entry.invocationId = this.invocationId;
+    } else {
+      delete entry.invocationId;
+    }
     entry.containerId = this.containerId;
     if (code !== undefined) entry.code = code;
 
