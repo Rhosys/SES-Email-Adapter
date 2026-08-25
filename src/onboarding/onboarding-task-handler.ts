@@ -90,7 +90,7 @@ export class OnboardingTaskHandler {
   private async ensureDefaultForwardingTarget(accountId: string, email: string): Promise<void> {
     const existingResult = await this.accountDb.getForwardingTarget(accountId, email);
     if (existingResult.isErr()) {
-      this.logger.track("Failed to check existing forwarding target during onboarding — continuing without setup", { code: "onboarding.forwarding_target_check_failed", accountId, email, error: existingResult.error });
+      this.logger.track(`Failed to check existing forwarding target during onboarding — continuing without setup: ${existingResult.error.message}`, { code: "onboarding.forwarding_target_check_failed", accountId, email, error: existingResult.error });
       return;
     }
 
@@ -115,7 +115,7 @@ export class OnboardingTaskHandler {
 
     const saveResult = await this.accountDb.saveForwardingTarget(target);
     if (saveResult.isErr()) {
-      this.logger.track("Failed to create default forwarding target during onboarding — continuing without setup", { code: "onboarding.forwarding_target_save_failed", accountId, email, error: saveResult.error });
+      this.logger.track(`Failed to create default forwarding target during onboarding — continuing without setup: ${saveResult.error.message}`, { code: "onboarding.forwarding_target_save_failed", accountId, email, error: saveResult.error });
       return;
     }
 
@@ -142,7 +142,7 @@ export class OnboardingTaskHandler {
 
     const updateResult = await this.accountDb.updateAccount(accountId, updates);
     if (updateResult.isErr()) {
-      this.logger.track("Failed to set account forwarding defaults during onboarding", { code: "onboarding.account_defaults_failed", accountId, forwardingTargetId, error: updateResult.error });
+      this.logger.track(`Failed to set account forwarding defaults during onboarding: ${updateResult.error.message}`, { code: "onboarding.account_defaults_failed", accountId, forwardingTargetId, error: updateResult.error });
       return;
     }
 

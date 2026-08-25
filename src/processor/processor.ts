@@ -421,13 +421,13 @@ export class SignalProcessor {
           this.logger.trackPoint("side_effect_forward_start");
           const forwardResult = await this.forwardingService.forward(toAddress, signal, thread);
           if (forwardResult.isErr()) {
-            this.logger.track("Side-effect forward failed — will force retry.", { code: "processor.side_effect.forward_failed", signal, thread, payload, toAddress, error: forwardResult.error });
+            this.logger.track(`Side-effect forward failed — will force retry: ${"message" in forwardResult.error ? forwardResult.error.message : "errorName" in forwardResult.error ? forwardResult.error.errorName : forwardResult.error.kind}`, { code: "processor.side_effect.forward_failed", signal, thread, payload, toAddress, error: forwardResult.error });
             criticalFailures.push(forwardResult.error);
           } else {
             this.logger.trackPoint("side_effect_forward_complete");
           }
         } catch (e) {
-          this.logger.track("Side-effect forward threw unexpectedly — will force retry.", { code: "processor.side_effect.forward_error", signal, thread, payload, toAddress, error: e });
+          this.logger.track(`Side-effect forward threw unexpectedly — will force retry: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.forward_error", signal, thread, payload, toAddress, error: e });
           criticalFailures.push(e);
         }
       }
@@ -439,11 +439,11 @@ export class SignalProcessor {
         this.logger.trackPoint("side_effect_notify_start");
         const notifyResult = await this.notifier.notify(accountId, thread, signal, thread.urgency ?? "normal");
         if (notifyResult.isErr()) {
-          this.logger.track("Side-effect notification failed.", { code: "processor.side_effect.notify_failed", signal, thread, payload, error: notifyResult.error });
+          this.logger.track(`Side-effect notification failed: ${notifyResult.error.message}`, { code: "processor.side_effect.notify_failed", signal, thread, payload, error: notifyResult.error });
         }
         this.logger.trackPoint("side_effect_notify_complete");
       } catch (e) {
-        this.logger.error("Side-effect notification threw unexpectedly.", { code: "processor.side_effect.notify_error", signal, thread, payload, error: e });
+        this.logger.error(`Side-effect notification threw unexpectedly: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.notify_error", signal, thread, payload, error: e });
       }
     }
 
@@ -452,7 +452,7 @@ export class SignalProcessor {
     const dispatchResult = await this.handlerRegistry.dispatch(signal, thread, accountId);
     this.logger.trackPoint("side_effect_workflow_complete");
     if (dispatchResult.isErr()) {
-      this.logger.track("Side-effect workflow dispatch failed — will force retry.", { code: "processor.side_effect.workflow_dispatch_failed", signal, thread, payload, error: dispatchResult.error });
+      this.logger.track(`Side-effect workflow dispatch failed — will force retry: ${dispatchResult.error.message}`, { code: "processor.side_effect.workflow_dispatch_failed", signal, thread, payload, error: dispatchResult.error });
       criticalFailures.push(dispatchResult.error);
     }
 
@@ -478,13 +478,13 @@ export class SignalProcessor {
           threadId: thread.id,
         });
         if (pongResult.isErr()) {
-          this.logger.track("Side-effect pong failed — will force retry.", { code: "processor.side_effect.pong_failed", signal, thread, payload, error: pongResult.error });
+          this.logger.track(`Side-effect pong failed — will force retry: ${"message" in pongResult.error ? pongResult.error.message : pongResult.error.kind}`, { code: "processor.side_effect.pong_failed", signal, thread, payload, error: pongResult.error });
           criticalFailures.push(pongResult.error);
         } else {
           this.logger.trackPoint("side_effect_pong_complete");
         }
       } catch (e) {
-        this.logger.track("Side-effect pong failed — will force retry.", { code: "processor.side_effect.pong_failed", signal, thread, payload, error: e });
+        this.logger.track(`Side-effect pong failed — will force retry: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.pong_failed", signal, thread, payload, error: e });
         criticalFailures.push(e);
       }
     }
@@ -640,7 +640,7 @@ export class SignalProcessor {
 
           const draftSaveResult = await this.threadDb.saveSignal(draft);
           if (draftSaveResult.isErr()) {
-            this.logger.track("Side-effect auto-draft save failed — will force retry.", { code: "processor.side_effect.auto_draft_failed", signal, thread, payload, error: draftSaveResult.error });
+            this.logger.track(`Side-effect auto-draft save failed — will force retry: ${draftSaveResult.error.message}`, { code: "processor.side_effect.auto_draft_failed", signal, thread, payload, error: draftSaveResult.error });
             criticalFailures.push(draftSaveResult.error);
             continue;
           }
@@ -652,7 +652,7 @@ export class SignalProcessor {
               300,
             );
             if (dispatchResult.isErr()) {
-              this.logger.track("Side-effect auto-draft SQS dispatch failed — draft remains pending_send, will not send automatically.", { code: "processor.side_effect.auto_draft_dispatch_failed", signal, thread, payload, signalId: draft.id, error: dispatchResult.error });
+              this.logger.track(`Side-effect auto-draft SQS dispatch failed — draft remains pending_send, will not send automatically: ${dispatchResult.error.message}`, { code: "processor.side_effect.auto_draft_dispatch_failed", signal, thread, payload, signalId: draft.id, error: dispatchResult.error });
             }
           }
 
@@ -662,7 +662,7 @@ export class SignalProcessor {
         }
         this.logger.trackPoint("side_effect_auto_draft_complete");
       } catch (e) {
-        this.logger.track("Side-effect auto-draft threw unexpectedly.", { code: "processor.side_effect.auto_draft_error", signal, thread, payload, error: e });
+        this.logger.track(`Side-effect auto-draft threw unexpectedly: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.auto_draft_error", signal, thread, payload, error: e });
       }
     }
 
@@ -680,7 +680,7 @@ export class SignalProcessor {
         // Find the calendar signal linked to this email signal
         const calendarSignalResult = await this.threadDb.getLinkedCalendarSignal(accountId, thread.id, signal.id);
         if (calendarSignalResult.isErr()) {
-          this.logger.track("Calendar forward failed — could not find linked calendar signal.", { code: "processor.side_effect.calendar_forward_no_signal", signal, thread, payload, error: calendarSignalResult.error });
+          this.logger.track(`Calendar forward failed — could not find linked calendar signal: ${calendarSignalResult.error.message}`, { code: "processor.side_effect.calendar_forward_no_signal", signal, thread, payload, error: calendarSignalResult.error });
         } else if (!calendarSignalResult.value) {
           this.logger.track("Calendar forward skipped — no linked calendar signal found.", { code: "processor.side_effect.calendar_forward_no_signal", signal, thread, payload });
         } else {
@@ -697,14 +697,14 @@ export class SignalProcessor {
             this.logger,
           );
           if (forwardResult.isErr()) {
-            this.logger.track("Calendar forward failed — will force retry.", { code: "processor.side_effect.calendar_forward_failed", signal, thread, payload, error: forwardResult.error });
+            this.logger.track(`Calendar forward failed — will force retry: ${"message" in forwardResult.error ? forwardResult.error.message : forwardResult.error.errorName}`, { code: "processor.side_effect.calendar_forward_failed", signal, thread, payload, error: forwardResult.error });
             criticalFailures.push(forwardResult.error);
           } else {
             this.logger.trackPoint("side_effect_calendar_forward_complete");
           }
         }
       } catch (e) {
-        this.logger.track("Calendar forward threw unexpectedly — will force retry.", { code: "processor.side_effect.calendar_forward_error", signal, thread, payload, error: e });
+        this.logger.track(`Calendar forward threw unexpectedly — will force retry: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.calendar_forward_error", signal, thread, payload, error: e });
         criticalFailures.push(e);
       }
     }
@@ -723,7 +723,7 @@ export class SignalProcessor {
     try {
       return await this._processInboundUnsafe(msg, receiveCount, opts);
     } catch (e) {
-      this.logger.error("processInbound threw an unhandled exception. The message will be retried.", { code: "processor.unhandled_exception", error: e, compositeMailMessageId: msg.compositeMailMessageId });
+      this.logger.error(`processInbound threw an unhandled exception — the message will be retried: ${e instanceof Error ? e.message : e}`, { code: "processor.unhandled_exception", error: e, compositeMailMessageId: msg.compositeMailMessageId });
       return err(dbError(e));
     }
   }
@@ -1032,7 +1032,7 @@ export class SignalProcessor {
     const primaryResult = await this.embeddingGenerator.generateForModel(embedText, readCluster.modelId);
 
     if (primaryResult.isErr()) {
-      this.logger.error("Primary embedding generation failed. The Bedrock InvokeModel call for the read cluster returned an error. Thread matching cannot proceed without a valid vector — the message will be retried via batch item failure.", { code: "embedding.primary_failed", modelId: readCluster.modelId, error: primaryResult.error });
+      this.logger.error(`Primary embedding generation failed — thread matching cannot proceed, message will be retried: ${primaryResult.error.message}`, { code: "embedding.primary_failed", modelId: readCluster.modelId, error: primaryResult.error });
       return err(dbError(primaryResult.error));
     }
     const embedding = primaryResult.value.vector;
@@ -1533,7 +1533,7 @@ export class SignalProcessor {
     const payload: SideEffectPayload = { signal, thread };
     const sendResult = await this.sqsDispatcher.sendMessage(payload);
     if (sendResult.isErr()) {
-      this.logger.error("Failed to dispatch side-effect SQS message. Aurora upserts succeeded but side-effects won't fire until the message is retried and dispatch succeeds. Check SQS queue health and permissions.", { code: "processor.side_effect_dispatch_failed", signal, thread, error: sendResult.error });
+      this.logger.error(`Failed to dispatch side-effect SQS message — side-effects won't fire until retry succeeds: ${sendResult.error.message}`, { code: "processor.side_effect_dispatch_failed", signal, thread, error: sendResult.error });
       return err(sendResult.error);
     }
 
@@ -1689,7 +1689,7 @@ export class SignalProcessor {
           sqsMessageAttributeMessageType: "signal_followup",
         });
         if (scheduleResult.isErr()) {
-          this.logger.error("Failed to create calendar day-of schedule.", { code: "processor.calendar.schedule_failed", signal, thread, calendarSignalId, fireAt, error: scheduleResult.error });
+          this.logger.error(`Failed to create calendar day-of schedule: ${scheduleResult.error.message}`, { code: "processor.calendar.schedule_failed", signal, thread, calendarSignalId, fireAt, error: scheduleResult.error });
         }
       }
     }
@@ -1717,7 +1717,7 @@ export class SignalProcessor {
               sqsMessageAttributeMessageType: "rsvp_reminder",
             });
             if (rsvpResult.isErr()) {
-              this.logger.error("Failed to create RSVP reminder schedule.", {
+              this.logger.error(`Failed to create RSVP reminder schedule: ${rsvpResult.error.message}`, {
                 code: "processor.calendar.rsvp_schedule_failed",
                 signal, thread, calendarSignalId, fireAt,
                 error: rsvpResult.error,
@@ -2017,9 +2017,9 @@ function buildSignal(opts: {
   }
 
   // ---------------------------------------------------------------------------
-  // Link overlap validation — ensure no URL appears in multiple classification buckets.
+  // Link overlap validation & dedup — ensure no URL appears in multiple classification buckets.
   // Priority: unsubscribe > workflowData URL fields > actions.
-  // If overlap found, log TRACK for follow-up investigation.
+  // Lower-priority buckets have duplicates stripped; overlaps are logged as TRACK.
   // ---------------------------------------------------------------------------
   const classifiedUrls = new Map<string, string>(); // url → first bucket that claimed it
   if (unsubscribe) {
@@ -2033,7 +2033,7 @@ function buildSignal(opts: {
     if (typeof value !== "string") continue;
     const existing = classifiedUrls.get(value);
     if (existing) {
-      logger?.track("Link overlap detected — same URL assigned to multiple classification buckets.", {
+      logger?.track(`Link overlap: "${value}" already in ${existing}, also claimed by workflowData.${field}`, {
         code: "processor.link_overlap",
         url: value,
         existingBucket: existing,
@@ -2046,10 +2046,12 @@ function buildSignal(opts: {
     }
   }
 
+  // Deduplicate actions — strip URLs already claimed by a higher-priority bucket
+  const dedupedActions: typeof classification.actions = [];
   for (const action of classification.actions) {
     const existing = classifiedUrls.get(action.url);
     if (existing) {
-      logger?.track("Link overlap detected — same URL assigned to multiple classification buckets.", {
+      logger?.track(`Link overlap: "${action.url}" already in ${existing}, stripped from actions`, {
         code: "processor.link_overlap",
         url: action.url,
         existingBucket: existing,
@@ -2059,6 +2061,7 @@ function buildSignal(opts: {
       });
     } else {
       classifiedUrls.set(action.url, "actions");
+      dedupedActions.push(action);
     }
   }
 
@@ -2082,7 +2085,7 @@ function buildSignal(opts: {
       recipientAddress,
       workflow: classification.workflow,
       workflowData: classification.workflowData,
-      actions: classification.actions,
+      actions: dedupedActions,
       tags: classification.tags.slice(0, 50),
       summary: classification.summary,
       s3Key,

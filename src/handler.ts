@@ -76,7 +76,7 @@ async function handlerInner(
     if (result && typeof result === "object" && "isErr" in result) {
       if ((result as { isErr(): boolean }).isErr()) {
         const error = (result as unknown as { error: unknown }).error;
-        logger.error("Step Function task failed", { code: "handler.sfn.task_failed", processorId, error });
+        logger.error(`Step Function task failed: ${error instanceof Error ? error.message : JSON.stringify(error)}`, { code: "handler.sfn.task_failed", processorId, error });
         throw new Error(`SFN task ${processorId} failed: ${JSON.stringify(error)}`);
       }
       return (result as unknown as { value: unknown }).value;
@@ -118,7 +118,7 @@ async function handlerInner(
       try {
         body = JSON.parse(record.body);
       } catch (e) {
-        logger.error("Failed to parse SQS record body as JSON.", { code: "handler.sqs.parse_failed", messageId: record.messageId, error: e });
+        logger.error(`Failed to parse SQS record body as JSON: ${e instanceof Error ? e.message : e}`, { code: "handler.sqs.parse_failed", messageId: record.messageId, error: e });
         failures.push({ itemIdentifier: record.messageId });
         continue;
       }
@@ -128,7 +128,7 @@ async function handlerInner(
 
       if (result.isErr()) {
         if (receiveCount > RETRY_TRACK_THRESHOLD) {
-          logger.error("SQS message failed after exceeding retry threshold.", { code: "handler.sqs.retry_threshold_exceeded", messageId: record.messageId, receiveCount, messageType: resolvedMessageType, error: result.error, record });
+          logger.error(`SQS message failed after exceeding retry threshold: ${result.error instanceof Error ? result.error.message : JSON.stringify(result.error)}`, { code: "handler.sqs.retry_threshold_exceeded", messageId: record.messageId, receiveCount, messageType: resolvedMessageType, error: result.error, record });
         } else {
           logger.info("SQS message processing failed. Will be retried automatically.", { code: "handler.sqs.processing_failed", messageId: record.messageId, receiveCount, messageType: resolvedMessageType, error: result.error, record });
         }
@@ -259,7 +259,7 @@ async function processSqsRecord(
   try {
     inner = JSON.parse(snsEnvelope.Message as string);
   } catch (e) {
-    logger.error("Failed to parse SNS Message field as JSON.", {
+    logger.error(`Failed to parse SNS Message field as JSON: ${e instanceof Error ? e.message : e}`, {
       code: "handler.sqs.sns_message_parse_failed",
       sqsMessageId,
       error: e,

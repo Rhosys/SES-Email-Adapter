@@ -91,7 +91,7 @@ async function migrationWrapper() {
         continue;
       }
 
-      logger.error("Migration failed due to unretryable reason", { code: "migrate.failed", reason: message, attempts: attempt, error: e, errors });
+      logger.error(`Migration failed due to unretryable reason: ${e instanceof Error ? e.message : e}`, { code: "migrate.failed", reason: message, attempts: attempt, error: e, errors });
       process.exit(1);
     }
   }

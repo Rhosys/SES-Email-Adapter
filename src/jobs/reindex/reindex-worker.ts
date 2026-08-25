@@ -88,7 +88,7 @@ export class ReindexWorker {
           ...(lastEvaluatedKey ? { ExclusiveStartKey: lastEvaluatedKey } : {}),
         }));
       } catch (e) {
-        this.logger.error("DynamoDB scan failed during reindex segment processing. The segment will be retried.", { code: "reindex.worker.scan_failed", error: e, segment, totalSegments, targetRegistryId });
+        this.logger.error(`DynamoDB scan failed during reindex segment processing — ${e instanceof Error ? e.message : e}. The segment will be retried.`, { code: "reindex.worker.scan_failed", error: e, segment, totalSegments, targetRegistryId });
         return err(dbError(e));
       }
 

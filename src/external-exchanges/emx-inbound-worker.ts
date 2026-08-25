@@ -61,7 +61,7 @@ export class EmxInboundWorker {
 
     const emxResult = await this.exchangesDb.getExternalExchange(accountId, emxId);
     if (emxResult.isErr()) {
-      this.logger.error("emx_inbound: failed to load EMX record", { code: "emx.inbound.emx_load_failed", source, emxId, error: emxResult.error });
+      this.logger.error(`emx_inbound: failed to load EMX record: ${emxResult.error.message}`, { code: "emx.inbound.emx_load_failed", source, emxId, error: emxResult.error });
       return err({ kind: "provider_fetch_failed", cause: emxResult.error });
     }
     const emx = emxResult.value;
@@ -79,7 +79,7 @@ export class EmxInboundWorker {
         this.logger.warn("emx_inbound: provider token expired, skipping", { code: "emx.inbound.token_expired", source, providerMessageId, emxId });
         return ok(undefined);
       }
-      this.logger.error("emx_inbound: fetch failed", { code: "emx.inbound.fetch_failed", source, providerMessageId, emxId, error });
+      this.logger.error(`emx_inbound: fetch failed [${error.kind}]`, { code: "emx.inbound.fetch_failed", source, providerMessageId, emxId, error });
       return err(error);
     }
 
@@ -104,7 +104,7 @@ export class EmxInboundWorker {
       });
       const ensureResult = await this.accountDb.ensureAlias(accountId, emx.emailAddress, "allow_all", null, emxId);
       if (ensureResult.isErr()) {
-        this.logger.error("EMX inbound: self-heal ensureAlias failed", { code: "emx.inbound.self_heal_failed", emxId, accountId, error: ensureResult.error });
+        this.logger.error(`EMX inbound: self-heal ensureAlias failed: ${ensureResult.error.message}`, { code: "emx.inbound.self_heal_failed", emxId, accountId, error: ensureResult.error });
       }
       return err({ kind: "provider_fetch_failed", cause: "Alias missing — self-heal attempted, retrying" });
     }

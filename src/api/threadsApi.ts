@@ -112,7 +112,7 @@ export class ThreadsApi {
           q, getPrimaryThreadMatcherRegistry().modelId
         );
         if (embeddingResult.isErr()) {
-          logger.error("Embedding generation failed for search.", { code: "api.threads.search_embed_failed", error: embeddingResult.error });
+          logger.error(`Embedding generation failed for search: ${embeddingResult.error.message}`, { code: "api.threads.search_embed_failed", error: embeddingResult.error });
           return err(c, 503, "Search temporarily unavailable");
         }
 
@@ -120,7 +120,7 @@ export class ThreadsApi {
           accountId, embeddingResult.value.vector, 10
         );
         if (threadIdsResult.isErr()) {
-          logger.error("Vector search failed.", { code: "api.threads.search_vector_failed", error: threadIdsResult.error });
+          logger.error(`Vector search failed: ${threadIdsResult.error.message}`, { code: "api.threads.search_vector_failed", error: threadIdsResult.error });
           return err(c, 503, "Search temporarily unavailable");
         }
 
@@ -130,7 +130,7 @@ export class ThreadsApi {
 
         const threadsResult = await threadDb.batchGetThreads(accountId, threadIdsResult.value);
         if (threadsResult.isErr()) {
-          logger.error("Failed to hydrate search results.", { code: "api.threads.search_hydrate_failed", error: threadsResult.error });
+          logger.error(`Failed to hydrate search results: ${threadsResult.error.message}`, { code: "api.threads.search_hydrate_failed", error: threadsResult.error });
           return err(c, 500, "Internal Server Error");
         }
 
@@ -145,7 +145,7 @@ export class ThreadsApi {
       };
       const result = await threadDb.listThreads(accountId, params);
       if (result.isErr()) {
-        logger.error("Failed to list threads.", { code: "api.threads.list_failed", error: result.error });
+        logger.error(`Failed to list threads: ${result.error.message}`, { code: "api.threads.list_failed", error: result.error });
         return err(c, 500, "Internal Server Error");
       }
       return c.json(page("threads", result.value.items.map(toApiThread), result.value.nextCursor), 200);
@@ -166,7 +166,7 @@ export class ThreadsApi {
       const threadId = c.req.param("threadId")!;
       const threadResult = await threadDb.getThread(accountId, threadId);
       if (threadResult.isErr()) {
-        logger.error("Failed to get thread.", { code: "api.thread.get_failed", error: threadResult.error });
+        logger.error(`Failed to get thread: ${threadResult.error.message}`, { code: "api.thread.get_failed", error: threadResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const thread = threadResult.value;
@@ -190,7 +190,7 @@ export class ThreadsApi {
       logger.info("Updating thread", { code: "api.threads.patch", accountId, threadId });
       const threadResult = await threadDb.getThread(accountId, threadId);
       if (threadResult.isErr()) {
-        logger.error("Failed to get thread for update.", { code: "api.thread.patch_failed", error: threadResult.error });
+        logger.error(`Failed to get thread for update: ${threadResult.error.message}`, { code: "api.thread.patch_failed", error: threadResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const thread = threadResult.value;
@@ -200,7 +200,7 @@ export class ThreadsApi {
       if (body.status === "report_violation") {
         const signalsResult = await threadDb.listSignals(accountId, thread.id, { limit: 1 });
         if (signalsResult.isErr()) {
-          logger.error("Failed to list signals for report violation.", { code: "api.thread.report_violation.list_signals_failed", error: signalsResult.error });
+          logger.error(`Failed to list signals for report violation: ${signalsResult.error.message}`, { code: "api.thread.report_violation.list_signals_failed", error: signalsResult.error });
           return err(c, 500, "Internal Server Error");
         }
         const signal = signalsResult.value.items[0];
@@ -210,7 +210,7 @@ export class ThreadsApi {
           const recipientAddress = signal.data.recipientAddress;
           const saveSenderResult = await accountDb.saveSender(accountId, recipientAddress, senderETLD1, "report_violation");
           if (saveSenderResult.isErr()) {
-            logger.error("Failed to save sender for report violation.", { code: "api.thread.report_violation.save_sender_failed", error: saveSenderResult.error });
+            logger.error(`Failed to save sender for report violation: ${saveSenderResult.error.message}`, { code: "api.thread.report_violation.save_sender_failed", error: saveSenderResult.error });
             return err(c, 500, "Internal Server Error");
           }
           logger.track("Thread reported as GDPR violation. Sender domain blocked with report_violation policy and thread deleted.", {
@@ -219,7 +219,7 @@ export class ThreadsApi {
         }
         const updateResult = await threadDb.updateThread(accountId, thread.id, "deleted", thread.lastSignalAt, {});
         if (updateResult.isErr()) {
-          logger.error("Failed to update thread for report violation.", { code: "api.thread.report_violation.update_failed", error: updateResult.error });
+          logger.error(`Failed to update thread for report violation: ${updateResult.error.message}`, { code: "api.thread.report_violation.update_failed", error: updateResult.error });
           return err(c, 500, "Internal Server Error");
         }
         return c.json(toApiThread(updateResult.value), 200);
@@ -258,7 +258,7 @@ export class ThreadsApi {
           const delaySeconds = Math.max(0, Math.ceil(deltaMs / 1000));
           const sqsResult = await signalQueue.send("signal_followup", { accountId, threadId: thread.id }, { delaySeconds });
           if (sqsResult.isErr()) {
-            logger.error("Failed to enqueue near-future followup.", { code: "api.thread.followup_sqs_failed", error: sqsResult.error });
+            logger.error(`Failed to enqueue near-future followup: ${sqsResult.error.message}`, { code: "api.thread.followup_sqs_failed", error: sqsResult.error });
             return err(c, 500, "Failed to schedule followup");
           }
         } else {
@@ -267,7 +267,7 @@ export class ThreadsApi {
             suffix: "followup", sqsMessageAttributeMessageType: "signal_followup",
           });
           if (scheduleResult.isErr()) {
-            logger.error("Failed to create followup schedule.", { code: "api.thread.followup_schedule_failed", error: scheduleResult.error });
+            logger.error(`Failed to create followup schedule: ${scheduleResult.error.message}`, { code: "api.thread.followup_schedule_failed", error: scheduleResult.error });
             return err(c, 500, "Failed to create followup schedule");
           }
         }
@@ -275,7 +275,7 @@ export class ThreadsApi {
 
       const updateResult = await threadDb.updateThread(accountId, thread.id, status, lastSignalAt, fields);
       if (updateResult.isErr()) {
-        logger.error("Failed to update thread.", { code: "api.thread.update_failed", error: updateResult.error });
+        logger.error(`Failed to update thread: ${updateResult.error.message}`, { code: "api.thread.update_failed", error: updateResult.error });
         return err(c, 500, "Internal Server Error");
       }
 
@@ -302,7 +302,7 @@ export class ThreadsApi {
       const threadId = c.req.param("threadId")!;
       const threadResult = await threadDb.getThread(accountId, threadId);
       if (threadResult.isErr()) {
-        logger.error("Failed to get thread for listing signals.", { code: "api.thread.list_signals_failed", error: threadResult.error });
+        logger.error(`Failed to get thread for listing signals: ${threadResult.error.message}`, { code: "api.thread.list_signals_failed", error: threadResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const thread = threadResult.value;
@@ -314,7 +314,7 @@ export class ThreadsApi {
       };
       const result = await threadDb.listSignals(accountId, thread.id, params);
       if (result.isErr()) {
-        logger.error("Failed to list signals.", { code: "api.thread.list_signals_failed", error: result.error });
+        logger.error(`Failed to list signals: ${result.error.message}`, { code: "api.thread.list_signals_failed", error: result.error });
         return err(c, 500, "Internal Server Error");
       }
 
@@ -361,7 +361,7 @@ export class ThreadsApi {
       logger.info("Creating draft signal", { code: "api.threads.create_signal", accountId, threadId });
       const threadResult = await threadDb.getThread(accountId, threadId);
       if (threadResult.isErr()) {
-        logger.error("Failed to get thread for creating signal.", { code: "api.thread.create_signal_failed", error: threadResult.error });
+        logger.error(`Failed to get thread for creating signal: ${threadResult.error.message}`, { code: "api.thread.create_signal_failed", error: threadResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const thread = threadResult.value;
@@ -403,7 +403,7 @@ export class ThreadsApi {
       };
       const createResult = await threadDb.createSignal(signal);
       if (createResult.isErr()) {
-        logger.error("Failed to create draft signal.", { code: "api.thread.create_signal_failed", error: createResult.error });
+        logger.error(`Failed to create draft signal: ${createResult.error.message}`, { code: "api.thread.create_signal_failed", error: createResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const draftThreadUpdateResult = await threadDb.updateThread(accountId, thread.id, thread.status, now, {});
@@ -429,14 +429,14 @@ export class ThreadsApi {
       logger.info("Replacing draft signal", { code: "api.threads.replace_signal", accountId, threadId, signalId });
       const threadResult = await threadDb.getThread(accountId, threadId);
       if (threadResult.isErr()) {
-        logger.error("Failed to get thread for replacing signal.", { code: "api.signal.update_failed", error: threadResult.error });
+        logger.error(`Failed to get thread for replacing signal: ${threadResult.error.message}`, { code: "api.signal.update_failed", error: threadResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const thread = threadResult.value;
       if (!thread) return err(c, 404, "Thread not found", "THREAD_NOT_FOUND");
       const signalResult = await threadDb.getSignalById(accountId, signalId, threadId);
       if (signalResult.isErr()) {
-        logger.error("Failed to get signal for replacement.", { code: "api.signal.get_failed", error: signalResult.error });
+        logger.error(`Failed to get signal for replacement: ${signalResult.error.message}`, { code: "api.signal.get_failed", error: signalResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const signal = signalResult.value;
@@ -452,7 +452,7 @@ export class ThreadsApi {
         ...(body.textBody != null ? { textBody: body.textBody } : {}),
       });
       if (updateResult.isErr()) {
-        logger.error("Failed to replace draft signal.", { code: "api.signal.update_failed", error: updateResult.error });
+        logger.error(`Failed to replace draft signal: ${updateResult.error.message}`, { code: "api.signal.update_failed", error: updateResult.error });
         return err(c, 500, "Internal Server Error");
       }
       logger.info("Draft signal replaced", { code: "api.threads.signal_replaced", accountId, threadId, signalId });
@@ -477,7 +477,7 @@ export class ThreadsApi {
 
       const threadResult = await threadDb.getThread(accountId, threadId);
       if (threadResult.isErr()) {
-        logger.error("Failed to get thread for signal send.", { code: "api.signal_send.get_thread_failed", error: threadResult.error });
+        logger.error(`Failed to get thread for signal send: ${threadResult.error.message}`, { code: "api.signal_send.get_thread_failed", error: threadResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const thread = threadResult.value;
@@ -485,7 +485,7 @@ export class ThreadsApi {
 
       const signalResult = await threadDb.getSignalById(accountId, signalId, threadId);
       if (signalResult.isErr()) {
-        logger.error("Failed to get signal for send.", { code: "api.signal_send.get_signal_failed", error: signalResult.error });
+        logger.error(`Failed to get signal for send: ${signalResult.error.message}`, { code: "api.signal_send.get_signal_failed", error: signalResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const signal = signalResult.value;
@@ -519,13 +519,13 @@ export class ThreadsApi {
       }
       const sqsResult = await draftSendDispatcher.dispatch({ signalId: signal.id, accountId, threadId, sendInitiatedAt }, undoWindowSeconds);
       if (sqsResult.isErr()) {
-        logger.error("Failed to dispatch draft send.", { code: "api.signal_send.dispatch_failed", error: sqsResult.error });
+        logger.error(`Failed to dispatch draft send: ${sqsResult.error.message}`, { code: "api.signal_send.dispatch_failed", error: sqsResult.error });
         return err(c, 500, "Internal Server Error");
       }
 
       const updateResult = await threadDb.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "pending_send", sendInitiatedAt });
       if (updateResult.isErr()) {
-        logger.error("Failed to update signal send status.", { code: "api.signal_send.status_update_failed", error: updateResult.error });
+        logger.error(`Failed to update signal send status: ${updateResult.error.message}`, { code: "api.signal_send.status_update_failed", error: updateResult.error });
         return err(c, 500, "Internal Server Error");
       }
 
@@ -551,7 +551,7 @@ export class ThreadsApi {
       logger.info("Unsubscribing from thread", { code: "api.threads.unsubscribe", accountId, threadId });
       const threadResult = await threadDb.getThread(accountId, threadId);
       if (threadResult.isErr()) {
-        logger.error("Failed to get thread for unsubscribe.", { code: "api.unsubscribe.get_thread_failed", error: threadResult.error });
+        logger.error(`Failed to get thread for unsubscribe: ${threadResult.error.message}`, { code: "api.unsubscribe.get_thread_failed", error: threadResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const thread = threadResult.value;
@@ -559,7 +559,7 @@ export class ThreadsApi {
 
       const signalsResult = await threadDb.listSignals(accountId, thread.id, { limit: 20 });
       if (signalsResult.isErr()) {
-        logger.error("Failed to list signals for unsubscribe.", { code: "api.unsubscribe.list_signals_failed", error: signalsResult.error });
+        logger.error(`Failed to list signals for unsubscribe: ${signalsResult.error.message}`, { code: "api.unsubscribe.list_signals_failed", error: signalsResult.error });
         return err(c, 500, "Internal Server Error");
       }
 
@@ -604,7 +604,7 @@ export class ThreadsApi {
 
       const archiveResult = await threadDb.updateThread(accountId, thread.id, "archived", thread.lastSignalAt, {});
       if (archiveResult.isErr()) {
-        logger.error("Failed to archive thread after unsubscribe.", { code: "api.unsubscribe.archive_failed", error: archiveResult.error });
+        logger.error(`Failed to archive thread after unsubscribe: ${archiveResult.error.message}`, { code: "api.unsubscribe.archive_failed", error: archiveResult.error });
         return err(c, 500, "Internal Server Error");
       }
 
@@ -635,7 +635,7 @@ export class ThreadsApi {
 
       const threadResult = await threadDb.getThread(accountId, threadId);
       if (threadResult.isErr()) {
-        logger.error("Failed to get thread for RSVP.", { code: "api.rsvp.get_thread_failed", error: threadResult.error });
+        logger.error(`Failed to get thread for RSVP: ${threadResult.error.message}`, { code: "api.rsvp.get_thread_failed", error: threadResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const thread = threadResult.value;
@@ -643,7 +643,7 @@ export class ThreadsApi {
 
       const signalResult = await threadDb.getSignalById(accountId, signalId, threadId);
       if (signalResult.isErr()) {
-        logger.error("Failed to get signal for RSVP.", { code: "api.rsvp.get_signal_failed", error: signalResult.error });
+        logger.error(`Failed to get signal for RSVP: ${signalResult.error.message}`, { code: "api.rsvp.get_signal_failed", error: signalResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const signal = signalResult.value;
@@ -663,7 +663,7 @@ export class ThreadsApi {
       const aliasDomain = recipientAddress.split("@")[1] ?? "";
       const domainResult = await accountDb.getDomainByName(accountId, aliasDomain);
       if (domainResult.isErr()) {
-        logger.error("Failed to get domain for RSVP.", { code: "api.rsvp.get_domain_failed", error: domainResult.error });
+        logger.error(`Failed to get domain for RSVP: ${domainResult.error.message}`, { code: "api.rsvp.get_domain_failed", error: domainResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const domain = domainResult.value;
@@ -730,7 +730,7 @@ export class ThreadsApi {
 
       const saveResult = await threadDb.saveSignal(responseSignal);
       if (saveResult.isErr()) {
-        logger.error("Failed to save RSVP response signal.", { code: "api.rsvp.save_failed", error: saveResult.error });
+        logger.error(`Failed to save RSVP response signal: ${saveResult.error.message}`, { code: "api.rsvp.save_failed", error: saveResult.error });
         return err(c, 500, "Internal Server Error");
       }
 
@@ -766,7 +766,7 @@ export class ThreadsApi {
       const threadId = c.req.param("threadId")!;
       const signalResult = await threadDb.getSignalById(accountId, c.req.param("id")!, threadId);
       if (signalResult.isErr()) {
-        logger.error("Failed to get signal.", { code: "api.signal.get_failed", error: signalResult.error });
+        logger.error(`Failed to get signal: ${signalResult.error.message}`, { code: "api.signal.get_failed", error: signalResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const signal = signalResult.value;
@@ -790,7 +790,7 @@ export class ThreadsApi {
       const threadId = c.req.param("threadId")!;
       const signalResult = await threadDb.getSignalById(accountId, c.req.param("id")!, threadId);
       if (signalResult.isErr()) {
-        logger.error("Failed to get signal for raw email.", { code: "api.signal.get_failed", error: signalResult.error });
+        logger.error(`Failed to get signal for raw email: ${signalResult.error.message}`, { code: "api.signal.get_failed", error: signalResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const signal = signalResult.value;
@@ -819,7 +819,7 @@ export class ThreadsApi {
       logger.info("Updating signal", { code: "api.threads.patch_signal", accountId, threadId, signalId });
       const signalResult = await threadDb.getSignalById(accountId, signalId, threadId);
       if (signalResult.isErr()) {
-        logger.error("Failed to get signal for update.", { code: "api.signal.get_failed", error: signalResult.error });
+        logger.error(`Failed to get signal for update: ${signalResult.error.message}`, { code: "api.signal.get_failed", error: signalResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const signal = signalResult.value;
@@ -836,7 +836,7 @@ export class ThreadsApi {
         if (body.status !== "draft") return err(c, 400, "Pending signals can only be reverted to draft", "INVALID_STATUS_TRANSITION");
         const updateResult = await threadDb.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "draft", sendInitiatedAt: null });
         if (updateResult.isErr()) {
-          logger.error("Failed to revert signal to draft.", { code: "api.signal.update_failed", error: updateResult.error });
+          logger.error(`Failed to revert signal to draft: ${updateResult.error.message}`, { code: "api.signal.update_failed", error: updateResult.error });
           return err(c, 500, "Internal Server Error");
         }
         logger.info("Signal reverted to draft", { code: "api.threads.signal_patched", accountId, threadId, signalId, statusTransition: "pending_send→draft" });
@@ -846,7 +846,7 @@ export class ThreadsApi {
       // Normal draft edit (subject, textBody, from, to)
       const updateResult = await threadDb.updateSignal(accountId, signal.signalLookupId, body as Parameters<typeof threadDb.updateSignal>[2]);
       if (updateResult.isErr()) {
-        logger.error("Failed to update signal.", { code: "api.signal.update_failed", error: updateResult.error });
+        logger.error(`Failed to update signal: ${updateResult.error.message}`, { code: "api.signal.update_failed", error: updateResult.error });
         return err(c, 500, "Internal Server Error");
       }
       logger.info("Signal updated", { code: "api.threads.signal_patched", accountId, threadId, signalId });
@@ -870,7 +870,7 @@ export class ThreadsApi {
       logger.info("Deleting signal", { code: "api.threads.delete_signal", accountId, threadId, signalId });
       const signalResult = await threadDb.getSignalById(accountId, signalId, threadId);
       if (signalResult.isErr()) {
-        logger.error("Failed to get signal for deletion.", { code: "api.signal.delete_failed", error: signalResult.error });
+        logger.error(`Failed to get signal for deletion: ${signalResult.error.message}`, { code: "api.signal.delete_failed", error: signalResult.error });
         return err(c, 500, "Internal Server Error");
       }
       const signal = signalResult.value;
@@ -879,7 +879,7 @@ export class ThreadsApi {
       if (signal.status !== "draft") return err(c, 400, "Only draft signals can be deleted", "SIGNAL_NOT_DRAFT");
       const deleteResult = await threadDb.deleteSignal(accountId, signal.signalLookupId);
       if (deleteResult.isErr()) {
-        logger.error("Failed to delete signal.", { code: "api.signal.delete_failed", error: deleteResult.error });
+        logger.error(`Failed to delete signal: ${deleteResult.error.message}`, { code: "api.signal.delete_failed", error: deleteResult.error });
         return err(c, 500, "Internal Server Error");
       }
       logger.info("Signal deleted", { code: "api.threads.signal_deleted", accountId, threadId, signalId });
@@ -908,7 +908,7 @@ export class ThreadsApi {
         if (error.message === "Only email signals can be reprocessed" || error.message === "Signal has no s3Key — cannot reprocess") {
           return err(c, 400, error.message);
         }
-        logger.error("Signal reprocess failed with an unexpected processor error.", { code: "api.reprocess.failed", accountId, signalId: id, threadId, error });
+        logger.error(`Signal reprocess failed with an unexpected processor error: ${error.message}`, { code: "api.reprocess.failed", accountId, signalId: id, threadId, error });
         return err(c, 500, "Reprocess failed", undefined, error.message);
       }
       logger.info("Signal reprocessed", { code: "api.threads.reprocessed", accountId, threadId, signalId: id });

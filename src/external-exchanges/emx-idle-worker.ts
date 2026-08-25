@@ -49,7 +49,7 @@ export class EmxIdleWorker {
     // Load all exchanges for this account
     const listResult = await this.db.listExternalExchanges(accountId);
     if (listResult.isErr()) {
-      this.logger.error("emx_idle: failed to list exchanges", { code: "emx.idle.list_failed", accountId, error: listResult.error });
+      this.logger.error(`emx_idle: failed to list exchanges: ${listResult.error.message}`, { code: "emx.idle.list_failed", accountId, error: listResult.error });
       return ok(undefined);
     }
 
@@ -103,7 +103,7 @@ export class EmxIdleWorker {
     settled.forEach((outcome, i) => {
       if (outcome.status === "rejected") {
         const task = tasks[i]!;
-        this.logger.error("emx_idle: task rejected unexpectedly", { code: "emx.idle.task_rejected", accountId, emxId: task.emxId, platform: task.platform, error: outcome.reason });
+        this.logger.error(`emx_idle: task rejected unexpectedly: ${outcome.reason instanceof Error ? outcome.reason.message : outcome.reason}`, { code: "emx.idle.task_rejected", accountId, emxId: task.emxId, platform: task.platform, error: outcome.reason });
       }
     });
 

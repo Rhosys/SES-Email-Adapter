@@ -76,7 +76,7 @@ export class ForwardingService implements IForwardingService {
       });
     } catch (e) {
       const message = e instanceof Error ? e.message : "Unknown error";
-      this.logger.error("Webhook verification failed — network/timeout error.", { code: "forwarding.webhook_verification_failed", accountId, url, error: e });
+      this.logger.error(`Webhook verification failed — network/timeout error: ${e instanceof Error ? e.message : e}`, { code: "forwarding.webhook_verification_failed", accountId, url, error: e });
       return err({ kind: "verification_failed", reason: `Webhook unreachable: ${message}` });
     }
 
@@ -168,10 +168,10 @@ export class ForwardingService implements IForwardingService {
 
     if (result.isErr()) {
       if (result.error.kind === "permanent_ses_error") {
-        this.logger.error("Forwarding verification email permanently rejected by SES.", { code: "forwarding.verify_send_permanent", accountId, target, error: result.error });
+        this.logger.error(`Forwarding verification email permanently rejected by SES: ${result.error.errorName}`, { code: "forwarding.verify_send_permanent", accountId, target, error: result.error });
         return err({ kind: "verification_failed", reason: `Email rejected by SES: ${result.error.errorName}` });
       }
-      this.logger.error("Failed to send forwarding verification email.", { code: "forwarding.verify_send_failed", accountId, target, error: result.error });
+      this.logger.error(`Failed to send forwarding verification email: ${"errorName" in result.error ? result.error.errorName : result.error.kind}`, { code: "forwarding.verify_send_failed", accountId, target, error: result.error });
       return err({ kind: "verification_failed", reason: `Unable to send verification email: ${result.error.kind === "transient_ses_error" ? result.error.errorName : "internal error"}` });
     }
 

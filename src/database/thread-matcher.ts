@@ -138,12 +138,12 @@ async function withRetry<T>(fn: () => Promise<T>, logger: Logger, operation: str
       }
 
       if (!isTransientError(e)) {
-        logger.error("Aurora query failed with non-transient error — no retry", { code: "aurora.non_transient", operation, attempt, error: e });
+        logger.error(`Aurora query failed with non-transient error — no retry: ${e instanceof Error ? e.message : e}`, { code: "aurora.non_transient", operation, attempt, error: e });
         throw e;
       }
 
       if (attempt === maxAttempts - 1) {
-        logger.error("Aurora query failed after all retry attempts exhausted", { code: "aurora.retries_exhausted", operation, attempts: maxAttempts, error: e });
+        logger.error(`Aurora query failed after all retry attempts exhausted: ${e instanceof Error ? e.message : e}`, { code: "aurora.retries_exhausted", operation, attempts: maxAttempts, error: e });
         throw e;
       }
 

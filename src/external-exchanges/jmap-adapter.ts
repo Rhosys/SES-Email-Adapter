@@ -285,7 +285,7 @@ export class JmapAdapter implements ProviderAdapter {
     }));
     const batchResult = await this.signalQueue.sendBatch("emx_inbound", entries);
     if (batchResult.isErr()) {
-      this.logger.error("JMAP: failed to enqueue emx_inbound batch", { code: "jmap.renew.batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
+      this.logger.error(`JMAP: failed to enqueue emx_inbound batch: ${batchResult.error.message}`, { code: "jmap.renew.batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
       return err({ kind: "provider_renewal_failed", cause: "SQS batch send failed" });
     }
 
@@ -738,7 +738,7 @@ export class JmapAdapter implements ProviderAdapter {
       }));
       const batchResult = await this.signalQueue.sendBatch("emx_inbound", entries);
       if (batchResult.isErr()) {
-        this.logger.error("JMAP push sync: failed to enqueue emx_inbound batch", { code: "jmap.push.batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
+        this.logger.error(`JMAP push sync: failed to enqueue emx_inbound batch: ${batchResult.error.message}`, { code: "jmap.push.batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
       }
     }
 
@@ -807,7 +807,7 @@ export class JmapAdapter implements ProviderAdapter {
     }));
     const batchResult = await this.signalQueue.sendBatch("emx_inbound", entries);
     if (batchResult.isErr()) {
-      this.logger.error("JMAP fallback: failed to enqueue emx_inbound batch", { code: "jmap.renew.fallback_batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
+      this.logger.error(`JMAP fallback: failed to enqueue emx_inbound batch: ${batchResult.error.message}`, { code: "jmap.renew.fallback_batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
       return err({ kind: "provider_renewal_failed", cause: "SQS batch send failed" });
     }
 

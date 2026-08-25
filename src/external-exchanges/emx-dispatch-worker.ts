@@ -32,7 +32,7 @@ export class EmxDispatchWorker {
     if (payload?.emxId && payload.accountId) {
       const getResult = await this.db.getExternalExchange(payload.accountId, payload.emxId);
       if (getResult.isErr()) {
-        this.logger.error("emx_dispatch: failed to fetch targeted exchange", { code: "emx.dispatch.targeted_fetch_failed", emxId: payload.emxId, error: getResult.error });
+        this.logger.error(`emx_dispatch: failed to fetch targeted exchange: ${getResult.error.message}`, { code: "emx.dispatch.targeted_fetch_failed", emxId: payload.emxId, error: getResult.error });
         return ok(undefined);
       }
       const emx = getResult.value;
@@ -49,7 +49,7 @@ export class EmxDispatchWorker {
 
     const expiringResult = await this.db.listExchangesDue(horizon);
     if (expiringResult.isErr()) {
-      this.logger.error("emx_dispatch: failed to query expiring exchanges", { code: "emx.dispatch.query_failed", error: expiringResult.error });
+      this.logger.error(`emx_dispatch: failed to query expiring exchanges: ${expiringResult.error.message}`, { code: "emx.dispatch.query_failed", error: expiringResult.error });
       return ok(undefined);
     }
 
@@ -75,7 +75,7 @@ export class EmxDispatchWorker {
     // failure below, same as any other renewal problem, rather than a separate check here.
     const renewResult = await adapter.renew(emx);
     if (renewResult.isErr()) {
-      this.logger.error("emx_dispatch: renewal failed", { code: "emx.dispatch.renewal_failed", emxId: emx.id, platform: emx.platform, error: renewResult.error });
+      this.logger.error(`emx_dispatch: renewal failed: ${renewResult.error.cause}`, { code: "emx.dispatch.renewal_failed", emxId: emx.id, platform: emx.platform, error: renewResult.error });
       return;
     }
 

@@ -285,7 +285,7 @@ export class AccountsApi {
       const profiles = await Promise.all(users.map(async (u) => {
         const profileResult = await access.getUserProfile(u.userId);
         if (profileResult.isErr()) {
-          logger.track("Failed to fetch user profile from Authress — returning user without profile data", { code: "accounts.authress_profile_fetch_failed", userId: u.userId, error: profileResult.error });
+          logger.track(`Failed to fetch user profile from Authress — returning user without profile data: ${profileResult.error.message}`, { code: "accounts.authress_profile_fetch_failed", userId: u.userId, error: profileResult.error });
           return u;
         }
         const { name, email, picture } = profileResult.value;
@@ -311,7 +311,7 @@ export class AccountsApi {
       }
       const inviteResult = await access.createInvite(accountId, body.email, body.role);
       if (inviteResult.isErr()) {
-        logger.track("Authress invite creation failed. The Authress API rejected the invite request.", { code: "invite.authress_creation_failed", accountId, email: body.email, error: inviteResult.error });
+        logger.track(`Authress invite creation failed. The Authress API rejected the invite request: ${inviteResult.error.message}`, { code: "invite.authress_creation_failed", accountId, email: body.email, error: inviteResult.error });
         return err(c, 422, "Failed to create invite", "INVITE_CREATION_FAILED");
       }
       const { inviteId } = inviteResult.value;

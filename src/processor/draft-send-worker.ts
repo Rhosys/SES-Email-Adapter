@@ -156,7 +156,7 @@ export class DraftSendWorker {
 
     const linkedResult = await this.threadDb.getSignalById(accountId, linkedSignalId, threadId);
     if (linkedResult.isErr()) {
-      this.logger.error("Draft send: failed to fetch linked signal for In-Reply-To — header will be omitted.", { code: "draft_send.linked_signal_fetch_failed", signalId: signal.id, accountId, linkedSignalId, error: linkedResult.error });
+      this.logger.error(`Draft send: failed to fetch linked signal for In-Reply-To — header will be omitted: ${linkedResult.error.message}`, { code: "draft_send.linked_signal_fetch_failed", signalId: signal.id, accountId, linkedSignalId, error: linkedResult.error });
       return undefined;
     }
     const linked = linkedResult.value;

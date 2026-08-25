@@ -123,7 +123,7 @@ export class SignalClassifier {
         }),
       );
     } catch (e) {
-      this.logger.error("Classifier Bedrock request failed.", { code: "classifier.bedrock_error", input, error: e });
+      this.logger.error(`Classifier Bedrock request failed: ${e instanceof Error ? e.message : e}`, { code: "classifier.bedrock_error", input, error: e });
       return err(classificationError(e));
     }
 
@@ -134,7 +134,7 @@ export class SignalClassifier {
     try {
       result = JSON.parse(responseBody) as BedrockResponseWithTrace;
     } catch (e) {
-      this.logger.error("Classifier received invalid JSON from Bedrock response envelope.", { code: "classifier.parse_failed", input, rawResponse: responseBody, error: e });
+      this.logger.error(`Classifier received invalid JSON from Bedrock response envelope: ${e instanceof Error ? e.message : e}`, { code: "classifier.parse_failed", input, rawResponse: responseBody, error: e });
       return err(classificationError(e, responseBody));
     }
 
@@ -151,7 +151,7 @@ export class SignalClassifier {
     try {
       raw = JSON.parse(jsonText) as RawClassificationResponse;
     } catch (e) {
-      this.logger.error("Classifier received invalid JSON from model output.", { code: "classifier.parse_failed", input, rawResponse: text, error: e });
+      this.logger.error(`Classifier received invalid JSON from model output: ${e instanceof Error ? e.message : e}`, { code: "classifier.parse_failed", input, rawResponse: text, error: e });
       return err(classificationError(e, text));
     }
 

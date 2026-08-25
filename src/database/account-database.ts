@@ -1426,7 +1426,7 @@ export class AccountDatabase {
         UpdateExpression: `REMOVE ${removeExpr}`,
       }));
     } catch (error) {
-      this.logger.error("Failed to clean up history list.", { code: "account_database.history_cleanup_failed", key, error });
+      this.logger.error(`Failed to clean up history list: ${error instanceof Error ? error.message : error}`, { code: "account_database.history_cleanup_failed", key, error });
     }
   }
 

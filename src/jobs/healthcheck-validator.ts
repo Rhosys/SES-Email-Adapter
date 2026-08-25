@@ -117,7 +117,7 @@ export class HealthcheckValidator {
     try {
       const result = await this.deps.threadDb.listActiveThreadsSince(SYSTEM_ACCOUNT_ID, sinceDate);
       if (result.isErr()) {
-        this.deps.logger.error("Healthcheck validation query failed — could not list SYSTEM threads.", {
+        this.deps.logger.error(`Healthcheck validation query failed — could not list SYSTEM threads: ${result.error.message}`, {
           code: "healthcheck.validation_error",
           error: result.error,
         });
@@ -125,7 +125,7 @@ export class HealthcheckValidator {
       }
       threads = result.value;
     } catch (e) {
-      this.deps.logger.error("Healthcheck validation threw unexpected error.", {
+      this.deps.logger.error(`Healthcheck validation threw unexpected error: ${e instanceof Error ? e.message : e}`, {
         code: "healthcheck.validation_error",
         error: e,
       });
@@ -201,7 +201,7 @@ export class HealthcheckValidator {
     try {
       const result = await this.deps.threadDb.listActiveThreadsSince(SYSTEM_ACCOUNT_ID, sinceDate);
       if (result.isErr()) {
-        this.deps.logger.error("Healthcheck validation query failed — could not list SYSTEM threads.", {
+        this.deps.logger.error(`Healthcheck validation query failed — could not list SYSTEM threads: ${result.error.message}`, {
           code: "healthcheck.validation_error",
           date,
           error: result.error,
@@ -210,7 +210,7 @@ export class HealthcheckValidator {
       }
       threads = result.value;
     } catch (e) {
-      this.deps.logger.error("Healthcheck validation threw unexpected error.", {
+      this.deps.logger.error(`Healthcheck validation threw unexpected error: ${e instanceof Error ? e.message : e}`, {
         code: "healthcheck.validation_error",
         date,
         error: e,
@@ -322,7 +322,7 @@ export class HealthcheckValidator {
         checks.hasEmbedding = embeddingResult.value;
       } else if (embeddingResult.error.schemaMismatch) {
         embeddingDetail = `[${date}] Aurora schema mismatch — migrations behind code: ${embeddingResult.error.message}.`;
-        this.deps.logger.error("Healthcheck embedding check failed — Aurora schema mismatch.", {
+        this.deps.logger.error(`Healthcheck embedding check failed — Aurora schema mismatch: ${embeddingResult.error.message}`, {
           code: "healthcheck.embedding_check_schema_mismatch",
           date,
           threadId: thread.id,
@@ -330,7 +330,7 @@ export class HealthcheckValidator {
           message: embeddingResult.error.message,
         });
       } else {
-        this.deps.logger.error("Aurora error during embedding existence check.", {
+        this.deps.logger.error(`Aurora error during embedding existence check: ${embeddingResult.error.message}`, {
           code: "healthcheck.embedding_check_error",
           date,
           threadId: thread.id,
@@ -339,7 +339,7 @@ export class HealthcheckValidator {
         });
       }
     } catch (e) {
-      this.deps.logger.error("Aurora connectivity/timeout error during embedding existence check.", {
+      this.deps.logger.error(`Aurora connectivity/timeout error during embedding existence check: ${e instanceof Error ? e.message : e}`, {
         code: "healthcheck.embedding_check_error",
         date,
         threadId: thread.id,
@@ -612,7 +612,7 @@ export class HealthcheckValidator {
       ];
       return checks;
     } catch (e) {
-      this.deps.logger.error("SES identity check threw unexpected error.", {
+      this.deps.logger.error(`SES identity check threw unexpected error: ${e instanceof Error ? e.message : e}`, {
         code: "healthcheck.ses_check_error",
         domain,
         error: e,
@@ -647,7 +647,7 @@ export class HealthcheckValidator {
         } : {}),
       }));
     } catch (e) {
-      this.deps.logger.error("DNS delegation check threw unexpected error.", {
+      this.deps.logger.error(`DNS delegation check threw unexpected error: ${e instanceof Error ? e.message : e}`, {
         code: "healthcheck.delegation_check_error",
         error: e,
       });

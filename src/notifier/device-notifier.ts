@@ -57,7 +57,7 @@ export class DeviceNotifier implements Notifier {
       if (result.isOk()) {
         successCount++;
       } else {
-        this.logger.error("Device delivery failed", { code: "notifier.delivery_failed", signal, thread, deviceType: device.type, token: device.token, reason: result.error.reason, error: result.error.cause });
+        this.logger.error(`Device delivery failed: ${result.error.reason}`, { code: "notifier.delivery_failed", signal, thread, deviceType: device.type, token: device.token, reason: result.error.reason, error: result.error.cause });
         failureReasons.push(`${device.type}: ${result.error.reason}`);
       }
     }

@@ -83,41 +83,42 @@ export interface ImapConnectionConfig {
 }
 
 // ---------------------------------------------------------------------------
-// IMAP error type — replaces all thrown exceptions from imapflow
+// IMAP error type — discriminated union, classified at construction time
 // ---------------------------------------------------------------------------
 
-export type ImapError = { kind: "imap_error"; reason: string; cause: unknown };
+export type ImapError =
+  | { kind: "transient"; reason: string; cause: unknown }
+  | { kind: "auth_failed"; reason: string; cause: unknown }
+  | { kind: "tls_error"; reason: string; cause: unknown }
+  | { kind: "mailbox_error"; reason: string; cause: unknown }
+  | { kind: "unknown"; reason: string; cause: unknown };
 
 function imapErr(e: unknown): ImapError {
-  const reason = e instanceof Error ? e.message : String(e);
-  return { kind: "imap_error", reason, cause: e };
-}
+  const reason = e instanceof Error ? e.message.slice(0, 256) : String(e).slice(0, 256);
+  const code = e instanceof Error ? (e as NodeJS.ErrnoException).code : undefined;
 
-function classifyImapError(e: unknown): string {
+  if (code === "ETIMEDOUT" || code === "ECONNREFUSED" || code === "ECONNRESET" || code === "EHOSTUNREACH" || code === "ENOTFOUND" || code === "CONNECT_TIMEOUT") {
+    return { kind: "transient", reason, cause: e };
+  }
   if (e instanceof Error) {
     if ("authenticationFailed" in e && (e as { authenticationFailed: boolean }).authenticationFailed) {
-      return "invalid credentials";
+      return { kind: "auth_failed", reason, cause: e };
     }
     const msg = e.message.toLowerCase();
     if (msg.includes("timeout") || msg.includes("econnrefused") || msg.includes("enotfound") || msg.includes("ehostunreach")) {
-      return "host unreachable";
+      return { kind: "transient", reason, cause: e };
     }
     if (msg.includes("certificate") || msg.includes("cert") || msg.includes("ssl") || msg.includes("tls") || msg.includes("self.signed") || msg.includes("self-signed")) {
-      return e.message.slice(0, 256);
+      return { kind: "tls_error", reason, cause: e };
     }
     if (msg.includes("inbox") && (msg.includes("not found") || msg.includes("does not exist") || msg.includes("no such"))) {
-      return "INBOX unavailable";
-    }
-    return e.message.slice(0, 256);
-  }
-  if (e && typeof e === "object" && "code" in e) {
-    const code = (e as { code: string }).code;
-    if (code === "CONNECT_TIMEOUT" || code === "ETIMEDOUT" || code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "EHOSTUNREACH") {
-      return "host unreachable";
+      return { kind: "mailbox_error", reason, cause: e };
     }
   }
-  return String(e).slice(0, 256);
+  return { kind: "unknown", reason, cause: e };
 }
+
+function delay(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
 
 // ---------------------------------------------------------------------------
 // ImapConnection — pure IMAP operations, never throws
@@ -304,7 +305,7 @@ export class ImapAdapter implements ProviderAdapter {
 
     const connectResult = await conn.connect();
     if (connectResult.isErr()) {
-      const reason = classifyImapError(connectResult.error.cause);
+      const reason = connectResult.error.reason;
       this.logger.info("IMAP activation failed", { code: "imap.activate.failed", host: imapConfig.host, username: imapConfig.username, reason });
       await conn.logout();
       return err({ kind: "provider_activation_failed", cause: reason });
@@ -313,7 +314,7 @@ export class ImapAdapter implements ProviderAdapter {
     const stateResult = await conn.getInboxState();
     await conn.logout();
     if (stateResult.isErr()) {
-      const reason = classifyImapError(stateResult.error.cause);
+      const reason = stateResult.error.reason;
       this.logger.info("IMAP activation failed", { code: "imap.activate.failed", host: imapConfig.host, username: imapConfig.username, reason });
       return err({ kind: "provider_activation_failed", cause: reason });
     }
@@ -336,23 +337,32 @@ export class ImapAdapter implements ProviderAdapter {
     if (decryptResult.isErr()) return err({ kind: "provider_renewal_failed", cause: "decryption failed" });
     const password = decryptResult.value;
 
-    const conn = new ImapConnection({
-      host: imapConfig.host,
-      tlsConfig: imapConfig.tlsConfig,
-      username: imapConfig.username,
-      password,
-      timeout: 30_000,
-    });
-
-    const connectResult = await conn.connect();
-    if (connectResult.isErr()) {
-      return this.handleRenewalFailure(emx, classifyImapError(connectResult.error.cause));
+    // Connect with exponential backoff for transient network errors (1s, 2s, 4s, 8s, 16s)
+    let conn: ImapConnection | undefined;
+    let lastConnectError: ImapError | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (attempt > 0) {
+        await delay(1_000 * 2 ** (attempt - 1));
+      }
+      const c = new ImapConnection({ host: imapConfig.host, tlsConfig: imapConfig.tlsConfig, username: imapConfig.username, password, timeout: 30_000 });
+      const connectResult = await c.connect();
+      if (connectResult.isOk()) {
+        conn = c;
+        break;
+      }
+      lastConnectError = connectResult.error;
+      if (connectResult.error.kind !== "transient") {
+        return this.handleRenewalFailure(emx, connectResult.error.reason);
+      }
+    }
+    if (!conn) {
+      return this.handleRenewalFailure(emx, lastConnectError!.reason);
     }
 
     const stateResult = await conn.getInboxState();
     if (stateResult.isErr()) {
       await conn.logout();
-      return this.handleRenewalFailure(emx, classifyImapError(stateResult.error.cause));
+      return this.handleRenewalFailure(emx, stateResult.error.reason);
     }
 
     const { uidvalidity: currentUidvalidity } = stateResult.value;
@@ -375,7 +385,7 @@ export class ImapAdapter implements ProviderAdapter {
     await conn.logout();
 
     if (searchResult.isErr()) {
-      return this.handleRenewalFailure(emx, classifyImapError(searchResult.error.cause));
+      return this.handleRenewalFailure(emx, searchResult.error.reason);
     }
 
     const newUids = searchResult.value;
@@ -391,7 +401,7 @@ export class ImapAdapter implements ProviderAdapter {
       }));
       const batchResult = await this.signalQueue.sendBatch("emx_inbound", entries);
       if (batchResult.isErr()) {
-        this.logger.error("IMAP: failed to enqueue emx_inbound batch", { code: "imap.renew.batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
+        this.logger.error(`IMAP: failed to enqueue emx_inbound batch: ${batchResult.error.message}`, { code: "imap.renew.batch_failed", emxId: emx.id, count: entries.length, error: batchResult.error });
         return err({ kind: "provider_renewal_failed", cause: "SQS batch send failed" });
       }
 
@@ -432,11 +442,11 @@ export class ImapAdapter implements ProviderAdapter {
   async idle(emx: ExternalMailExchange, timeoutMs: number): Promise<Result<"new_mail" | "timeout", ImapError>> {
     const config = emx.imapConfig;
     if (!config) {
-      return err({ kind: "imap_error", reason: "missing imapConfig", cause: undefined });
+      return err({ kind: "unknown", reason: "missing imapConfig", cause: undefined });
     }
 
     const decryptResult = await this.encryptionManager.decrypt(config.encryptedPassword);
-    if (decryptResult.isErr()) return err({ kind: "imap_error", reason: "decryption failed", cause: decryptResult.error });
+    if (decryptResult.isErr()) return err({ kind: "unknown", reason: "decryption failed", cause: decryptResult.error });
     const password = decryptResult.value;
 
     const conn = new ImapConnection({ host: config.host, tlsConfig: config.tlsConfig, username: config.username, password, timeout: 30_000 });
@@ -471,7 +481,7 @@ export class ImapAdapter implements ProviderAdapter {
   async idleAndDispatch(emx: ExternalMailExchange, timeoutMs: number): Promise<Result<void, never>> {
     const catchUpResult = await this.signalQueue.send("emx_dispatch", { emxId: emx.id, accountId: emx.accountId });
     if (catchUpResult.isErr()) {
-      this.logger.error("emx_idle: failed to enqueue pre-IDLE catch-up dispatch", { code: "emx.idle.catch_up_enqueue_failed", emxId: emx.id, error: catchUpResult.error });
+      this.logger.error(`emx_idle: failed to enqueue pre-IDLE catch-up dispatch: ${catchUpResult.error.message}`, { code: "emx.idle.catch_up_enqueue_failed", emxId: emx.id, error: catchUpResult.error });
     }
 
     const result = await this.idle(emx, timeoutMs);
@@ -488,7 +498,7 @@ export class ImapAdapter implements ProviderAdapter {
     this.logger.info("emx_idle: IMAP new mail detected", { code: "emx.idle.imap_new_mail", emxId: emx.id });
     const sendResult = await this.signalQueue.send("emx_dispatch", { emxId: emx.id, accountId: emx.accountId });
     if (sendResult.isErr()) {
-      this.logger.error("emx_idle: failed to enqueue emx_dispatch after detecting new mail", { code: "emx.idle.enqueue_failed", emxId: emx.id, error: sendResult.error });
+      this.logger.error(`emx_idle: failed to enqueue emx_dispatch after detecting new mail: ${sendResult.error.message}`, { code: "emx.idle.enqueue_failed", emxId: emx.id, error: sendResult.error });
     }
 
     return ok(undefined);
@@ -545,7 +555,7 @@ export class ImapAdapter implements ProviderAdapter {
   // ---------------------------------------------------------------------------
 
   private async handleRenewalFailure(emx: ExternalMailExchange, cause: string): Promise<Result<void, ProviderRenewalError>> {
-    this.logger.error("IMAP renewal failed", { code: "imap.renew.failed", emxId: emx.id, cause });
+    this.logger.error(`IMAP renewal failed: ${cause}`, { code: "imap.renew.failed", emxId: emx.id, cause });
     const failures = (emx.consecutiveFailures ?? 0) + 1;
     if (failures >= 3) {
       const deactivateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, "activation_failed", emx.nextSyncTime!, {

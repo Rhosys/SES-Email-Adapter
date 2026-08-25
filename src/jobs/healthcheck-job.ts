@@ -66,7 +66,7 @@ export class HealthcheckJob {
       if (result.isErr()) {
         if (result.error.kind === "permanent_ses_error") {
           this.deps.logger.error(
-            "Healthcheck email permanently rejected by SES — the healthcheck email did NOT go out.",
+            `Healthcheck email permanently rejected by SES — ${result.error.errorName}`,
             { code: "healthcheck.send_permanent_failure", messageId, error: result.error },
           );
           return;
