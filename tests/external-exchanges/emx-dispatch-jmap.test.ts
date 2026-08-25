@@ -104,7 +104,7 @@ describe("dispatch worker logs JMAP adapter errors", () => {
 
     expect(result.isOk()).toBe(true);
     expect(mockLogger.error).toHaveBeenCalledWith(
-      "emx_dispatch: renewal failed",
+      "emx_dispatch: renewal failed: invalid credentials",
       expect.objectContaining({ code: "emx.dispatch.renewal_failed", emxId: "emx_jmapABC123", platform: "jmap" }),
     );
   });

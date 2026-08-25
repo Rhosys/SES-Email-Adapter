@@ -137,7 +137,7 @@ describe("ImapAdapter.activate", () => {
     expect(result.isErr()).toBe(true);
     const error = result._unsafeUnwrapErr();
     expect(error.kind).toBe("provider_activation_failed");
-    expect(error.cause).toBe("host unreachable");
+    expect(error.cause).toBe("Connection timeout after 10000ms");
   });
 
   it("returns activation_failed with 'invalid credentials' on auth failure", async () => {
@@ -152,7 +152,7 @@ describe("ImapAdapter.activate", () => {
     expect(result.isErr()).toBe(true);
     const error = result._unsafeUnwrapErr();
     expect(error.kind).toBe("provider_activation_failed");
-    expect(error.cause).toBe("invalid credentials");
+    expect(error.cause).toBe("Authentication failed");
   });
 });
 

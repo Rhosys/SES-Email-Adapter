@@ -38,6 +38,47 @@ export const JMAP_USING = ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:ma
 const MAIL_CAPABILITY = "urn:ietf:params:jmap:mail";
 const JMAP_PUSH_WEBHOOK_BASE = "https://api.email.rhosys.cloud/api/external-exchanges/jmap/target";
 
+function delay(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
+
+function isTransientStatus(status: number): boolean {
+  return status >= 500 || status === 429 || status === 408;
+}
+
+function isRetryableError(e: unknown): boolean {
+  if (e instanceof Error) {
+    if (e.name === "AbortError" || e.name === "TimeoutError") { return false; }
+    if (e.message.includes("AbortError") || e.message.includes("abort")) { return false; }
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ETIMEDOUT" || code === "ECONNREFUSED" || code === "ECONNRESET" || code === "EHOSTUNREACH" || code === "ENOTFOUND" || code === "UND_ERR_CONNECT_TIMEOUT") {
+      return true;
+    }
+    const msg = e.message.toLowerCase();
+    if (msg.includes("fetch failed") || msg.includes("network") || msg.includes("socket")) { return true; }
+  }
+  return false;
+}
+
+/** Fetch with exponential backoff (1s, 2s, 4s, 8s, 16s) for transient failures. */
+async function fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (attempt > 0) {
+      if (init.signal?.aborted) { break; }
+      await delay(1_000 * 2 ** (attempt - 1));
+      if (init.signal?.aborted) { break; }
+    }
+    try {
+      const response = await fetch(url, init);
+      if (isTransientStatus(response.status) && attempt < 4) { continue; }
+      return response;
+    } catch (e) {
+      lastError = e;
+      if (!isRetryableError(e)) { break; }
+    }
+  }
+  throw lastError;
+}
+
 export function buildBasicAuth(username: string, password: string): string {
   return "Basic " + Buffer.from(`${username}:${password}`).toString("base64");
 }
@@ -45,7 +86,7 @@ export function buildBasicAuth(username: string, password: string): string {
 export async function fetchSession(sessionUrl: string, auth: string, timeout: number): Promise<Result<JmapSession, ProviderActivationError>> {
   let response: Response;
   try {
-    response = await fetch(sessionUrl, {
+    response = await fetchWithRetry(sessionUrl, {
       method: "GET",
       headers: { Authorization: auth },
       signal: AbortSignal.timeout(timeout),
@@ -95,7 +136,7 @@ export async function fetchSession(sessionUrl: string, auth: string, timeout: nu
 export async function jmapCall(apiUrl: string, auth: string, using: readonly string[], methodCalls: unknown[][], timeout: number): Promise<Result<unknown[][], ProviderRenewalError>> {
   let response: Response;
   try {
-    response = await fetch(apiUrl, {
+    response = await fetchWithRetry(apiUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: auth },
       body: JSON.stringify({ using, methodCalls }),
@@ -455,7 +496,7 @@ export class JmapAdapter implements ProviderAdapter {
 
     let mimeResponse: Response;
     try {
-      mimeResponse = await fetch(downloadUrl, {
+      mimeResponse = await fetchWithRetry(downloadUrl, {
         method: "GET",
         headers: { Authorization: auth },
         signal: AbortSignal.timeout(30_000),

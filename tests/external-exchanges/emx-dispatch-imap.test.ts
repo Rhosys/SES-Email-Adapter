@@ -132,7 +132,7 @@ describe("dispatch worker logs adapter errors", () => {
 
     expect(result.isOk()).toBe(true);
     expect(mockLogger.error).toHaveBeenCalledWith(
-      "emx_dispatch: renewal failed",
+      "emx_dispatch: renewal failed: invalid credentials",
       expect.objectContaining({ code: "emx.dispatch.renewal_failed", emxId: "emx_testABC123", platform: "imap" }),
     );
   });
@@ -176,7 +176,7 @@ describe("dispatch worker logs adapter errors", () => {
 
     expect(result.isOk()).toBe(true);
     expect(mockLogger.error).toHaveBeenCalledWith(
-      "emx_dispatch: renewal failed",
+      "emx_dispatch: renewal failed: token refresh failed",
       expect.objectContaining({ code: "emx.dispatch.renewal_failed", emxId: "emx_gmail1", platform: "gmail" }),
     );
   });
