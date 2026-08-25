@@ -59,7 +59,7 @@ interface ContentSanitizeError {
   success: false;
   error: {
     message: string;
-    type: "parse_error" | "limits_exceeded" | "missing_sender" | "fetch_failed";
+    type: "parse_error" | "limits_exceeded" | "missing_sender" | "fetch_failed" | "internal_error";
   };
 }
 
@@ -151,7 +151,21 @@ async function uploadViaPresignedPost(
 // Handler
 // ---------------------------------------------------------------------------
 
+// Wraps processEmail so that any exception we didn't anticipate becomes a structured
+// ContentSanitizeError instead of an opaque Lambda "Unhandled" FunctionError — the
+// processor can then surface the real message/type instead of just "Unhandled".
 export async function handler(event: ContentSanitizeRequest): Promise<ContentSanitizeResponse | ContentSanitizeError> {
+  try {
+    return await processEmail(event);
+  } catch (e) {
+    return {
+      success: false,
+      error: { message: e instanceof Error ? e.message : String(e), type: "internal_error" },
+    };
+  }
+}
+
+async function processEmail(event: ContentSanitizeRequest): Promise<ContentSanitizeResponse | ContentSanitizeError> {
   if (event.invocationId) {
     const { RequestLogger } = await import("../logger.js");
     const logger = new RequestLogger();

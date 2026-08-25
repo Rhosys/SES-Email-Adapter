@@ -181,7 +181,7 @@ describe("WsDeliverer", () => {
 
       expect(result.isErr()).toBe(true);
       const e = result._unsafeUnwrapErr();
-      expect(e.kind).toBe("delivery_failed");
+      if (e.kind !== "delivery_failed") throw new Error(`expected delivery_failed, got ${e.kind}`);
       expect(e.cause).toBe(error);
     });
   });

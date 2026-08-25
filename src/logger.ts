@@ -69,22 +69,43 @@ function redactValue(key: string, value: unknown): unknown {
   return value;
 }
 
+// Error instances carry message/name/stack as non-enumerable properties, so a plain
+// Object.entries()/JSON.stringify() walk silently drops them to `{}`. This matters
+// beyond the top-level context fields serializeErrors() already covers: our error
+// types (DbError, ProcessorError, etc.) nest the underlying Error under a `cause`
+// property, and redact() recurses arbitrarily deep into those — so every level must
+// flatten an Error to a plain object before it gets recursed into or stringified.
+function errorToPlain(e: Error): Record<string, unknown> {
+  if (e instanceof AggregateError) {
+    return {
+      ...e,
+      message: e.message,
+      name: e.name,
+      stack: e.stack,
+      errors: e.errors.map((sub: unknown) => (sub instanceof Error ? errorToPlain(sub) : sub)),
+    };
+  }
+  return { ...e, message: e.message, name: e.name, stack: e.stack };
+}
+
 function redact(obj: Record<string, unknown>, seen = new WeakSet()): Record<string, unknown> {
   if (seen.has(obj)) return { _circular: true };
   seen.add(obj);
   const result: Record<string, unknown> = {};
-  for (const [key, raw] of Object.entries(obj)) {
+  for (const [key, rawValue] of Object.entries(obj)) {
+    const raw = rawValue instanceof Error ? errorToPlain(rawValue) : rawValue;
     const value = redactValue(key, raw);
     if (value !== raw) {
       result[key] = value;
     } else if (value && typeof value === "object" && !Array.isArray(value)) {
       result[key] = redact(value as Record<string, unknown>, seen);
     } else if (Array.isArray(value)) {
-      result[key] = value.map((item) =>
-        item && typeof item === "object" && !Array.isArray(item)
-          ? redact(item as Record<string, unknown>, seen)
-          : redactValue("", item),
-      );
+      result[key] = value.map((item) => {
+        const plainItem = item instanceof Error ? errorToPlain(item) : item;
+        return plainItem && typeof plainItem === "object" && !Array.isArray(plainItem)
+          ? redact(plainItem as Record<string, unknown>, seen)
+          : redactValue("", plainItem);
+      });
     } else {
       result[key] = value;
     }
