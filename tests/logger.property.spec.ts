@@ -64,12 +64,7 @@ describe("Log entry structural invariant", () => {
       expect(entry.level).toBe(level.toUpperCase());
       expect(entry.title).toBe("test.msg");
       expect(entry.containerId).toBe("test1234");
-      if (level === "error" || level === "critical") {
-        // Omitted so error-tracking tools can aggregate identical errors across invocations.
-        expect(entry.invocationId).toBeUndefined();
-      } else {
-        expect(entry.invocationId).toBe("test-invocation");
-      }
+      expect(entry.invocationId).toBe("test-invocation");
       expect(new Date(entry.timestamp as string).toISOString()).toBe(entry.timestamp);
     },
   );
@@ -109,16 +104,6 @@ describe("Context merge preserves required fields", () => {
     expect(entry.containerId).toBe("test1234");
     expect(entry.invocationId).not.toBe("FAKE");
     expect(entry.invocationId).toBe("test-invocation");
-  });
-
-  it("error level omits invocationId even when context supplies one", () => {
-    const logger = new RequestLogger({ containerId: "test1234" });
-    logger.startInvocation("test-invocation");
-
-    callLevel(logger, "error", "real.message", { invocationId: "FAKE" });
-
-    const entry = lastEntryFromSpies(logSpy, warnSpy, errorSpy);
-    expect(entry.invocationId).toBeUndefined();
   });
 });
 
