@@ -438,7 +438,7 @@ resource "aws_lambda_function" "content_sanitizer" {
   handler       = "content-sanitizer.handler"
   runtime       = "nodejs24.x"
   memory_size   = 128
-  timeout       = 10
+  timeout       = 60
   publish       = true
 
   filename         = data.archive_file.lambda_stub.output_path

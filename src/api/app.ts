@@ -219,14 +219,22 @@ export function createApp({ threadDb, resourceDb, accountDb, exchangesDb, auditD
       ? await c.req.raw.clone().text()
       : undefined;
 
-    await next();
+    // Fires on its own clock at the 25s mark regardless of whether next() ever settles —
+    // a stuck downstream handler would never reach code after `await next()`, since the
+    // await itself never returns. This is a plain timer, not a check after the await,
+    // precisely so it still fires even if the request hangs all the way to Lambda timeout.
+    const slowRequestTimer = setTimeout(() => {
+      logger.track("Request exceeded 25s — at risk of Lambda timeout.", { code: "api.slow_request", method: c.req.method, path: c.req.path, elapsedMs: Date.now() - start });
+    }, 25_000);
+
+    try {
+      await next();
+    } finally {
+      clearTimeout(slowRequestTimer);
+    }
 
     const elapsed = Date.now() - start;
     const status = c.res.status;
-
-    if (elapsed > 25_000) {
-      logger.track("Request exceeded 25s — at risk of Lambda timeout.", { code: "api.slow_request", method: c.req.method, path: c.req.path, status, elapsedMs: elapsed });
-    }
 
     const logData: Record<string, unknown> = {
       code: "api.request",

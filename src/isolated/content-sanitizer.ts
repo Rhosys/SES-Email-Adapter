@@ -2,6 +2,12 @@ import { simpleParser } from "mailparser";
 import { Window } from "happy-dom";
 import { sanitizeHtml } from "./html-sanitizer.js";
 import { extractAssets, type ExtractedAsset } from "./asset-extractor.js";
+import type { Logger } from "../logger.js";
+
+// Lambda timeout is 60s (see deploy/compute.tf). Emitting a TRACK log past this
+// threshold surfaces invocations that are close to timing out, before they start
+// actually failing — mirrors the api.slow_request pattern in src/api/app.ts.
+const SLOW_INVOCATION_THRESHOLD_MS = 50_000;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -155,25 +161,39 @@ async function uploadViaPresignedPost(
 // ContentSanitizeError instead of an opaque Lambda "Unhandled" FunctionError — the
 // processor can then surface the real message/type instead of just "Unhandled".
 export async function handler(event: ContentSanitizeRequest): Promise<ContentSanitizeResponse | ContentSanitizeError> {
+  const start = Date.now();
+  let logger: Logger | undefined;
+  if (event.invocationId) {
+    const { RequestLogger } = await import("../logger.js");
+    const requestLogger = new RequestLogger();
+    requestLogger.startInvocation(event.invocationId);
+    requestLogger.info("content-sanitizer.invoked", { code: "content_sanitizer.invoked", invocationId: event.invocationId, accountId: event.accountId });
+    logger = requestLogger;
+  }
+
+  // Fires on its own clock at the 50s mark regardless of whether processEmail ever
+  // settles — a stuck fetch/parse would never reach a `finally` after `await`, since
+  // the await itself never returns. This is a plain timer, not a Promise.race, precisely
+  // so it still fires even if the awaited work hangs all the way to the Lambda timeout.
+  const slowInvocationTimer = setTimeout(() => {
+    logger?.track("Content sanitizer invocation exceeded 50s — at risk of Lambda timeout.", { code: "content_sanitizer.slow_invocation", elapsedMs: Date.now() - start, accountId: event.accountId });
+  }, SLOW_INVOCATION_THRESHOLD_MS);
+
   try {
-    return await processEmail(event);
+    return await processEmail(event, logger);
   } catch (e) {
     return {
       success: false,
       error: { message: e instanceof Error ? e.message : String(e), type: "internal_error" },
     };
+  } finally {
+    clearTimeout(slowInvocationTimer);
   }
 }
 
-async function processEmail(event: ContentSanitizeRequest): Promise<ContentSanitizeResponse | ContentSanitizeError> {
-  if (event.invocationId) {
-    const { RequestLogger } = await import("../logger.js");
-    const logger = new RequestLogger();
-    logger.startInvocation(event.invocationId);
-    logger.info("content-sanitizer.invoked", { code: "content_sanitizer.invoked", invocationId: event.invocationId, accountId: event.accountId });
-  }
-
+async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Promise<ContentSanitizeResponse | ContentSanitizeError> {
   // 1. Fetch raw MIME via presignedGetUrl
+  logger?.trackPoint("fetch_mime_start");
   let rawMime: Buffer;
   try {
     const response = await fetch(event.presignedGetUrl);
@@ -184,6 +204,7 @@ async function processEmail(event: ContentSanitizeRequest): Promise<ContentSanit
       };
     }
     rawMime = Buffer.from(await response.arrayBuffer());
+    logger?.trackPoint("fetch_mime_complete", { sizeBytes: rawMime.length });
   } catch (e) {
     return {
       success: false,
@@ -192,9 +213,11 @@ async function processEmail(event: ContentSanitizeRequest): Promise<ContentSanit
   }
 
   // 2. Parse with mailparser
+  logger?.trackPoint("mime_parse_start");
   let parsed;
   try {
     parsed = await simpleParser(rawMime);
+    logger?.trackPoint("mime_parse_complete");
   } catch (e) {
     return {
       success: false,
@@ -227,6 +250,7 @@ async function processEmail(event: ContentSanitizeRequest): Promise<ContentSanit
       error: { message: `Total attachment size ${totalAttachmentSize} bytes exceeds limit of 25MB`, type: "limits_exceeded" },
     };
   }
+  logger?.trackPoint("attachment_limits_validated", { attachmentCount: attachments.length, totalAttachmentSize });
 
   // 5. Build CID map for inline images and upload real attachments to S3
   let uploadIndex = 0;
@@ -262,6 +286,7 @@ async function processEmail(event: ContentSanitizeRequest): Promise<ContentSanit
 
     uploadIndex++;
   }
+  logger?.trackPoint("attachments_processed", { attachmentRefCount: attachmentRefs.length, inlineImageCount: inlineImages.length });
 
   // 6. Sanitize HTML and inline CID images
   let htmlBody: string | undefined;
@@ -271,6 +296,7 @@ async function processEmail(event: ContentSanitizeRequest): Promise<ContentSanit
     const htmlInput = typeof parsed.html === "string" ? parsed.html : "";
     const sanitized = sanitizeHtml(htmlInput);
     htmlBody = sanitized.html.replace(/cid:([^"'\s>]+)/g, (_, id: string) => cidMap[id] ?? "");
+    logger?.trackPoint("html_sanitized", { htmlLength: htmlInput.length });
 
     // Extract links from raw HTML using a DOM parser (before sanitization strips tracking pixels etc.)
     const linkDoc = new Window({ url: "about:blank" }).document;
@@ -291,6 +317,7 @@ async function processEmail(event: ContentSanitizeRequest): Promise<ContentSanit
       const text = anchorText && anchorText !== href ? anchorText : null;
       extractedLinks.push({ url: href, text });
     }
+    logger?.trackPoint("links_extracted_from_html", { linkCount: extractedLinks.length });
   }
 
   // Fallback: extract bare URLs from text body ONLY when no HTML part exists.
@@ -312,6 +339,7 @@ async function processEmail(event: ContentSanitizeRequest): Promise<ContentSanit
     // message would be stored with no visible body at all. Render the plain text as
     // escaped, pre-formatted HTML so it flows through the existing display pipeline.
     htmlBody = textToHtml(parsed.text);
+    logger?.trackPoint("links_extracted_from_text_fallback", { linkCount: extractedLinks.length });
   }
 
   // 9. Build response
@@ -331,13 +359,16 @@ async function processEmail(event: ContentSanitizeRequest): Promise<ContentSanit
       }
     }
   }
+  logger?.trackPoint("headers_extracted", { headerCount: Object.keys(headers).length });
 
   // 7. Extract scannable assets (QR codes, PKPass barcodes) — best-effort
   let extractedAssets: ExtractedAsset[] = [];
   try {
     extractedAssets = await extractAssets(inlineImages, attachmentsWithBytes);
+    logger?.trackPoint("assets_extracted", { assetCount: extractedAssets.length });
   } catch {
     // extraction failure must never fail the sanitizer
+    logger?.trackPoint("assets_extraction_failed");
   }
 
   const result: ContentSanitizeResponse = {
@@ -372,5 +403,6 @@ async function processEmail(event: ContentSanitizeRequest): Promise<ContentSanit
     result.parsed.links = extractedLinks;
   }
 
+  logger?.trackPoint("response_built");
   return result;
 }
