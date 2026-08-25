@@ -119,6 +119,7 @@ export interface AlertData {
   service: string;
   severity?: "info" | "warning" | "critical";
   requiresAction: boolean;
+  actionUrl?: string;
   ipAddress?: string;
   location?: string;
   deviceName?: string;
@@ -175,6 +176,7 @@ export interface JobData {
   applicationStatus?: "submitted" | "reviewing" | "interview" | "offer" | "rejected";
   contactName?: string;
   contactEmail?: string;
+  actionUrl?: string;
 }
 
 export interface SupportData {

@@ -35,9 +35,21 @@ export function assignSystemLabels(ctx: SystemLabelContext): SystemLabel[] {
     labels.push("system:auth:security_alert");
   }
 
-  if (ctx.actions.length > 0) {
+  const workflowDataRecord = ctx.workflowData as unknown as Record<string, unknown>;
+  const hasActionableUrl = ctx.actions.length > 0
+    || Object.values(workflowDataRecord).some(v => typeof v === "string" && isUrl(v));
+  if (hasActionableUrl) {
     labels.push("system:action");
   }
 
   return labels;
+}
+
+function isUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
 }

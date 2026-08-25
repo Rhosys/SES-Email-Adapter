@@ -187,6 +187,7 @@ export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
         e("critical", "immediate action required to prevent damage or loss"),
       ] },
       { name: "requiresAction", type: "boolean", required: true },
+      { name: "actionUrl", type: "string", required: false, notes: "The primary link the user should click to investigate or resolve the alert (e.g. \"Review activity\", \"Secure your account\", \"View build logs\")" },
       { name: "ipAddress", type: "string", required: false },
       { name: "location", type: "string", required: false },
       { name: "deviceName", type: "string", required: false },
@@ -295,6 +296,7 @@ export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
       ] },
       { name: "contactName", type: "string", required: false },
       { name: "contactEmail", type: "string", required: false },
+      { name: "actionUrl", type: "string", required: false, notes: "The primary link the user should click (e.g. \"View application\", \"Schedule interview\", \"Accept offer\")" },
     ],
   },
   {
