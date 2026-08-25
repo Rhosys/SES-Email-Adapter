@@ -1114,7 +1114,10 @@ export class SignalProcessor {
     const tier2Promise = (async (): Promise<Thread | null> => {
       this.logger.trackPoint("thread_matcher_similarity_search");
       const matchResult = await this.threadMatcher.findMatch(accountId, recipientAddress, embedding);
-      if (matchResult.isErr()) return null;
+      if (matchResult.isErr()) {
+        this.logger.warn("Similarity search failed — treating as miss.", { code: "processor.thread_matcher.similarity_search_failed", accountId, compositeMailMessageId: msg.compositeMailMessageId, error: matchResult.error });
+        return null;
+      }
       return matchResult.value;
     })();
 

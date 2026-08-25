@@ -3,7 +3,7 @@ import { ok, err } from "neverthrow";
 
 // --- Standalone error types (no composite unions) ---
 
-export type DbError = { kind: "db_error"; message: string; cause: Error; schemaMismatch?: boolean; lambdaRequestId?: string };
+export type DbError = { kind: "db_error"; message: string; cause: Error; schemaMismatch?: boolean; lambdaRequestId?: string; operation?: string; attempts?: number };
 export type NotFoundError = { kind: "not_found"; resource: string; id: string };
 export type InvalidResponseError = { kind: "invalid_response" };
 export type AuthressServiceError = { kind: "authress_service_error"; message: string; cause: Error };
@@ -61,11 +61,13 @@ export function errorMessage(e: unknown): string {
   return JSON.stringify(e);
 }
 
-export const dbError = (cause: unknown, extra?: { lambdaRequestId?: string }): DbError => {
+export const dbError = (cause: unknown, extra?: { lambdaRequestId?: string; operation?: string; attempts?: number }): DbError => {
   const error = toError(cause);
   const result: DbError = { kind: "db_error", message: error.message, cause: error };
   if (isSchemaMismatchError(error.message)) result.schemaMismatch = true;
   if (extra?.lambdaRequestId !== undefined) result.lambdaRequestId = extra.lambdaRequestId;
+  if (extra?.operation !== undefined) result.operation = extra.operation;
+  if (extra?.attempts !== undefined) result.attempts = extra.attempts;
   return result;
 };
 export const notFoundError = (resource: string, id: string): NotFoundError => ({ kind: "not_found", resource, id });

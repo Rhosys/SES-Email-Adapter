@@ -116,18 +116,34 @@ function isAuroraResuming(e: unknown): boolean {
   return error.message?.includes("resuming after being auto-paused") === true;
 }
 
+// DrizzleQueryError's own .message is "Failed query: <sql> params: <values>" — useful for
+// debugging but it embeds bound parameter values (e.g. thread IDs), which don't belong in a
+// log title. The unwrapped cause's .message carries the actual driver/SDK failure reason
+// without the query dump, so prefer that for anything meant to be read as a short "why".
+// The full error (query text included) still reaches the log via the `error` context field.
+function errorReason(e: unknown): string {
+  const error = classifiableError(e);
+  if (error != null && typeof error === "object" && typeof error.message === "string" && error.message.length > 0) {
+    return error.message;
+  }
+  return e instanceof Error ? e.message : String(e);
+}
+
 // ---------------------------------------------------------------------------
 // Retry helper
 // ---------------------------------------------------------------------------
 
-async function withRetry<T>(fn: () => Promise<T>, logger: Logger, operation: string): Promise<T> {
+// Never throws — every terminal failure comes back as an err(DbError) carrying the
+// operation name and the attempt count it gave up at, so callers get full context without
+// having to wrap this in their own try/catch.
+async function withRetry<T>(fn: () => Promise<T>, logger: Logger, operation: string): Promise<Result<T, DbError>> {
   let lastError: unknown;
   let maxAttempts = MAX_ATTEMPTS;
   let baseDelay = BASE_DELAY_MS;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      return await fn();
+      return ok(await fn());
     } catch (e) {
       lastError = e;
 
@@ -138,21 +154,28 @@ async function withRetry<T>(fn: () => Promise<T>, logger: Logger, operation: str
       }
 
       if (!isTransientError(e)) {
-        logger.error(`Aurora query failed with non-transient error — no retry: ${e instanceof Error ? e.message : e}`, { code: "aurora.non_transient", operation, attempt, error: e });
-        throw e;
+        logger.error(`Aurora query failed with non-transient error — no retry: ${errorReason(e)}`, { code: "aurora.non_transient", operation, attempt, error: e });
+        return err(dbError(e, { operation, attempts: attempt + 1 }));
       }
 
       if (attempt === maxAttempts - 1) {
-        logger.error(`Aurora query failed after all retry attempts exhausted: ${e instanceof Error ? e.message : e}`, { code: "aurora.retries_exhausted", operation, attempts: maxAttempts, error: e });
-        throw e;
+        logger.error(`Aurora query failed after all retry attempts exhausted: ${errorReason(e)}`, { code: "aurora.retries_exhausted", operation, attempts: maxAttempts, error: e });
+        return err(dbError(e, { operation, attempts: maxAttempts }));
       }
 
       const delayMs = Math.min(baseDelay * Math.pow(2, attempt), 8000);
-      logger.warn("Aurora query failed — retrying", { code: "aurora.retry", operation, attempt, maxAttempts, nextDelayMs: delayMs, error: e });
+      const retryContext = { code: "aurora.retry", operation, attempt, maxAttempts, nextDelayMs: delayMs, error: e };
+      if (isAuroraResuming(e)) {
+        // Expected and self-resolving — nothing actionable, so this doesn't warrant a WARN.
+        // The one-time "aurora.resume_detected" info log above already flags the transition.
+        logger.info(`Aurora query retrying while cluster resumes from auto-pause: ${errorReason(e)}`, retryContext);
+      } else {
+        logger.warn(`Aurora query failed — retrying: ${errorReason(e)}`, retryContext);
+      }
       await sleep(delayMs);
     }
   }
-  throw lastError;
+  return err(dbError(lastError, { operation, attempts: maxAttempts }));
 }
 
 function sleep(ms: number): Promise<void> {
@@ -211,30 +234,32 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
     const cluster = getPrimaryThreadMatcherRegistry();
     const db = getDbForCluster(cluster);
 
+    const threadIdResult = await withRetry(async () => {
+      return db.transaction(async (tx) => {
+        // SET LOCAL does not support parameterized values in PostgreSQL —
+        // accountId is an internal value from DDB (not user input), safe to interpolate.
+        await tx.execute(sql.raw(`SET LOCAL app.current_account_id = '${accountId.replace(/'/g, "''")}'`));
+
+        const result = await tx
+          .select({ threadId: threadEmbeddings.threadId })
+          .from(threadEmbeddings)
+          .where(and(
+            eq(threadEmbeddings.accountId, accountId),
+            eq(threadEmbeddings.recipientAddress, recipientAddress),
+            sql`${threadEmbeddings.embedding} <=> ${toVector(embedding)} < ${THREAD_MATCH_THRESHOLD}`,
+          ))
+          .orderBy(sql`${threadEmbeddings.embedding} <=> ${toVector(embedding)}`)
+          .limit(1);
+
+        return result[0]?.threadId ?? null;
+      });
+    }, this.logger, "findMatch");
+    if (threadIdResult.isErr()) return err(threadIdResult.error);
+    const threadId = threadIdResult.value;
+
+    if (!threadId) return ok(null);
+
     try {
-      const threadId = await withRetry(async () => {
-        return db.transaction(async (tx) => {
-          // SET LOCAL does not support parameterized values in PostgreSQL —
-          // accountId is an internal value from DDB (not user input), safe to interpolate.
-          await tx.execute(sql.raw(`SET LOCAL app.current_account_id = '${accountId.replace(/'/g, "''")}'`));
-
-          const result = await tx
-            .select({ threadId: threadEmbeddings.threadId })
-            .from(threadEmbeddings)
-            .where(and(
-              eq(threadEmbeddings.accountId, accountId),
-              eq(threadEmbeddings.recipientAddress, recipientAddress),
-              sql`${threadEmbeddings.embedding} <=> ${toVector(embedding)} < ${THREAD_MATCH_THRESHOLD}`,
-            ))
-            .orderBy(sql`${threadEmbeddings.embedding} <=> ${toVector(embedding)}`)
-            .limit(1);
-
-          return result[0]?.threadId ?? null;
-        });
-      }, this.logger, "findMatch");
-
-      if (!threadId) return ok(null);
-
       const threadResult = await dynamo.send(new GetCommand({
         TableName: SIGNALS_TABLE,
         Key: { pk: threadPk(accountId, threadId), sk: ITEM_SK },
@@ -243,17 +268,18 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
       if (!threadResult.Item) {
         this.logger.track(`Aurora matched threadId but DDB thread is missing — orphaned embedding. Treating as no match. accountId=${accountId}, threadId=${threadId}`, { code: "thread_matcher.ghost_thread", threadId, accountId, recipientAddress, matchedData: { threadId, accountId, recipientAddress } });
 
-        // Prune orphaned embeddings so this ghost thread never matches again
-        try {
-          await withRetry(async () => {
-            await db.delete(threadEmbeddings).where(and(
-              eq(threadEmbeddings.threadId, threadId),
-              eq(threadEmbeddings.accountId, accountId),
-            ));
-          }, this.logger, "deleteGhostEmbeddings");
+        // Prune orphaned embeddings so this ghost thread never matches again — best-effort,
+        // not fatal to the lookup: on failure it just retries the next time this thread matches.
+        const pruneResult = await withRetry(async () => {
+          await db.delete(threadEmbeddings).where(and(
+            eq(threadEmbeddings.threadId, threadId),
+            eq(threadEmbeddings.accountId, accountId),
+          ));
+        }, this.logger, "deleteGhostEmbeddings");
+        if (pruneResult.isErr()) {
+          this.logger.warn("Failed to delete orphaned embeddings — will retry on next match.", { code: "thread_matcher.ghost_thread_prune_failed", threadId, accountId, error: pruneResult.error });
+        } else {
           this.logger.info("Deleted orphaned embeddings for ghost thread.", { code: "thread_matcher.ghost_thread_pruned", threadId, accountId });
-        } catch (e) {
-          this.logger.warn("Failed to delete orphaned embeddings — will retry on next match.", { code: "thread_matcher.ghost_thread_prune_failed", threadId, accountId, error: e });
         }
 
         return ok(null);
@@ -261,7 +287,7 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
 
       return ok(threadResult.Item as Thread);
     } catch (e) {
-      return err(dbError(e));
+      return err(dbError(e, { operation: "findMatch.getThread" }));
     }
   }
 
@@ -275,31 +301,28 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
     if (!cluster) return err(dbError(`Cluster "${opts.registryId}" not found in CLUSTER_REGISTRY`));
     const db = getDbForCluster(cluster);
 
-    try {
-      const result = await withRetry(async () => {
-        return db.transaction(async (tx) => {
-          await tx.execute(sql.raw(`SET LOCAL app.current_account_id = '${opts.accountId.replace(/'/g, "''")}'`));
+    const result = await withRetry(async () => {
+      return db.transaction(async (tx) => {
+        await tx.execute(sql.raw(`SET LOCAL app.current_account_id = '${opts.accountId.replace(/'/g, "''")}'`));
 
-          const rows = await tx
-            .select({ threadId: threadEmbeddings.threadId })
-            .from(threadEmbeddings)
-            .where(and(
-              eq(threadEmbeddings.accountId, opts.accountId),
-              eq(threadEmbeddings.recipientAddress, opts.recipientAddress),
-              sql`${threadEmbeddings.embedding} <=> ${toVector(opts.embedding)} < ${THREAD_MATCH_THRESHOLD}`,
-            ))
-            .orderBy(sql`${threadEmbeddings.embedding} <=> ${toVector(opts.embedding)}`)
-            .limit(1);
+        const rows = await tx
+          .select({ threadId: threadEmbeddings.threadId })
+          .from(threadEmbeddings)
+          .where(and(
+            eq(threadEmbeddings.accountId, opts.accountId),
+            eq(threadEmbeddings.recipientAddress, opts.recipientAddress),
+            sql`${threadEmbeddings.embedding} <=> ${toVector(opts.embedding)} < ${THREAD_MATCH_THRESHOLD}`,
+          ))
+          .orderBy(sql`${threadEmbeddings.embedding} <=> ${toVector(opts.embedding)}`)
+          .limit(1);
 
-          const threadId = rows[0]?.threadId;
-          if (!threadId) return null;
-          return { threadId };
-        });
-      }, this.logger, "findMatchForCluster");
-      return ok(result);
-    } catch (e) {
-      return err(dbError(e));
-    }
+        const threadId = rows[0]?.threadId;
+        if (!threadId) return null;
+        return { threadId };
+      });
+    }, this.logger, "findMatchForCluster");
+    if (result.isErr()) return err(result.error);
+    return ok(result.value);
   }
 
   // ---------------------------------------------------------------------------
@@ -310,32 +333,29 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
     const cluster = getPrimaryThreadMatcherRegistry();
     const db = getDbForCluster(cluster);
 
-    try {
-      const rows = await withRetry(async () => {
-        return db.transaction(async (tx) => {
-          await tx.execute(sql.raw(`SET LOCAL app.current_account_id = '${accountId.replace(/'/g, "''")}'`));
+    const rowsResult = await withRetry(async () => {
+      return db.transaction(async (tx) => {
+        await tx.execute(sql.raw(`SET LOCAL app.current_account_id = '${accountId.replace(/'/g, "''")}'`));
 
-          // With multi-row embeddings (one per signal), DISTINCT ON deduplicates at DB level:
-          // inner query picks closest embedding per thread, outer sorts by global distance.
-          const result = await tx.execute(sql`
-            SELECT thread_id FROM (
-              SELECT DISTINCT ON (thread_id) thread_id, embedding <=> ${toVector(embedding)} AS dist
-              FROM thread_embeddings
-              WHERE account_id = ${accountId}
-                AND embedding <=> ${toVector(embedding)} < ${SEARCH_THRESHOLD}
-              ORDER BY thread_id, embedding <=> ${toVector(embedding)}
-            ) sub
-            ORDER BY dist
-            LIMIT ${limit}
-          `);
-          return result.rows as Array<{ thread_id: string }>;
-        });
-      }, this.logger, "searchByVector");
+        // With multi-row embeddings (one per signal), DISTINCT ON deduplicates at DB level:
+        // inner query picks closest embedding per thread, outer sorts by global distance.
+        const result = await tx.execute(sql`
+          SELECT thread_id FROM (
+            SELECT DISTINCT ON (thread_id) thread_id, embedding <=> ${toVector(embedding)} AS dist
+            FROM thread_embeddings
+            WHERE account_id = ${accountId}
+              AND embedding <=> ${toVector(embedding)} < ${SEARCH_THRESHOLD}
+            ORDER BY thread_id, embedding <=> ${toVector(embedding)}
+          ) sub
+          ORDER BY dist
+          LIMIT ${limit}
+        `);
+        return result.rows as Array<{ thread_id: string }>;
+      });
+    }, this.logger, "searchByVector");
+    if (rowsResult.isErr()) return err(rowsResult.error);
 
-      return ok(rows.map(r => r.thread_id));
-    } catch (e) {
-      return err(dbError(e));
-    }
+    return ok(rowsResult.value.map(r => r.thread_id));
   }
 
   // ---------------------------------------------------------------------------
@@ -346,18 +366,15 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
     const cluster = getPrimaryThreadMatcherRegistry();
     const db = getDbForCluster(cluster);
 
-    try {
-      const rows = await withRetry(async () => {
-        return db
-          .select({ threadId: threadEmbeddings.threadId })
-          .from(threadEmbeddings)
-          .where(eq(threadEmbeddings.threadId, threadId))
-          .limit(1);
-      }, this.logger, "hasEmbedding");
-      return ok(rows.length > 0);
-    } catch (e) {
-      return err(dbError(e));
-    }
+    const rowsResult = await withRetry(async () => {
+      return db
+        .select({ threadId: threadEmbeddings.threadId })
+        .from(threadEmbeddings)
+        .where(eq(threadEmbeddings.threadId, threadId))
+        .limit(1);
+    }, this.logger, "hasEmbedding");
+    if (rowsResult.isErr()) return err(rowsResult.error);
+    return ok(rowsResult.value.length > 0);
   }
 
   // ---------------------------------------------------------------------------
@@ -402,36 +419,33 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
     if (!cluster) return err(dbError(`Cluster "${opts.registryId}" not found in CLUSTER_REGISTRY`));
     const db = getDbForCluster(cluster);
 
-    try {
-      await withRetry(async () => {
-        await db.transaction(async (tx) => {
-          await tx.execute(sql.raw(`SET LOCAL app.current_account_id = '${opts.accountId.replace(/'/g, "''")}'`));
+    const result = await withRetry(async () => {
+      await db.transaction(async (tx) => {
+        await tx.execute(sql.raw(`SET LOCAL app.current_account_id = '${opts.accountId.replace(/'/g, "''")}'`));
 
-          await tx
-            .insert(threadEmbeddings)
-            .values({
-              signalId: opts.signalId,
-              threadId: opts.threadId,
-              accountId: opts.accountId,
-              recipientAddress: opts.recipientAddress,
+        await tx
+          .insert(threadEmbeddings)
+          .values({
+            signalId: opts.signalId,
+            threadId: opts.threadId,
+            accountId: opts.accountId,
+            recipientAddress: opts.recipientAddress,
+            embedding: toVector(opts.embedding),
+            updatedAt: sql`now()`,
+            expiresAt: opts.ttl != null ? sql`to_timestamp(${opts.ttl})` : sql`now() + interval '2 years'`,
+          })
+          .onConflictDoUpdate({
+            target: [threadEmbeddings.signalId, threadEmbeddings.threadId, threadEmbeddings.accountId, threadEmbeddings.recipientAddress],
+            set: {
               embedding: toVector(opts.embedding),
               updatedAt: sql`now()`,
               expiresAt: opts.ttl != null ? sql`to_timestamp(${opts.ttl})` : sql`now() + interval '2 years'`,
-            })
-            .onConflictDoUpdate({
-              target: [threadEmbeddings.signalId, threadEmbeddings.threadId, threadEmbeddings.accountId, threadEmbeddings.recipientAddress],
-              set: {
-                embedding: toVector(opts.embedding),
-                updatedAt: sql`now()`,
-                expiresAt: opts.ttl != null ? sql`to_timestamp(${opts.ttl})` : sql`now() + interval '2 years'`,
-              },
-            });
-        });
-      }, this.logger, "upsertEmbedding");
-      return ok(undefined);
-    } catch (e) {
-      return err(dbError(e));
-    }
+            },
+          });
+      });
+    }, this.logger, "upsertEmbedding");
+    if (result.isErr()) return err(result.error);
+    return ok(undefined);
   }
 
   // ---------------------------------------------------------------------------
@@ -442,17 +456,14 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
     const cluster = getPrimaryThreadMatcherRegistry();
     const db = getDbForCluster(cluster);
 
-    try {
-      await withRetry(async () => {
-        await db.delete(threadEmbeddings).where(and(
-          eq(threadEmbeddings.threadId, threadId),
-          eq(threadEmbeddings.accountId, accountId),
-        ));
-      }, this.logger, "deleteEmbeddingsForThread");
-      return ok(undefined);
-    } catch (e) {
-      return err(dbError(e));
-    }
+    const result = await withRetry(async () => {
+      await db.delete(threadEmbeddings).where(and(
+        eq(threadEmbeddings.threadId, threadId),
+        eq(threadEmbeddings.accountId, accountId),
+      ));
+    }, this.logger, "deleteEmbeddingsForThread");
+    if (result.isErr()) return err(result.error);
+    return ok(undefined);
   }
 }
 
