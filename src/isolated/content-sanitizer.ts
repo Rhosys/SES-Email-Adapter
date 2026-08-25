@@ -9,6 +9,11 @@ import type { Logger } from "../logger.js";
 // actually failing — mirrors the api.slow_request pattern in src/api/app.ts.
 const SLOW_INVOCATION_THRESHOLD_MS = 50_000;
 
+// Lower-bar threshold so a message that's merely slow to parse (large/complex MIME,
+// many attachments) shows up before it gets anywhere near the 50s near-timeout alert —
+// gives us an early signal to look at parsing performance, not just imminent failures.
+const SLOW_PARSE_THRESHOLD_MS = 10_000;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -23,6 +28,13 @@ interface AttachmentRef {
   mimeType: string;
   sizeBytes: number;
   s3Key: string;
+}
+
+interface DroppedAttachment {
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  reason: "too_large" | "upload_failed";
 }
 
 interface ContentSanitizeRequest {
@@ -58,6 +70,7 @@ interface ContentSanitizeResponse {
     sentAt?: string;
     assets?: ExtractedAsset[];
     links?: ExtractedLink[];
+    droppedAttachments?: DroppedAttachment[];
   };
 }
 
@@ -214,10 +227,15 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
 
   // 2. Parse with mailparser
   logger?.trackPoint("mime_parse_start");
+  const parseStart = Date.now();
   let parsed;
   try {
     parsed = await simpleParser(rawMime);
+    const parseElapsedMs = Date.now() - parseStart;
     logger?.trackPoint("mime_parse_complete");
+    if (parseElapsedMs > SLOW_PARSE_THRESHOLD_MS) {
+      logger?.track("MIME parse exceeded 10s.", { code: "content_sanitizer.slow_parse", elapsedMs: parseElapsedMs, sizeBytes: rawMime.length, accountId: event.accountId });
+    }
   } catch (e) {
     return {
       success: false,
@@ -258,13 +276,20 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   const cidMap: Record<string, string> = {};
   const inlineImages: Array<{ mimeType: string; content: Buffer }> = [];
   const attachmentsWithBytes: Array<{ filename: string; mimeType: string; content: Buffer; s3Key?: string }> = [];
+  const droppedAttachments: DroppedAttachment[] = [];
 
   for (const attachment of attachments) {
+    const contentType = attachment.contentType || "application/octet-stream";
+
     if (attachment.size > MAX_SINGLE_ATTACHMENT_SIZE) {
+      droppedAttachments.push({
+        filename: attachment.filename ?? `attachment-${uploadIndex}`,
+        mimeType: contentType,
+        sizeBytes: attachment.size,
+        reason: "too_large",
+      });
       continue;
     }
-
-    const contentType = attachment.contentType || "application/octet-stream";
 
     if (attachment.contentId) {
       // Inline image — embed as data URI, no S3 upload needed
@@ -278,15 +303,25 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
     const s3Key = `${event.keyPrefix}${uploadIndex}`;
     const uploaded = await uploadViaPresignedPost(event.presignedPost, s3Key, attachment.content, contentType, event.retentionTag);
 
+    const filename = attachment.filename ?? `attachment-${uploadIndex}`;
     if (uploaded) {
-      const filename = attachment.filename ?? `attachment-${uploadIndex}`;
       attachmentRefs.push({ filename, mimeType: contentType, sizeBytes: attachment.size, s3Key });
       attachmentsWithBytes.push({ filename, mimeType: contentType, content: attachment.content, s3Key });
+    } else {
+      droppedAttachments.push({ filename, mimeType: contentType, sizeBytes: attachment.size, reason: "upload_failed" });
     }
 
     uploadIndex++;
   }
-  logger?.trackPoint("attachments_processed", { attachmentRefCount: attachmentRefs.length, inlineImageCount: inlineImages.length });
+  logger?.trackPoint("attachments_processed", { attachmentRefCount: attachmentRefs.length, inlineImageCount: inlineImages.length, droppedCount: droppedAttachments.length });
+  if (droppedAttachments.length > 0) {
+    logger?.track("Attachment(s) dropped from message.", {
+      code: "content_sanitizer.attachments_dropped",
+      accountId: event.accountId,
+      droppedCount: droppedAttachments.length,
+      dropped: droppedAttachments.map(d => ({ mimeType: d.mimeType, sizeBytes: d.sizeBytes, reason: d.reason })),
+    });
+  }
 
   // 6. Sanitize HTML and inline CID images
   let htmlBody: string | undefined;
@@ -401,6 +436,9 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   }
   if (extractedLinks.length > 0) {
     result.parsed.links = extractedLinks;
+  }
+  if (droppedAttachments.length > 0) {
+    result.parsed.droppedAttachments = droppedAttachments;
   }
 
   logger?.trackPoint("response_built");

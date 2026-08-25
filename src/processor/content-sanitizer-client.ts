@@ -20,6 +20,13 @@ interface AttachmentRef {
   s3Key: string;
 }
 
+export interface DroppedAttachment {
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  reason: "too_large" | "upload_failed";
+}
+
 export interface ContentSanitizeRequest {
   presignedGetUrl: string;
   presignedPost: {
@@ -59,6 +66,7 @@ export interface ContentSanitizeResponse {
     sentAt?: string;
     assets?: ExtractedAsset[];
     links?: ExtractedLink[];
+    droppedAttachments?: DroppedAttachment[];
   };
 }
 

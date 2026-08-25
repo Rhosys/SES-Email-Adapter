@@ -887,6 +887,15 @@ export class SignalProcessor {
     const { parsed: sanitizedParsed } = sanitizeResult.value;
     const sanitizerAssets = sanitizedParsed.assets ?? [];
 
+    if (sanitizedParsed.droppedAttachments && sanitizedParsed.droppedAttachments.length > 0) {
+      this.logger.warn("Message had attachment(s) dropped by content sanitizer", {
+        code: "processor.attachments_dropped",
+        accountId,
+        droppedCount: sanitizedParsed.droppedAttachments.length,
+        dropped: sanitizedParsed.droppedAttachments.map(d => ({ mimeType: d.mimeType, sizeBytes: d.sizeBytes, reason: d.reason })),
+      });
+    }
+
     // Map sanitized response to ParsedMime for downstream compatibility
     const parsed: ParsedMime = {
       from: sanitizedParsed.from,
