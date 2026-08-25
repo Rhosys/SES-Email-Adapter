@@ -134,8 +134,8 @@ function errorReason(e: unknown): string {
 // ---------------------------------------------------------------------------
 
 // Never throws — every terminal failure comes back as an err(DbError) carrying the
-// operation name and the attempt count it gave up at, so callers get full context without
-// having to wrap this in their own try/catch.
+// operation name, so callers get context without having to wrap this in their own
+// try/catch. Retry counts stay internal to this function — nothing outside it acts on them.
 async function withRetry<T>(fn: () => Promise<T>, logger: Logger, operation: string): Promise<Result<T, DbError>> {
   let lastError: unknown;
   let maxAttempts = MAX_ATTEMPTS;
@@ -155,12 +155,12 @@ async function withRetry<T>(fn: () => Promise<T>, logger: Logger, operation: str
 
       if (!isTransientError(e)) {
         logger.error(`Aurora query failed with non-transient error — no retry: ${errorReason(e)}`, { code: "aurora.non_transient", operation, attempt, error: e });
-        return err(dbError(e, { operation, attempts: attempt + 1 }));
+        return err(dbError(e, { operation }));
       }
 
       if (attempt === maxAttempts - 1) {
         logger.error(`Aurora query failed after all retry attempts exhausted: ${errorReason(e)}`, { code: "aurora.retries_exhausted", operation, attempts: maxAttempts, error: e });
-        return err(dbError(e, { operation, attempts: maxAttempts }));
+        return err(dbError(e, { operation }));
       }
 
       const delayMs = Math.min(baseDelay * Math.pow(2, attempt), 8000);
@@ -175,7 +175,7 @@ async function withRetry<T>(fn: () => Promise<T>, logger: Logger, operation: str
       await sleep(delayMs);
     }
   }
-  return err(dbError(lastError, { operation, attempts: maxAttempts }));
+  return err(dbError(lastError, { operation }));
 }
 
 function sleep(ms: number): Promise<void> {
