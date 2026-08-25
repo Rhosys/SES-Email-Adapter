@@ -40,7 +40,7 @@ describe("LambdaContentSanitizer", () => {
     lambdaMock.restore();
   });
 
-  it("strips the per-invocation RequestId from a sandbox timeout error so the message can be aggregated", async () => {
+  it("moves the per-invocation RequestId out of the message and into a structured field", async () => {
     lambdaMock.on(InvokeCommand).resolves({
       FunctionError: "Unhandled",
       Payload: payloadFrom({
@@ -55,6 +55,7 @@ describe("LambdaContentSanitizer", () => {
     if (result.isErr()) {
       expect(result.error.message).toBe("Content Sanitizer Lambda error: Unhandled — Sandbox.Timedout: Error: Task timed out after 10.00 seconds");
       expect(result.error.message).not.toContain("0fdb18b6-f166-4949-b101-e5e2e495fe54");
+      expect(result.error.lambdaRequestId).toBe("0fdb18b6-f166-4949-b101-e5e2e495fe54");
     }
   });
 
@@ -72,6 +73,7 @@ describe("LambdaContentSanitizer", () => {
     expect(result.isErr()).toBe(true);
     if (result.isErr()) {
       expect(result.error.message).toBe("Content Sanitizer Lambda error: Unhandled — Error: Something went wrong");
+      expect(result.error.lambdaRequestId).toBeUndefined();
     }
   });
 });
