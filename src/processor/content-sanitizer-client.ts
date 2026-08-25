@@ -122,7 +122,11 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
     try {
       const decoded = JSON.parse(new TextDecoder().decode(payload)) as { errorType?: string; errorMessage?: string };
       if (!decoded.errorMessage && !decoded.errorType) return undefined;
-      return [decoded.errorType, decoded.errorMessage].filter(Boolean).join(": ");
+      // Lambda sandbox errors (e.g. Sandbox.Timedout) embed a per-invocation
+      // "RequestId: <uuid>" in errorMessage — strip it so the resulting log
+      // message stays identical across invocations and can be aggregated.
+      const errorMessage = decoded.errorMessage?.replace(/RequestId:\s*[0-9a-f-]{36}\s*/gi, "").trim();
+      return [decoded.errorType, errorMessage].filter(Boolean).join(": ");
     } catch {
       return undefined;
     }
