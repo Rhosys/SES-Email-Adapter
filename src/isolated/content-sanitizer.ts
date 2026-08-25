@@ -171,6 +171,14 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
     logger = requestLogger;
   }
 
+  // Fires on its own clock at the 50s mark regardless of whether processEmail ever
+  // settles — a stuck fetch/parse would never reach a `finally` after `await`, since
+  // the await itself never returns. This is a plain timer, not a Promise.race, precisely
+  // so it still fires even if the awaited work hangs all the way to the Lambda timeout.
+  const slowInvocationTimer = setTimeout(() => {
+    logger?.track("Content sanitizer invocation exceeded 50s — at risk of Lambda timeout.", { code: "content_sanitizer.slow_invocation", elapsedMs: Date.now() - start, accountId: event.accountId });
+  }, SLOW_INVOCATION_THRESHOLD_MS);
+
   try {
     return await processEmail(event, logger);
   } catch (e) {
@@ -179,10 +187,7 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
       error: { message: e instanceof Error ? e.message : String(e), type: "internal_error" },
     };
   } finally {
-    const elapsedMs = Date.now() - start;
-    if (elapsedMs > SLOW_INVOCATION_THRESHOLD_MS) {
-      logger?.track("Content sanitizer invocation exceeded 50s — at risk of Lambda timeout.", { code: "content_sanitizer.slow_invocation", elapsedMs, accountId: event.accountId });
-    }
+    clearTimeout(slowInvocationTimer);
   }
 }
 
