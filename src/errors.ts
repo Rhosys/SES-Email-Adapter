@@ -46,6 +46,21 @@ export function isSchemaMismatchError(message: string): boolean {
   return SCHEMA_MISMATCH_PATTERNS.some((pattern) => pattern.test(message));
 }
 
+/**
+ * Best-effort human-readable message for any of our error kinds (all of which carry a
+ * `message: string` field), a raw Error, or an arbitrary thrown value. Prefer this over
+ * `instanceof Error` checks when logging a Result's `.error` — our error kinds are plain
+ * objects, not Error instances, so `instanceof Error` always falls through to
+ * JSON.stringify() for them, which loses the message behind a non-enumerable `cause`.
+ */
+export function errorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === "object" && "message" in e && typeof (e as { message: unknown }).message === "string") {
+    return (e as { message: string }).message;
+  }
+  return JSON.stringify(e);
+}
+
 export const dbError = (cause: unknown): DbError => {
   const error = toError(cause);
   const result: DbError = { kind: "db_error", message: error.message, cause: error };

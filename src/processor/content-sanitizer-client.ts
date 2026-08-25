@@ -95,7 +95,8 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
       }));
 
       if (response.FunctionError) {
-        return err(dbError(`Content Sanitizer Lambda error: ${response.FunctionError}`));
+        const errorDetail = this.extractInvocationErrorDetail(response.Payload);
+        return err(dbError(`Content Sanitizer Lambda error: ${response.FunctionError}${errorDetail ? ` — ${errorDetail}` : ""}`));
       }
 
       if (!response.Payload) {
@@ -113,6 +114,17 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
     } catch (e) {
       this.logger.warn("Content sanitizer invoke failed", { code: "content_sanitizer.invoke_failed", error: e });
       return err(dbError(e));
+    }
+  }
+
+  private extractInvocationErrorDetail(payload: Uint8Array | undefined): string | undefined {
+    if (!payload) return undefined;
+    try {
+      const decoded = JSON.parse(new TextDecoder().decode(payload)) as { errorType?: string; errorMessage?: string };
+      if (!decoded.errorMessage && !decoded.errorType) return undefined;
+      return [decoded.errorType, decoded.errorMessage].filter(Boolean).join(": ");
+    } catch {
+      return undefined;
     }
   }
 }
