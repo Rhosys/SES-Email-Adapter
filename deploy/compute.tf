@@ -53,8 +53,8 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         Effect = "Allow"
         Action = [
           "dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem",
-          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:BatchWriteItem",
-          "dynamodb:Scan"
+          "dynamodb:DeleteItem", "dynamodb:Query", "dynamodb:BatchGetItem",
+          "dynamodb:BatchWriteItem", "dynamodb:Scan"
         ]
         Resource = [
           aws_dynamodb_table.accounts.arn,
