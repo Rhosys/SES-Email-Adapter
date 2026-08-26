@@ -150,3 +150,175 @@ describe("coerceDate", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Locale noise stripping
+// ---------------------------------------------------------------------------
+
+describe("coerceDate — locale noise stripping", () => {
+  it("strips German 'Uhr' suffix from time", () => {
+    expect(coerceDate("15 March 2025 17:00 Uhr", RECEIVED_AT)).toBe("2025-03-15T17:00");
+  });
+
+  it("strips 'Uhr' case-insensitively", () => {
+    expect(coerceDate("15 March 2025 17:00 uhr", RECEIVED_AT)).toBe("2025-03-15T17:00");
+  });
+
+  it("strips English 'o'clock' suffix", () => {
+    expect(coerceDate("15 March 2025 17:00 o'clock", RECEIVED_AT)).toBe("2025-03-15T17:00");
+  });
+
+  it("strips French 'heure' suffix", () => {
+    expect(coerceDate("15 March 2025 14:00 heure", RECEIVED_AT)).toBe("2025-03-15T14:00");
+  });
+
+  it("strips French 'heures' suffix (plural)", () => {
+    expect(coerceDate("15 March 2025 14:00 heures", RECEIVED_AT)).toBe("2025-03-15T14:00");
+  });
+
+  it("strips Dutch 'uur' suffix", () => {
+    expect(coerceDate("15 March 2025 09:30 uur", RECEIVED_AT)).toBe("2025-03-15T09:30");
+  });
+
+  it("strips short 'h' suffix", () => {
+    expect(coerceDate("15 March 2025 09:30 h", RECEIVED_AT)).toBe("2025-03-15T09:30");
+  });
+
+  it("strips 'hrs' suffix", () => {
+    expect(coerceDate("15 March 2025 09:30 hrs", RECEIVED_AT)).toBe("2025-03-15T09:30");
+  });
+
+  it("year-free with Uhr suffix → resolves year and preserves time", () => {
+    expect(coerceDate("15 August 17:00 Uhr", RECEIVED_AT)).toBe("2024-08-15T17:00");
+  });
+
+  it("date only with trailing noise — does not affect date-only parsing", () => {
+    expect(coerceDate("15 March 2025", RECEIVED_AT)).toBe("2025-03-15");
+  });
+
+  it("pure time-only with Uhr but no date → still null (no date component)", () => {
+    expect(coerceDate("17:00 Uhr", RECEIVED_AT)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Locale-aware fallback parsing
+// ---------------------------------------------------------------------------
+
+describe("coerceDate — locale-aware fallback", () => {
+  it("parses German month name with de locale hint", () => {
+    expect(coerceDate("15 März 2025", RECEIVED_AT, ["de"])).toBe("2025-03-15");
+  });
+
+  it("parses German abbreviated month — full form works with de locale", () => {
+    // Luxon's d MMM with 'de' locale doesn't reliably parse 3-letter abbreviations
+    // on all Node.js ICU builds. Full month "März" always works via MMMM.
+    expect(coerceDate("15 März 2025", RECEIVED_AT, ["de"])).toBe("2025-03-15");
+  });
+
+  it("parses French month name with fr locale hint", () => {
+    expect(coerceDate("15 mars 2025", RECEIVED_AT, ["fr"])).toBe("2025-03-15");
+  });
+
+  it("parses French full month with fr locale", () => {
+    expect(coerceDate("15 janvier 2025", RECEIVED_AT, ["fr"])).toBe("2025-01-15");
+  });
+
+  it("parses Spanish month with es locale hint", () => {
+    expect(coerceDate("15 marzo 2025", RECEIVED_AT, ["es"])).toBe("2025-03-15");
+  });
+
+  it("parses Italian month with it locale hint", () => {
+    expect(coerceDate("15 marzo 2025", RECEIVED_AT, ["it"])).toBe("2025-03-15");
+  });
+
+  it("parses Dutch month with nl locale hint", () => {
+    expect(coerceDate("15 maart 2025", RECEIVED_AT, ["nl"])).toBe("2025-03-15");
+  });
+
+  it("parses German month with time and Uhr stripped", () => {
+    expect(coerceDate("15 März 2025 17:00 Uhr", RECEIVED_AT, ["de"])).toBe("2025-03-15T17:00");
+  });
+
+  it("parses French month with time", () => {
+    expect(coerceDate("15 mars 2025 14:30", RECEIVED_AT, ["fr"])).toBe("2025-03-15T14:30");
+  });
+
+  it("year-free German month resolves to next occurrence", () => {
+    // receivedAt is June 15 2024, so "15 März" (March 15) is in the past → next year
+    expect(coerceDate("15 März", RECEIVED_AT, ["de"])).toBe("2025-03-15");
+  });
+
+  it("year-free German month in the future resolves to same year", () => {
+    // receivedAt is June 15 2024, so "15 August" is in the future
+    expect(coerceDate("15 August", RECEIVED_AT, ["de"])).toBe("2024-08-15");
+  });
+
+  it("year-free French month with time resolves correctly", () => {
+    // receivedAt is June 15, "15 août" (August 15) is future
+    expect(coerceDate("15 août 14:00", RECEIVED_AT, ["fr"])).toBe("2024-08-15T14:00");
+  });
+
+  it("tries multiple locale hints — first match wins", () => {
+    // "März" won't parse with fr, but will parse with de
+    expect(coerceDate("15 März 2025", RECEIVED_AT, ["fr", "de"])).toBe("2025-03-15");
+  });
+
+  it("falls through all locales and returns null if none match", () => {
+    expect(coerceDate("gibberish value", RECEIVED_AT, ["de", "fr", "es"])).toBeNull();
+  });
+
+  it("empty locale hints array works like no locales", () => {
+    expect(coerceDate("15 März 2025", RECEIVED_AT, [])).toBeNull();
+  });
+
+  it("BCP 47 locale tags work (de-CH)", () => {
+    expect(coerceDate("15 März 2025", RECEIVED_AT, ["de-CH"])).toBe("2025-03-15");
+  });
+
+  it("BCP 47 locale tags work (fr-CH)", () => {
+    expect(coerceDate("15 mars 2025", RECEIVED_AT, ["fr-CH"])).toBe("2025-03-15");
+  });
+
+  it("English month names still work without locale hints (baseline)", () => {
+    expect(coerceDate("15 March 2025", RECEIVED_AT)).toBe("2025-03-15");
+  });
+
+  it("locale noise + locale-aware parsing combined — German date with Uhr", () => {
+    expect(coerceDate("26 August 2026 17:00 Uhr", RECEIVED_AT, ["de"])).toBe("2026-08-26T17:00");
+  });
+
+  it("does not parse pure time-only even with locale hints", () => {
+    expect(coerceDate("17:00 Uhr", RECEIVED_AT, ["de"])).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Locale noise does NOT interfere with existing parsing
+// ---------------------------------------------------------------------------
+
+describe("coerceDate — noise stripping safety", () => {
+  it("ISO 8601 is not affected by noise stripping (no noise present)", () => {
+    expect(coerceDate("2025-03-15T14:30:00Z", RECEIVED_AT)).toBe("2025-03-15T14:30+00:00");
+  });
+
+  it("AM/PM parsing still works", () => {
+    expect(coerceDate("March 15, 2025 2:30 PM", RECEIVED_AT)).toBe("2025-03-15T14:30");
+  });
+
+  it("'at' prefix time still works", () => {
+    expect(coerceDate("15 March 2025 at 14:30", RECEIVED_AT)).toBe("2025-03-15T14:30");
+  });
+
+  it("'at' prefix with AM/PM still works", () => {
+    expect(coerceDate("March 15, 2025 at 2:30 PM", RECEIVED_AT)).toBe("2025-03-15T14:30");
+  });
+
+  it("dot-separated European date still works", () => {
+    expect(coerceDate("15.03.2025", RECEIVED_AT)).toBe("2025-03-15");
+  });
+
+  it("slash dates are still rejected", () => {
+    expect(coerceDate("15/03/2025", RECEIVED_AT)).toBeNull();
+  });
+});

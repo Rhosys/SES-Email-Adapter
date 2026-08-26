@@ -107,6 +107,7 @@ export function coerceWorkflowData(
   logger: Logger,
   ctx: CoercionContext,
   receivedAt: string,
+  localeHints: string[] = [],
 ): Record<string, unknown> {
   const result = { ...workflowData };
   const fields = WORKFLOW_FIELDS.get(workflow);
@@ -205,9 +206,9 @@ export function coerceWorkflowData(
       }
 
       case "date": {
-        const coerced = coerceDate(raw, receivedAt);
+        const coerced = coerceDate(raw, receivedAt, localeHints);
         if (coerced === null && typeof raw === "string" && raw.trim() !== "") {
-          logger.track("Classifier returned unparseable date value — nullified.", {
+          logger.track(`Classifier returned unparseable date value "${raw}" — nullified.`, {
             code: "classifier.date_parse_failed",
             field: field.name,
             value: raw,
@@ -287,12 +288,19 @@ function resolveYearFree(month: number, day: number, receivedAt: DateTime): Date
 }
 
 /**
+ * Known locale time-noise suffixes that carry no semantic value beyond the time digits.
+ * Stripped before attempting format-based parsing.
+ */
+const LOCALE_TIME_NOISE = /(?<=\d)\s*(?:Uhr|o'clock|h(?:rs?)?|heure[s]?|ч(?:ас(?:ов|а)?)?|uur|ore|godzin[ay]?)\s*$/i;
+
+/**
  * Coerces a raw date value into a Display_Date string.
  *
  * Parse order:
  * 1. ISO 8601 (with or without offset)
  * 2. Human-readable formats (day MMMM yyyy, MMMM d yyyy, dot-separated, year-free, with/without time)
- * 3. null on failure
+ * 3. Locale-aware fallback using localeHints (Content-Language, html lang, classifier-detected)
+ * 4. null on failure
  *
  * Slash-separated numeric dates are rejected as ambiguous.
  *
@@ -301,7 +309,7 @@ function resolveYearFree(month: number, day: number, receivedAt: DateTime): Date
  * - date+time, no offset → "YYYY-MM-DDTHH:mm"
  * - date only → "YYYY-MM-DD"
  */
-export function coerceDate(value: unknown, receivedAt: string): string | null {
+export function coerceDate(value: unknown, receivedAt: string, localeHints: string[] = []): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (trimmed === "") return null;
@@ -317,11 +325,15 @@ export function coerceDate(value: unknown, receivedAt: string): string | null {
     return formatDisplayDate(iso, trimmed);
   }
 
+  // Strip locale time noise (e.g. "Uhr", "o'clock") for format-based parsing
+  const cleaned = trimmed.replace(LOCALE_TIME_NOISE, "").trim();
+  const input = cleaned || trimmed;
+
   // 2. Try human-readable formats with year + time variants
   for (const fmt of DATE_FORMATS_WITH_YEAR) {
     for (const timeSuffix of TIME_SUFFIXES) {
       const fullFmt = fmt + timeSuffix;
-      const parsed = DateTime.fromFormat(trimmed, fullFmt);
+      const parsed = DateTime.fromFormat(input, fullFmt);
       if (parsed.isValid) {
         return formatDisplayDate(parsed, trimmed, timeSuffix !== "");
       }
@@ -332,7 +344,7 @@ export function coerceDate(value: unknown, receivedAt: string): string | null {
   for (const fmt of DATE_FORMATS_YEARFREE) {
     for (const timeSuffix of TIME_SUFFIXES) {
       const fullFmt = fmt + timeSuffix;
-      const parsed = DateTime.fromFormat(trimmed, fullFmt);
+      const parsed = DateTime.fromFormat(input, fullFmt);
       if (parsed.isValid) {
         const resolved = resolveYearFree(parsed.month, parsed.day, receivedAtDt);
         if (timeSuffix !== "") {
@@ -340,6 +352,34 @@ export function coerceDate(value: unknown, receivedAt: string): string | null {
           return formatDisplayDate(withTime, trimmed, true);
         }
         return resolved.toFormat("yyyy-MM-dd");
+      }
+    }
+  }
+
+  // 4. Locale-aware fallback — try each locale hint with all formats
+  const uniqueLocales = [...new Set(localeHints.filter(Boolean))];
+  for (const locale of uniqueLocales) {
+    for (const fmt of DATE_FORMATS_WITH_YEAR) {
+      for (const timeSuffix of TIME_SUFFIXES) {
+        const fullFmt = fmt + timeSuffix;
+        const parsed = DateTime.fromFormat(input, fullFmt, { locale });
+        if (parsed.isValid) {
+          return formatDisplayDate(parsed, trimmed, timeSuffix !== "");
+        }
+      }
+    }
+    for (const fmt of DATE_FORMATS_YEARFREE) {
+      for (const timeSuffix of TIME_SUFFIXES) {
+        const fullFmt = fmt + timeSuffix;
+        const parsed = DateTime.fromFormat(input, fullFmt, { locale });
+        if (parsed.isValid) {
+          const resolved = resolveYearFree(parsed.month, parsed.day, receivedAtDt);
+          if (timeSuffix !== "") {
+            const withTime = resolved.set({ hour: parsed.hour, minute: parsed.minute });
+            return formatDisplayDate(withTime, trimmed, true);
+          }
+          return resolved.toFormat("yyyy-MM-dd");
+        }
       }
     }
   }

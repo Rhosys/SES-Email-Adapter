@@ -1002,6 +1002,13 @@ export class SignalProcessor {
     for (const [k, v] of Object.entries(parsed.headers)) {
       if (RELEVANT_HEADERS.has(k.toLowerCase())) classificationHeaders[k] = v;
     }
+    // Extract <html lang="..."> attribute from raw HTML as an additional locale signal
+    if (parsed.htmlBody) {
+      const htmlLangMatch = parsed.htmlBody.match(/<html[^>]*\slang=["']([^"']+)["']/i);
+      if (htmlLangMatch?.[1]) {
+        classificationHeaders["x-html-lang"] = htmlLangMatch[1];
+      }
+    }
     const extractedLinks = sanitizedParsed.links ?? [];
     const classification = await this.classifier.classify({
       from: parsed.from.address,
@@ -1015,6 +1022,7 @@ export class SignalProcessor {
       extractedLinks,
       signalId: msg.compositeMailMessageId,
       accountId,
+      accountTimezone: account?.timezone ?? "UTC",
     });
 
     let classificationOutput: ClassificationOutput;

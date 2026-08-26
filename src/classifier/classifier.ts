@@ -31,6 +31,7 @@ export interface ClassificationInput {
   extractedLinks?: Array<{ url: string; text: string | null }>;
   signalId?: string;
   accountId?: string;
+  accountTimezone?: string;
 }
 
 /**
@@ -49,6 +50,8 @@ export interface ClassificationOutput {
   summary: string;
   labels: string[];
   actions: SignalAction[];
+  language?: string;
+  locale?: string;
 }
 
 interface RawClassificationResponse {
@@ -59,6 +62,8 @@ interface RawClassificationResponse {
   summary: string;
   labels: string[];
   actions?: unknown[];
+  language?: string;
+  locale?: string;
 }
 
 // Bedrock Guardrail trace types (when trace: "ENABLED" is set on InvokeModel)
@@ -228,12 +233,21 @@ export class SignalClassifier {
       }
     }
 
+    // Build locale hints for date parsing (classifier-detected > Content-Language > html lang)
+    const localeHints: string[] = [];
+    if (typeof raw.locale === "string" && raw.locale.trim()) localeHints.push(raw.locale.trim());
+    if (typeof raw.language === "string" && raw.language.trim()) localeHints.push(raw.language.trim());
+    const contentLanguage = input.headers["content-language"] ?? input.headers["Content-Language"];
+    if (typeof contentLanguage === "string" && contentLanguage.trim()) localeHints.push(contentLanguage.trim());
+    const htmlLang = input.headers["x-html-lang"];
+    if (typeof htmlLang === "string" && htmlLang.trim()) localeHints.push(htmlLang.trim());
+
     // Coerce workflowData field types (numeric → string, boolean normalization)
     const coercedWorkflowData = coerceWorkflowData(workflowData, raw.workflow, this.logger, {
       signalId: input.signalId,
       accountId: input.accountId,
       workflow: raw.workflow,
-    }, input.receivedAt);
+    }, input.receivedAt, localeHints);
 
     // Validate currency fields — must be a valid ISO 4217 code (3 uppercase letters)
     if (typeof coercedWorkflowData.currency === "string") {
@@ -302,6 +316,9 @@ export class SignalClassifier {
     // Filter actions to valid URLs only (after resolution)
     const validActions = actions.filter((a) => isValidUrl(a.url));
 
+    const language = typeof raw.language === "string" && raw.language.trim() ? raw.language.trim() : undefined;
+    const locale = typeof raw.locale === "string" && raw.locale.trim() ? raw.locale.trim() : undefined;
+
     return ok({
       workflow: raw.workflow as Workflow,
       workflowData: coercedWorkflowData as unknown as WorkflowData,
@@ -309,6 +326,8 @@ export class SignalClassifier {
       summary: raw.summary,
       labels,
       actions: validActions,
+      ...(language ? { language } : {}),
+      ...(locale ? { locale } : {}),
     });
   }
 

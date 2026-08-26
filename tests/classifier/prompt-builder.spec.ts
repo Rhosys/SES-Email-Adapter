@@ -104,3 +104,68 @@ describe("buildUserMessage", () => {
     expect(message).not.toContain("Headers:");
   });
 });
+
+// ---------------------------------------------------------------------------
+// buildUserMessage — current date/time injection
+// ---------------------------------------------------------------------------
+
+describe("buildUserMessage — current date and time injection", () => {
+  const baseInput: ClassificationInput = {
+    from: "sender@example.com",
+    to: ["recipient@example.com"],
+    subject: "Test Subject",
+    body: "Hello, this is the email body.",
+    receivedAt: "2025-01-15T10:30:00Z",
+    headers: {},
+    allowedLabels: [],
+    labelInstructions: {},
+  };
+
+  it("injects current date and time when accountTimezone is provided", () => {
+    const input: ClassificationInput = {
+      ...baseInput,
+      accountTimezone: "Europe/Zurich",
+    };
+    const message = buildUserMessage(input);
+    // Zurich is UTC+1 in January → 11:30
+    expect(message).toContain("Current date and time: Wednesday, 15 January 2025, 11:30");
+  });
+
+  it("uses UTC when accountTimezone is not provided", () => {
+    const message = buildUserMessage(baseInput);
+    expect(message).toContain("Current date and time: Wednesday, 15 January 2025, 10:30");
+  });
+
+  it("does not include timezone name in the injection", () => {
+    const input: ClassificationInput = {
+      ...baseInput,
+      accountTimezone: "America/New_York",
+    };
+    const message = buildUserMessage(input);
+    expect(message).not.toContain("America/New_York");
+    expect(message).not.toContain("EST");
+    expect(message).not.toContain("UTC");
+  });
+
+  it("converts receivedAt to account timezone correctly (US Eastern in January)", () => {
+    const input: ClassificationInput = {
+      ...baseInput,
+      receivedAt: "2025-01-15T15:00:00Z",
+      accountTimezone: "America/New_York",
+    };
+    const message = buildUserMessage(input);
+    // NY is UTC-5 in January → 10:00
+    expect(message).toContain("Current date and time: Wednesday, 15 January 2025, 10:00");
+  });
+
+  it("handles timezone where date rolls back (UTC midnight → previous day in western tz)", () => {
+    const input: ClassificationInput = {
+      ...baseInput,
+      receivedAt: "2025-01-15T03:00:00Z",
+      accountTimezone: "America/Los_Angeles",
+    };
+    const message = buildUserMessage(input);
+    // LA is UTC-8 in January → 19:00 on Jan 14
+    expect(message).toContain("Current date and time: Tuesday, 14 January 2025, 19:00");
+  });
+});
