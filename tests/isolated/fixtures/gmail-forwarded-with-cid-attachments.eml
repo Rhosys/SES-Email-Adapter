@@ -1,0 +1,160 @@
+Return-Path: <alice@gmail.com>
+Received: from mail-qv1-f43.google.com (mail-qv1-f43.google.com [209.85.219.43])
+ by inbound-smtp.eu-central-1.amazonaws.com with SMTP id abc123def456
+ for recipient@example.link;
+ Tue, 10 Jun 2025 14:30:00 +0000 (UTC)
+X-SES-Spam-Verdict: PASS
+X-SES-Virus-Verdict: PASS
+Authentication-Results: amazonses.com;
+ dkim=pass header.i=@gmail.com;
+ dmarc=pass header.from=gmail.com;
+MIME-Version: 1.0
+References: <010001a039a57256-original-message-id@email.amazonses.com>
+In-Reply-To: <010001a039a57256-original-message-id@email.amazonses.com>
+From: Alice Smith <alice@gmail.com>
+Date: Tue, 10 Jun 2025 16:30:00 +0200
+Message-ID: <CAB57test-message-id@mail.gmail.com>
+Subject: Fwd: Your order: ABC123
+To: recipient@example.link
+Content-Type: multipart/mixed; boundary="----=_mixed_boundary_001"
+
+------=_mixed_boundary_001
+Content-Type: multipart/related; boundary="----=_related_boundary_001"
+
+------=_related_boundary_001
+Content-Type: multipart/alternative; boundary="----=_alt_boundary_001"
+
+------=_alt_boundary_001
+Content-Type: text/plain; charset="UTF-8"
+
+---------- Forwarded message ---------
+From: Test Event Platform <noreply@eventplatform.example.com>
+Date: Tue, Jun 10, 2025, 16:00
+Subject: Your order: ABC123
+To: recipient@example.link
+
+Your order for Test Conference 2025 was successful.
+
+Order code: ABC123
+Date: Fri, Nov 14, 2025 09:00
+Location: Grand Hotel, Bahnhofstrasse 1, 8001 Zurich
+
+------=_alt_boundary_001
+Content-Type: text/html; charset="UTF-8"
+
+<div dir="auto"></div><br><div class="gmail_quote gmail_quote_container"><div dir="ltr" class="gmail_attr">---------- Forwarded message ---------<br>From: <strong class="gmail_sendername" dir="auto">Test Event Platform</strong> <span dir="auto">&lt;<a href="mailto:noreply@eventplatform.example.com">noreply@eventplatform.example.com</a>&gt;</span><br>Date: Tue, Jun 10, 2025, 16:00<br>Subject: Your order: ABC123<br>To: <a href="mailto:recipient@example.link">recipient@example.link</a><br></div><br><br>
+<div align="center" style="background-color:#eee;font-family:Arial,sans-serif;font-size:16px">
+<table width="100%"><tbody><tr><td align="center" style="padding:20px">
+<table border="0" cellspacing="0" style="width:100%;max-width:600px">
+<tbody><tr>
+<td align="center" style="background-color:white;padding:0">
+<img alt="Test Conference 2025" src="cid:ii_inline_banner_001" style="display:block;width:100%">
+</td>
+</tr>
+<tr>
+<td align="center" style="background-color:white;padding:0 20px;text-align:center">
+<h2><a href="https://tickets.eventplatform.example.com/">Test Conference 2025</a></h2>
+<h1>Your order: ABC123</h1>
+</td>
+</tr>
+<tr>
+<td style="background-color:white;padding:20px">
+<p>Hello,</p>
+<p>Your order for Test Conference 2025 was successful.</p>
+<p>View your order at <a href="https://tickets.eventplatform.example.com/order/ABC123/token123/">https://tickets.eventplatform.example.com/order/ABC123/token123/</a></p>
+</td>
+</tr>
+<tr>
+<td style="border-top:1px solid #ccc;font-size:12px;background-color:white;padding:20px">
+<table style="width:100%">
+<tbody>
+<tr><td><strong>Order code:</strong></td><td>ABC123 (2025-06-10)</td></tr>
+<tr><td><strong>Date:</strong></td><td>Fri, Nov. 14, 2025 09:00</td></tr>
+<tr><td><strong>Location:</strong></td><td>Grand Hotel, <a href="https://www.google.com/maps/search/Bahnhofstrasse+1,+8001+Zurich">Bahnhofstrasse 1, 8001 Zurich</a></td></tr>
+<tr><td><strong>Details:</strong></td><td>1x Speaker</td></tr>
+</tbody>
+</table>
+</td>
+</tr>
+</tbody></table>
+</td></tr></tbody></table>
+</div></div>
+
+------=_alt_boundary_001
+Content-Type: text/calendar; charset="UTF-8"
+
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//test.example.com//
+BEGIN:VEVENT
+UID:test-event-uid@tickets.eventplatform.example.com
+DTSTART;TZID=Europe/Zurich:20251114T090000
+DTEND;TZID=Europe/Zurich:20251114T180000
+SUMMARY:Test Conference 2025
+LOCATION:Grand Hotel, Bahnhofstrasse 1, 8001 Zurich
+END:VEVENT
+END:VCALENDAR
+
+------=_alt_boundary_001--
+------=_related_boundary_001
+Content-Type: image/png; name="banner.png"
+Content-Disposition: inline; filename="banner.png"
+Content-Transfer-Encoding: base64
+Content-ID: <ii_inline_banner_001>
+X-Attachment-Id: ii_inline_banner_001
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9
+awAAAABJRU5ErkJggg==
+
+------=_related_boundary_001
+Content-Type: image/png; name="logo.png"
+Content-Disposition: inline; filename="logo.png"
+Content-Transfer-Encoding: base64
+Content-ID: <inline_logo_002>
+X-Attachment-Id: inline_logo_002
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI
+7wAAAABJRU5ErkJggg==
+
+------=_related_boundary_001--
+------=_mixed_boundary_001
+Content-Type: application/pdf; name="ticket-ABC123.pdf"
+Content-Disposition: attachment; filename="ticket-ABC123.pdf"
+Content-Transfer-Encoding: base64
+Content-ID: <attachment_pdf_001>
+X-Attachment-Id: attachment_pdf_001
+
+JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5k
+b2JqCjIgMCBvYmoKPDwgL1R5cGUgL1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4K
+ZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAgUiAvTWVkaWFCb3gg
+WzAgMCA2MTIgNzkyXSA+PgplbmRvYmoKeHJlZgowIDQKMDAwMDAwMDAwMCA2NTUzNSBmIAow
+MDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMMDz
+MCBuIAp0cmFpbGVyCjw8IC9TaXplIDQgL1Jvb3QgMSAwIFIgPj4Kc3RhcnR4cmVmCjE5MQol
+JUVPZGO=
+
+------=_mixed_boundary_001
+Content-Type: application/vnd.apple.pkpass; name="pass-ABC123.pkpass"
+Content-Disposition: attachment; filename="pass-ABC123.pkpass"
+Content-Transfer-Encoding: base64
+Content-ID: <attachment_pkpass_002>
+X-Attachment-Id: attachment_pkpass_002
+
+UEsDBBQAAAAIAFakePassDataForTestingPurposesOnlyAAAAAAAAAAAAAAAAAAAAUEsDBBQAAAAI
+AFakePassContentNotRealPkPassJustPlaceholderDataForUnitTest==
+
+------=_mixed_boundary_001
+Content-Type: application/ics; name="invite.ics"
+Content-Disposition: attachment; filename="invite.ics"
+Content-Transfer-Encoding: base64
+Content-ID: <attachment_ics_003>
+X-Attachment-Id: attachment_ics_003
+
+QkVHSU46VkNBTEVOREFSDQpWRVJTSU9OOjIuMA0KUFJPRElEOi0vL3Rlc3QvL3Rlc3QuZXhh
+bXBsZS5jb20vLw0KQkVHSU46VkVWRU5UDQpVSUQ6dGVzdC1ldmVudC11aWRAdGlja2V0cy5l
+dmVudHBsYXRmb3JtLmV4YW1wbGUuY29tDQpEVFNUQVJUO1RaSUQ9RXVyb3BlL1p1cmljaDoy
+MDI1MTExNFQwOTAwMDANCkRURU5EO1RaSUQ9RXVyb3BlL1p1cmljaDoyMDI1MTExNFQxODAw
+MDANClNVTU1BUlk6VGVzdCBDb25mZXJlbmNlIDIwMjUNCkxPQ0FUSU9OOkdyYW5kIEhvdGVs
+LCBCYW5uaG9mc3RyYXNzZSAxLCA4MDAxIFp1cmljaA0KRU5EOlZFVkVOVA0KRU5EOlZDQUxF
+TkRBUg==
+
+------=_mixed_boundary_001--

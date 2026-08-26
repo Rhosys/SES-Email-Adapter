@@ -336,7 +336,9 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
 
     // `cid` (not `contentId`) is the bracket-stripped form mailparser itself matches
     // `cid:` references against — it's what appears bare in `<img src="cid:...">`.
-    if (attachment.cid) {
+    // Gmail adds Content-ID to ALL parts (even PDFs, pkpass, ICS) — only treat as
+    // inline when the part is NOT explicitly marked Content-Disposition: attachment.
+    if (attachment.cid && attachment.contentDisposition !== "attachment") {
       const cid = attachment.cid;
       const fitsInlineBudget = attachment.size <= MAX_INLINE_DATA_URI_SIZE && inlinedDataUriCount < MAX_INLINE_DATA_URI_COUNT;
 
