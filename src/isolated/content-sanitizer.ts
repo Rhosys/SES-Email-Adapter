@@ -2,12 +2,18 @@ import { simpleParser } from "mailparser";
 import { Window } from "happy-dom";
 import { sanitizeHtml } from "./html-sanitizer.js";
 import { extractAssets, type ExtractedAsset } from "./asset-extractor.js";
+import { buildDisplayRawEmail } from "./raw-email-display.js";
 import type { Logger } from "../logger.js";
 
 // Lambda timeout is 60s (see deploy/compute.tf). Emitting a TRACK log past this
 // threshold surfaces invocations that are close to timing out, before they start
 // actually failing — mirrors the api.slow_request pattern in src/api/app.ts.
 const SLOW_INVOCATION_THRESHOLD_MS = 50_000;
+
+// Lower-bar threshold so a message that's merely slow to parse (large/complex MIME,
+// many attachments) shows up before it gets anywhere near the 50s near-timeout alert —
+// gives us an early signal to look at parsing performance, not just imminent failures.
+const SLOW_PARSE_THRESHOLD_MS = 10_000;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,6 +26,20 @@ interface EmailAddress {
 
 interface AttachmentRef {
   filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  s3Key: string;
+}
+
+interface DroppedAttachment {
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  reason: "too_large" | "upload_failed";
+}
+
+interface InlineImageRef {
+  contentId: string;
   mimeType: string;
   sizeBytes: number;
   s3Key: string;
@@ -58,6 +78,9 @@ interface ContentSanitizeResponse {
     sentAt?: string;
     assets?: ExtractedAsset[];
     links?: ExtractedLink[];
+    droppedAttachments?: DroppedAttachment[];
+    inlineImages?: InlineImageRef[];
+    displayRawS3Key?: string;
   };
 }
 
@@ -76,6 +99,16 @@ interface ContentSanitizeError {
 const MAX_ATTACHMENTS = 50;
 const MAX_TOTAL_ATTACHMENT_SIZE = 25 * 1024 * 1024; // 25MB
 const MAX_SINGLE_ATTACHMENT_SIZE = 10 * 1024 * 1024; // 10MB
+
+// DynamoDB's per-item cap is 400KB; MAX_HTML_BODY_BYTES in processor.ts already reserves
+// 300KB of that for htmlBody as a last-resort truncation guard. These two caps keep most
+// messages from ever needing that guard: a data URI runs ~33% larger than its source bytes,
+// so 3 images at 100KB each tops out around 400KB of embedded text — big enough for a
+// typical logo/signature image, small enough that inline images can't silently balloon
+// htmlBody the way an unbounded embed would. Anything past either cap is uploaded to S3
+// instead (see InlineImageRef) and resolved to a CDN url at API read time.
+const MAX_INLINE_DATA_URI_SIZE = 100 * 1024; // 100KB
+const MAX_INLINE_DATA_URI_COUNT = 3;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -212,12 +245,38 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
     };
   }
 
+  // 1b. Build a display-safe copy of the raw MIME (attachments stripped, small inline
+  // images kept — see raw-email-display.ts) and upload it. This is what the "view original
+  // email" / download-as-.eml feature serves; the true original is never exposed through
+  // that path. Best-effort — a failure here must not fail the whole sanitize, the feature
+  // just falls back to unavailable for this message.
+  logger?.trackPoint("display_raw_build_start");
+  let displayRawS3Key: string | undefined;
+  try {
+    const displayRaw = buildDisplayRawEmail(rawMime.toString("latin1"));
+    const key = `${event.keyPrefix}raw-display.eml`;
+    const uploaded = await uploadViaPresignedPost(event.presignedPost, key, Buffer.from(displayRaw, "latin1"), "message/rfc822", event.retentionTag);
+    if (uploaded) displayRawS3Key = key;
+    logger?.trackPoint("display_raw_build_complete", { uploaded });
+  } catch {
+    logger?.trackPoint("display_raw_build_failed");
+  }
+
   // 2. Parse with mailparser
   logger?.trackPoint("mime_parse_start");
+  const parseStart = Date.now();
   let parsed;
   try {
-    parsed = await simpleParser(rawMime);
+    // keepCidLinks: mailparser's default behaviour is to eagerly replace every `cid:`
+    // reference in the HTML with a base64 data URI itself, before this file ever sees the
+    // parsed message — which would silently bypass the inline-image size/count budget below.
+    // With this set, `cid:` references are left as-is in parsed.html for us to resolve.
+    parsed = await simpleParser(rawMime, { keepCidLinks: true });
+    const parseElapsedMs = Date.now() - parseStart;
     logger?.trackPoint("mime_parse_complete");
+    if (parseElapsedMs > SLOW_PARSE_THRESHOLD_MS) {
+      logger?.track("MIME parse exceeded 10s.", { code: "content_sanitizer.slow_parse", elapsedMs: parseElapsedMs, sizeBytes: rawMime.length, accountId: event.accountId });
+    }
   } catch (e) {
     return {
       success: false,
@@ -258,19 +317,54 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   const cidMap: Record<string, string> = {};
   const inlineImages: Array<{ mimeType: string; content: Buffer }> = [];
   const attachmentsWithBytes: Array<{ filename: string; mimeType: string; content: Buffer; s3Key?: string }> = [];
+  const droppedAttachments: DroppedAttachment[] = [];
+  const inlineImageRefs: InlineImageRef[] = [];
+  let inlinedDataUriCount = 0;
 
   for (const attachment of attachments) {
+    const contentType = attachment.contentType || "application/octet-stream";
+
     if (attachment.size > MAX_SINGLE_ATTACHMENT_SIZE) {
+      droppedAttachments.push({
+        filename: attachment.filename ?? `attachment-${uploadIndex}`,
+        mimeType: contentType,
+        sizeBytes: attachment.size,
+        reason: "too_large",
+      });
       continue;
     }
 
-    const contentType = attachment.contentType || "application/octet-stream";
+    // `cid` (not `contentId`) is the bracket-stripped form mailparser itself matches
+    // `cid:` references against — it's what appears bare in `<img src="cid:...">`.
+    if (attachment.cid) {
+      const cid = attachment.cid;
+      const fitsInlineBudget = attachment.size <= MAX_INLINE_DATA_URI_SIZE && inlinedDataUriCount < MAX_INLINE_DATA_URI_COUNT;
 
-    if (attachment.contentId) {
-      // Inline image — embed as data URI, no S3 upload needed
-      cidMap[attachment.contentId] = `data:${contentType};base64,${attachment.content.toString("base64")}`;
-      if (contentType.startsWith("image/")) {
-        inlineImages.push({ mimeType: contentType, content: attachment.content });
+      if (fitsInlineBudget) {
+        // Small inline image, still within the per-message budget — embed as a data URI, no S3 upload needed
+        cidMap[cid] = `data:${contentType};base64,${attachment.content.toString("base64")}`;
+        inlinedDataUriCount++;
+        if (contentType.startsWith("image/")) {
+          inlineImages.push({ mimeType: contentType, content: attachment.content });
+        }
+      } else {
+        // Too large, or past the per-message inline budget — upload to S3 like a regular
+        // attachment instead of embedding. Its `cid:` reference is deliberately left
+        // unresolved below; the API layer resolves it to a CDN url at read time.
+        const s3Key = `${event.keyPrefix}${uploadIndex}`;
+        const uploaded = await uploadViaPresignedPost(event.presignedPost, s3Key, attachment.content, contentType, event.retentionTag);
+        const filename = attachment.filename ?? `inline-${uploadIndex}`;
+
+        if (uploaded) {
+          inlineImageRefs.push({ contentId: cid, mimeType: contentType, sizeBytes: attachment.size, s3Key });
+          // Still eligible for QR scanning via the attachment-image path in extractAssets
+          if (contentType.startsWith("image/")) {
+            attachmentsWithBytes.push({ filename, mimeType: contentType, content: attachment.content, s3Key });
+          }
+        } else {
+          droppedAttachments.push({ filename, mimeType: contentType, sizeBytes: attachment.size, reason: "upload_failed" });
+        }
+        uploadIndex++;
       }
       continue;
     }
@@ -278,15 +372,25 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
     const s3Key = `${event.keyPrefix}${uploadIndex}`;
     const uploaded = await uploadViaPresignedPost(event.presignedPost, s3Key, attachment.content, contentType, event.retentionTag);
 
+    const filename = attachment.filename ?? `attachment-${uploadIndex}`;
     if (uploaded) {
-      const filename = attachment.filename ?? `attachment-${uploadIndex}`;
       attachmentRefs.push({ filename, mimeType: contentType, sizeBytes: attachment.size, s3Key });
       attachmentsWithBytes.push({ filename, mimeType: contentType, content: attachment.content, s3Key });
+    } else {
+      droppedAttachments.push({ filename, mimeType: contentType, sizeBytes: attachment.size, reason: "upload_failed" });
     }
 
     uploadIndex++;
   }
-  logger?.trackPoint("attachments_processed", { attachmentRefCount: attachmentRefs.length, inlineImageCount: inlineImages.length });
+  logger?.trackPoint("attachments_processed", { attachmentRefCount: attachmentRefs.length, inlineImageCount: inlineImages.length, inlineImageRefCount: inlineImageRefs.length, droppedCount: droppedAttachments.length });
+  if (droppedAttachments.length > 0) {
+    logger?.track("Attachment(s) dropped from message.", {
+      code: "content_sanitizer.attachments_dropped",
+      accountId: event.accountId,
+      droppedCount: droppedAttachments.length,
+      dropped: droppedAttachments.map(d => ({ mimeType: d.mimeType, sizeBytes: d.sizeBytes, reason: d.reason })),
+    });
+  }
 
   // 6. Sanitize HTML and inline CID images
   let htmlBody: string | undefined;
@@ -295,7 +399,12 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   if (parsed.html) {
     const htmlInput = typeof parsed.html === "string" ? parsed.html : "";
     const sanitized = sanitizeHtml(htmlInput);
-    htmlBody = sanitized.html.replace(/cid:([^"'\s>]+)/g, (_, id: string) => cidMap[id] ?? "");
+    const inlineImageContentIds = new Set(inlineImageRefs.map(ref => ref.contentId));
+    htmlBody = sanitized.html.replace(/cid:([^"'\s>]+)/g, (match, id: string) => {
+      if (id in cidMap) return cidMap[id] ?? "";
+      if (inlineImageContentIds.has(id)) return match; // resolved to a CDN url at API read time
+      return "";
+    });
     logger?.trackPoint("html_sanitized", { htmlLength: htmlInput.length });
 
     // Extract links from raw HTML using a DOM parser (before sanitization strips tracking pixels etc.)
@@ -401,6 +510,15 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   }
   if (extractedLinks.length > 0) {
     result.parsed.links = extractedLinks;
+  }
+  if (droppedAttachments.length > 0) {
+    result.parsed.droppedAttachments = droppedAttachments;
+  }
+  if (inlineImageRefs.length > 0) {
+    result.parsed.inlineImages = inlineImageRefs;
+  }
+  if (displayRawS3Key) {
+    result.parsed.displayRawS3Key = displayRawS3Key;
   }
 
   logger?.trackPoint("response_built");

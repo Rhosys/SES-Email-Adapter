@@ -887,6 +887,15 @@ export class SignalProcessor {
     const { parsed: sanitizedParsed } = sanitizeResult.value;
     const sanitizerAssets = sanitizedParsed.assets ?? [];
 
+    if (sanitizedParsed.droppedAttachments && sanitizedParsed.droppedAttachments.length > 0) {
+      this.logger.warn("Message had attachment(s) dropped by content sanitizer", {
+        code: "processor.attachments_dropped",
+        accountId,
+        droppedCount: sanitizedParsed.droppedAttachments.length,
+        dropped: sanitizedParsed.droppedAttachments.map(d => ({ mimeType: d.mimeType, sizeBytes: d.sizeBytes, reason: d.reason })),
+      });
+    }
+
     // Map sanitized response to ParsedMime for downstream compatibility
     const parsed: ParsedMime = {
       from: sanitizedParsed.from,
@@ -904,6 +913,8 @@ export class SignalProcessor {
       ...(sanitizedParsed.textBody !== undefined ? { textBody: sanitizedParsed.textBody } : {}),
       ...(sanitizedParsed.htmlBody !== undefined ? { htmlBody: sanitizedParsed.htmlBody } : {}),
       ...(sanitizedParsed.sentAt !== undefined ? { sentAt: sanitizedParsed.sentAt } : {}),
+      ...(sanitizedParsed.inlineImages ? { inlineImages: sanitizedParsed.inlineImages } : {}),
+      ...(sanitizedParsed.displayRawS3Key ? { displayRawS3Key: sanitizedParsed.displayRawS3Key } : {}),
     };
     this.logger.trackPoint("email_parsed");
 
@@ -2097,6 +2108,8 @@ function buildSignal(opts: {
       ...(htmlBodyTruncated ? { htmlBodyTruncated: true } : {}),
       ...(parsed.sentAt !== undefined ? { sentAt: parsed.sentAt } : {}),
       ...(unsubscribe !== undefined ? { unsubscribe } : {}),
+      ...(parsed.inlineImages && parsed.inlineImages.length > 0 ? { inlineImages: parsed.inlineImages } : {}),
+      ...(parsed.displayRawS3Key ? { displayRawS3Key: parsed.displayRawS3Key } : {}),
     },
   };
 

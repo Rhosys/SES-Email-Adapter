@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toApiSignal } from "../../src/api/signal-transforms.js";
+import { toApiSignal, withResolvedContentUrls } from "../../src/api/signal-transforms.js";
 import type { Signal } from "../../src/types/index.js";
 
 function makeInboundSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit<Signal, "data">> = {}): Signal {
@@ -65,5 +65,64 @@ describe("toApiSignal — matchedRules collapse", () => {
     const apiSignal = toApiSignal(signal);
     const data = apiSignal.data as { matchedRules?: Array<{ ruleId: string }> };
     expect(data.matchedRules).toEqual([{ ruleId: "SR-02", actions: [{ type: "quarantine_visible" }], labelsAdded: [], statusChange: "quarantine_visible" }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// withResolvedContentUrls — s3Key -> CDN url resolution, computed lazily at read
+// time (never stored). Covers both Attachment.url and the inline-image cid:
+// substitution for images the sanitizer routed to S3 instead of embedding as a
+// data URI (see MAX_INLINE_DATA_URI_SIZE / MAX_INLINE_DATA_URI_COUNT).
+// ---------------------------------------------------------------------------
+describe("withResolvedContentUrls", () => {
+  it("adds a CDN url to each attachment computed from its s3Key", () => {
+    const signal = makeInboundSignal({
+      data: {
+        attachments: [
+          { filename: "doc.pdf", mimeType: "application/pdf", sizeBytes: 1024, s3Key: "emails/msg-001/0" },
+        ],
+      },
+    });
+
+    const result = withResolvedContentUrls(signal, "https://cdn.example.com");
+    const attachments = result.data.attachments as Array<{ url?: string }>;
+    expect(attachments[0]?.url).toBe("https://cdn.example.com/emails/msg-001/0");
+  });
+
+  it("replaces a leftover cid: reference in htmlBody with the matching inline image's CDN url", () => {
+    const signal = makeInboundSignal({
+      data: {
+        htmlBody: '<p>Logo: <img src="cid:logo123"></p>',
+        inlineImages: [{ contentId: "logo123", mimeType: "image/png", sizeBytes: 500_000, s3Key: "emails/msg-001/inline-0" }],
+      },
+    });
+
+    const result = withResolvedContentUrls(signal, "https://cdn.example.com");
+    expect((result.data as { htmlBody?: string }).htmlBody).toBe(
+      '<p>Logo: <img src="https://cdn.example.com/emails/msg-001/inline-0"></p>',
+    );
+  });
+
+  it("does not touch htmlBody when there are no inline images to resolve", () => {
+    const signal = makeInboundSignal({ data: { htmlBody: "<p>Hello</p>" } });
+    const result = withResolvedContentUrls(signal, "https://cdn.example.com");
+    expect((result.data as { htmlBody?: string }).htmlBody).toBe("<p>Hello</p>");
+  });
+
+  it("resolves multiple inline images independently", () => {
+    const signal = makeInboundSignal({
+      data: {
+        htmlBody: '<img src="cid:a"><img src="cid:b">',
+        inlineImages: [
+          { contentId: "a", mimeType: "image/png", sizeBytes: 500_000, s3Key: "emails/msg-001/inline-0" },
+          { contentId: "b", mimeType: "image/jpeg", sizeBytes: 600_000, s3Key: "emails/msg-001/inline-1" },
+        ],
+      },
+    });
+
+    const result = withResolvedContentUrls(signal, "https://cdn.example.com");
+    expect((result.data as { htmlBody?: string }).htmlBody).toBe(
+      '<img src="https://cdn.example.com/emails/msg-001/inline-0"><img src="https://cdn.example.com/emails/msg-001/inline-1">',
+    );
   });
 });

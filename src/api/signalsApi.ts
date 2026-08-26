@@ -3,14 +3,14 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { DateTime } from "luxon";
 import { getDomain } from "tldts";
 import { zParse } from "./validate.js";
-import { toApiThread, toApiSignal } from "./signal-transforms.js";
+import { toApiThread, toApiSignal, withResolvedContentUrls } from "./signal-transforms.js";
 import { deriveGroupingKey } from "../grouping-key.js";
 import { handlePostApprovalCalendar } from "../processor/calendar/post-approval-handler.js";
 import { resolveRetention } from "../retention.js";
 import { buildActiveThread } from "../thread-factory.js";
 import { isEmailSignal } from "../types/index.js";
 import type { Result } from "neverthrow";
-import type { Thread, Signal, AnySignal, Attachment, MatchedRuleResult, PageParams } from "../types/index.js";
+import type { Thread, Signal, MatchedRuleResult, PageParams } from "../types/index.js";
 import type { Pagination } from "../types/index.js";
 import type { ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
@@ -27,11 +27,6 @@ export interface SignalReprocessor {
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
-}
-
-function withAttachmentUrls<T extends AnySignal>(signal: T, cdnBase: string): T {
-  if (!isEmailSignal(signal)) return signal;
-  return { ...signal, data: { ...signal.data, attachments: signal.data.attachments.map((a: Attachment) => ({ ...a, url: `${cdnBase}/${a.s3Key}` })) } };
 }
 
 export class SignalsApi {
@@ -99,7 +94,7 @@ export class SignalsApi {
         items = items.filter(s => isEmailSignal(s) && s.data.from.address.toLowerCase().includes(senderLower));
       }
 
-      const itemsWithUrls = contentCdnBaseUrl ? items.map(s => withAttachmentUrls(s, contentCdnBaseUrl)) : items;
+      const itemsWithUrls = contentCdnBaseUrl ? items.map(s => withResolvedContentUrls(s, contentCdnBaseUrl)) : items;
       return c.json(page("signals", itemsWithUrls.map(toApiSignal), result.value.nextCursor), 200);
     });
 
@@ -238,7 +233,7 @@ export class SignalsApi {
         }
       }
 
-      const signalWithUrls = contentCdnBaseUrl ? withAttachmentUrls(signal, contentCdnBaseUrl) : signal;
+      const signalWithUrls = contentCdnBaseUrl ? withResolvedContentUrls(signal, contentCdnBaseUrl) : signal;
       logger.info("Signal activated", { code: "api.signals.activated", accountId, signalId, threadId: thread.id });
       return c.json({ thread: toApiThread(thread), signal: toApiSignal({ ...signalWithUrls, status: "active", threadId: thread.id }) }, 200);
     });
