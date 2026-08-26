@@ -914,6 +914,7 @@ export class SignalProcessor {
       ...(sanitizedParsed.htmlBody !== undefined ? { htmlBody: sanitizedParsed.htmlBody } : {}),
       ...(sanitizedParsed.sentAt !== undefined ? { sentAt: sanitizedParsed.sentAt } : {}),
       ...(sanitizedParsed.inlineImages ? { inlineImages: sanitizedParsed.inlineImages } : {}),
+      ...(sanitizedParsed.displayRawS3Key ? { displayRawS3Key: sanitizedParsed.displayRawS3Key } : {}),
     };
     this.logger.trackPoint("email_parsed");
 
@@ -2108,6 +2109,7 @@ function buildSignal(opts: {
       ...(parsed.sentAt !== undefined ? { sentAt: parsed.sentAt } : {}),
       ...(unsubscribe !== undefined ? { unsubscribe } : {}),
       ...(parsed.inlineImages && parsed.inlineImages.length > 0 ? { inlineImages: parsed.inlineImages } : {}),
+      ...(parsed.displayRawS3Key ? { displayRawS3Key: parsed.displayRawS3Key } : {}),
     },
   };
 

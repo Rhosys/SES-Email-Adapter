@@ -11,7 +11,7 @@ import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../retention.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { EmailContentStore } from "./content-store.js";
-import type { Signal, AnySignal, PageParams, ThreadStatus, Workflow } from "../types/index.js";
+import type { Signal, AnySignal, InboundEmailSignalData, PageParams, ThreadStatus, Workflow } from "../types/index.js";
 import type { CalendarResponseData, DomainMisconfigurationData, Pagination } from "../types/index.js";
 import type { UpdateThreadFields, ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
@@ -792,6 +792,15 @@ export class ThreadsApi {
       if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
       if (!isEmailSignal(signal)) return err(c, 400, "Signal is not an email", "SIGNAL_NOT_FOUND");
       if (!signal.data.s3Key) return err(c, 404, "Raw email not available", "SIGNAL_NOT_FOUND");
+
+      // The display-safe copy (attachments stripped, small inline images kept — built by
+      // the content sanitizer, see raw-email-display.ts) is what this endpoint serves.
+      // The true raw original at signal.data.s3Key is never exposed through this path —
+      // it stays available server-side only, e.g. for reprocessing.
+      const displayRawS3Key = (signal.data as InboundEmailSignalData).displayRawS3Key;
+      if (displayRawS3Key && contentCdnBaseUrl) {
+        return c.redirect(`${contentCdnBaseUrl}/${displayRawS3Key}`, 307);
+      }
 
       const url = await emailContentStore.getRawEmailUrl(signal);
       return c.redirect(url, 307);

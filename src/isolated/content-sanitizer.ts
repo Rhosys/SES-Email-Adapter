@@ -2,6 +2,7 @@ import { simpleParser } from "mailparser";
 import { Window } from "happy-dom";
 import { sanitizeHtml } from "./html-sanitizer.js";
 import { extractAssets, type ExtractedAsset } from "./asset-extractor.js";
+import { buildDisplayRawEmail } from "./raw-email-display.js";
 import type { Logger } from "../logger.js";
 
 // Lambda timeout is 60s (see deploy/compute.tf). Emitting a TRACK log past this
@@ -79,6 +80,7 @@ interface ContentSanitizeResponse {
     links?: ExtractedLink[];
     droppedAttachments?: DroppedAttachment[];
     inlineImages?: InlineImageRef[];
+    displayRawS3Key?: string;
   };
 }
 
@@ -241,6 +243,23 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
       success: false,
       error: { message: `Failed to fetch MIME: ${e instanceof Error ? e.message : "unknown error"}`, type: "fetch_failed" },
     };
+  }
+
+  // 1b. Build a display-safe copy of the raw MIME (attachments stripped, small inline
+  // images kept — see raw-email-display.ts) and upload it. This is what the "view original
+  // email" / download-as-.eml feature serves; the true original is never exposed through
+  // that path. Best-effort — a failure here must not fail the whole sanitize, the feature
+  // just falls back to unavailable for this message.
+  logger?.trackPoint("display_raw_build_start");
+  let displayRawS3Key: string | undefined;
+  try {
+    const displayRaw = buildDisplayRawEmail(rawMime.toString("latin1"));
+    const key = `${event.keyPrefix}raw-display.eml`;
+    const uploaded = await uploadViaPresignedPost(event.presignedPost, key, Buffer.from(displayRaw, "latin1"), "message/rfc822", event.retentionTag);
+    if (uploaded) displayRawS3Key = key;
+    logger?.trackPoint("display_raw_build_complete", { uploaded });
+  } catch {
+    logger?.trackPoint("display_raw_build_failed");
   }
 
   // 2. Parse with mailparser
@@ -497,6 +516,9 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   }
   if (inlineImageRefs.length > 0) {
     result.parsed.inlineImages = inlineImageRefs;
+  }
+  if (displayRawS3Key) {
+    result.parsed.displayRawS3Key = displayRawS3Key;
   }
 
   logger?.trackPoint("response_built");

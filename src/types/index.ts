@@ -460,6 +460,13 @@ export interface InboundEmailSignalData extends EmailSignalDataBase {
   htmlBodyTruncated?: boolean;
   /** Inline CID images stored via S3 (not embedded as data URIs) — see InlineImageRef. */
   inlineImages?: InlineImageRef[];
+  /**
+   * S3 key (in the content bucket, alongside extracted attachments) of a display-safe
+   * copy of the raw MIME source — attachments stripped, small inline images kept. Served
+   * by the "view original email" / download-as-.eml feature in place of the true raw
+   * original (which stays at `s3Key` for internal use only, e.g. reprocessing).
+   */
+  displayRawS3Key?: string;
 }
 
 // ---------------------------------------------------------------------------
