@@ -913,6 +913,7 @@ export class SignalProcessor {
       ...(sanitizedParsed.textBody !== undefined ? { textBody: sanitizedParsed.textBody } : {}),
       ...(sanitizedParsed.htmlBody !== undefined ? { htmlBody: sanitizedParsed.htmlBody } : {}),
       ...(sanitizedParsed.sentAt !== undefined ? { sentAt: sanitizedParsed.sentAt } : {}),
+      ...(sanitizedParsed.inlineImages ? { inlineImages: sanitizedParsed.inlineImages } : {}),
     };
     this.logger.trackPoint("email_parsed");
 
@@ -2106,6 +2107,7 @@ function buildSignal(opts: {
       ...(htmlBodyTruncated ? { htmlBodyTruncated: true } : {}),
       ...(parsed.sentAt !== undefined ? { sentAt: parsed.sentAt } : {}),
       ...(unsubscribe !== undefined ? { unsubscribe } : {}),
+      ...(parsed.inlineImages && parsed.inlineImages.length > 0 ? { inlineImages: parsed.inlineImages } : {}),
     },
   };
 

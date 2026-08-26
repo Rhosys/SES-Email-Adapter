@@ -27,6 +27,13 @@ export interface DroppedAttachment {
   reason: "too_large" | "upload_failed";
 }
 
+export interface InlineImageRef {
+  contentId: string;
+  mimeType: string;
+  sizeBytes: number;
+  s3Key: string;
+}
+
 export interface ContentSanitizeRequest {
   presignedGetUrl: string;
   presignedPost: {
@@ -67,6 +74,7 @@ export interface ContentSanitizeResponse {
     assets?: ExtractedAsset[];
     links?: ExtractedLink[];
     droppedAttachments?: DroppedAttachment[];
+    inlineImages?: InlineImageRef[];
   };
 }
 

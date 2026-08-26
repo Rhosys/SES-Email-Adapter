@@ -4,11 +4,14 @@
 import type {
   Thread as DbThread,
   AnySignal,
+  Attachment,
   EmailSignalData,
+  InboundEmailSignalData,
   DeliverabilitySignalData,
   MatchedRuleResult,
   Signal as DbSignal,
 } from "../types/index.js";
+import { isEmailSignal } from "../types/index.js";
 import type * as Api from "./schemas.js";
 
 // matchedRules is an append-only trace (e.g. a signal dismissed from quarantine gets a second
@@ -19,6 +22,41 @@ function collapseMatchedRules(rules: MatchedRuleResult[]): MatchedRuleResult[] {
   const byRuleId = new Map<string, MatchedRuleResult>();
   for (const rule of rules) byRuleId.set(rule.ruleId, rule);
   return [...byRuleId.values()];
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Resolves what the content sanitizer left as s3Key-only references (never a baked-in URL,
+// so CDN config can change without a data migration) into CDN urls, at API read time:
+//  - Attachment.s3Key -> Attachment.url, as before.
+//  - Any `cid:{contentId}` left unresolved in htmlBody (an inline image too large, or past
+//    the per-message budget, to embed as a data URI — see MAX_INLINE_DATA_URI_SIZE /
+//    MAX_INLINE_DATA_URI_COUNT in the content sanitizer) -> the matching InlineImageRef's CDN url.
+// inlineImages itself is intentionally not included on the returned signal — it's write-side
+// plumbing for this substitution, not something the client needs.
+export function withResolvedContentUrls<T extends AnySignal>(signal: T, cdnBase: string): T {
+  if (!isEmailSignal(signal)) return signal;
+
+  const attachments = signal.data.attachments.map((a: Attachment) => ({ ...a, url: `${cdnBase}/${a.s3Key}` }));
+
+  const inlineImages = (signal.data as InboundEmailSignalData).inlineImages;
+  let htmlBody = (signal.data as InboundEmailSignalData).htmlBody;
+  if (htmlBody && inlineImages && inlineImages.length > 0) {
+    for (const ref of inlineImages) {
+      htmlBody = htmlBody.replace(new RegExp(`cid:${escapeRegExp(ref.contentId)}`, "g"), `${cdnBase}/${ref.s3Key}`);
+    }
+  }
+
+  return {
+    ...signal,
+    data: {
+      ...signal.data,
+      attachments,
+      ...(htmlBody !== undefined ? { htmlBody } : {}),
+    },
+  } as T;
 }
 
 export function toApiThread(thread: DbThread): Api.Thread {

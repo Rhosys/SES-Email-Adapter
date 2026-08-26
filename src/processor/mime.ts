@@ -1,4 +1,4 @@
-import type { EmailAddress, Attachment } from "../types/index.js";
+import type { EmailAddress, Attachment, InlineImageRef } from "../types/index.js";
 import type { DbError, Result } from "../errors.js";
 
 export interface ParsedMime {
@@ -12,6 +12,7 @@ export interface ParsedMime {
   attachments: Attachment[];
   headers: Record<string, string>;
   sentAt?: string;
+  inlineImages?: InlineImageRef[];
 }
 
 export interface MimeParser {
