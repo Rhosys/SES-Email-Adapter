@@ -113,24 +113,28 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
         Payload: new TextEncoder().encode(JSON.stringify(invokePayload)),
       }));
 
+      const executedVersion = response.ExecutedVersion ?? "unknown";
+
       if (response.FunctionError) {
         const { detail, lambdaRequestId } = this.extractInvocationErrorDetail(response.Payload);
         return err(dbError(
-          `Content Sanitizer Lambda error: ${response.FunctionError}${detail ? ` — ${detail}` : ""}`,
+          `Content Sanitizer Lambda error (v${executedVersion}): ${response.FunctionError}${detail ? ` — ${detail}` : ""}`,
           lambdaRequestId ? { lambdaRequestId } : undefined,
         ));
       }
 
       if (!response.Payload) {
-        return err(dbError("Content Sanitizer Lambda returned empty payload"));
+        return err(dbError(`Content Sanitizer Lambda returned empty payload (v${executedVersion})`));
       }
 
       const wireResult = JSON.parse(new TextDecoder().decode(response.Payload)) as { success: boolean; parsed?: ContentSanitizeResponse["parsed"]; error?: { message: string; type: string } };
 
       if (!wireResult.success || !wireResult.parsed) {
         const errorPayload = wireResult.error;
-        return err(dbError(`Content Sanitizer: ${errorPayload?.type ?? "unknown"} — ${errorPayload?.message ?? "unknown error"}`));
+        return err(dbError(`Content Sanitizer (v${executedVersion}): ${errorPayload?.type ?? "unknown"} — ${errorPayload?.message ?? "unknown error"}`));
       }
+
+      this.logger.trackPoint("content_sanitizer_invoked", { executedVersion });
 
       return ok({ parsed: wireResult.parsed });
     } catch (e) {
