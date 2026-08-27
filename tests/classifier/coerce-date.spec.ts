@@ -351,4 +351,9 @@ describe("coerceDate — weekday prefix and abbreviated month period stripping",
   it("does not strip a leading month name mistaken for a weekday", () => {
     expect(coerceDate("March 15, 2025", RECEIVED_AT)).toBe("2025-03-15");
   });
+
+  it("handles a French weekday prefix via locale hint — generic, not English-only", () => {
+    // "ven." (vendredi) — proves the weekday token is locale-resolved, not a hardcoded English list
+    expect(coerceDate("ven. 20 novembre 2026", RECEIVED_AT, ["fr"])).toBe("2026-11-20");
+  });
 });

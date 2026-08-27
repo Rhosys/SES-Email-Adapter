@@ -256,7 +256,7 @@ function coerceEnumValue(raw: unknown, enumValues: Array<{ value: string }>): st
  * Formats for human-readable date parsing (first match wins after ISO).
  * Slash-separated numeric formats are explicitly excluded — they are ambiguous.
  */
-const DATE_FORMATS_WITH_YEAR = [
+const BASE_DATE_FORMATS_WITH_YEAR = [
   "d MMMM yyyy",
   "MMMM d, yyyy",
   "d MMM yyyy",
@@ -264,12 +264,38 @@ const DATE_FORMATS_WITH_YEAR = [
   "dd.MM.yyyy",
 ];
 
-const DATE_FORMATS_YEARFREE = [
+const BASE_DATE_FORMATS_YEARFREE = [
   "d MMMM",
   "MMMM d",
   "d MMM",
   "MMM d",
 ];
+
+/**
+ * Expands a format list with a leading-weekday variant of each entry, using luxon's
+ * own "ccc"/"cccc" weekday tokens rather than an enumerated word list — those tokens
+ * resolve locale-specific weekday names via Intl (same mechanism already relied on for
+ * MMM/MMMM month names below), so this covers "Fri, ...", "Friday, ...", and their
+ * equivalents in any locale hint without us hardcoding weekday names per language.
+ */
+function withWeekdayPrefix(formats: string[]): string[] {
+  return formats.flatMap(fmt => [fmt, `ccc, ${fmt}`, `cccc, ${fmt}`, `ccc ${fmt}`, `cccc ${fmt}`]);
+}
+
+/**
+ * Expands a format list with a trailing-period variant for any bare "MMM" token (not
+ * "MMMM"), e.g. "MMM d, yyyy" → also try "MMM. d, yyyy". Many locales abbreviate months
+ * with a trailing period (English "Nov.", French "janv."); luxon's MMM token already
+ * resolves the locale-specific abbreviation itself, so adding the period as a literal
+ * in the format string covers it without us enumerating month abbreviations.
+ */
+function withAbbrevMonthPeriod(formats: string[]): string[] {
+  const bareMmm = /(?<!M)MMM(?!M)/;
+  return formats.flatMap(fmt => (bareMmm.test(fmt) ? [fmt, fmt.replace(bareMmm, "MMM.")] : [fmt]));
+}
+
+const DATE_FORMATS_WITH_YEAR = withWeekdayPrefix(withAbbrevMonthPeriod(BASE_DATE_FORMATS_WITH_YEAR));
+const DATE_FORMATS_YEARFREE = withWeekdayPrefix(withAbbrevMonthPeriod(BASE_DATE_FORMATS_YEARFREE));
 
 const TIME_SUFFIXES = ["", " HH:mm", " h:mm a", " 'at' HH:mm", " 'at' h:mm a"];
 
@@ -292,19 +318,6 @@ function resolveYearFree(month: number, day: number, receivedAt: DateTime): Date
  * Stripped before attempting format-based parsing.
  */
 const LOCALE_TIME_NOISE = /(?<=\d)\s*(?:Uhr|o'clock|h(?:rs?)?|heure[s]?|ч(?:ас(?:ов|а)?)?|uur|ore|godzin[ay]?)\s*$/i;
-
-/**
- * Leading weekday name (e.g. "Fri, ", "Friday, ") — carries no date information
- * once the day/month/year are parsed, but blocks every DATE_FORMATS entry point
- * since none of them declare a leading weekday token.
- */
-const WEEKDAY_PREFIX = /^(?:Sun(?:day)?|Mon(?:day)?|Tue(?:s(?:day)?)?|Wed(?:nesday)?|Thu(?:rs?(?:day)?)?|Fri(?:day)?|Sat(?:urday)?)\.?,?\s+/i;
-
-/**
- * Trailing period after an abbreviated month name (e.g. "Nov." → "Nov") — common
- * in US-style dates but not matched by luxon's "MMM" token, which expects no punctuation.
- */
-const ABBREV_MONTH_PERIOD = /\b(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.(?=\s|,|$)/gi;
 
 /**
  * Coerces a raw date value into a Display_Date string.
@@ -338,13 +351,8 @@ export function coerceDate(value: unknown, receivedAt: string, localeHints: stri
     return formatDisplayDate(iso, trimmed);
   }
 
-  // Strip locale time noise (e.g. "Uhr", "o'clock"), a leading weekday name, and
-  // the period after an abbreviated month, for format-based parsing
-  const cleaned = trimmed
-    .replace(LOCALE_TIME_NOISE, "")
-    .replace(WEEKDAY_PREFIX, "")
-    .replace(ABBREV_MONTH_PERIOD, "$1")
-    .trim();
+  // Strip locale time noise (e.g. "Uhr", "o'clock") for format-based parsing
+  const cleaned = trimmed.replace(LOCALE_TIME_NOISE, "").trim();
   const input = cleaned || trimmed;
 
   // 2. Try human-readable formats with year + time variants

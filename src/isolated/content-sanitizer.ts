@@ -40,6 +40,27 @@ interface DroppedAttachment {
   detail?: string;
 }
 
+/**
+ * Builds a human-readable reason summary for the TRACK log title — not just the payload.
+ * Reasons carrying a `detail` (currently only "upload_failed") are listed individually
+ * with their full detail text, since that's the actual "why" and different attachments
+ * can fail for different reasons; reasons with no further detail (e.g. "too_large") are
+ * collapsed into a single count.
+ */
+function summarizeDroppedReasons(dropped: { reason: string; detail?: string }[]): string {
+  const parts: string[] = [];
+  const countsByReason = new Map<string, number>();
+  for (const d of dropped) {
+    if (d.detail) {
+      parts.push(`${d.reason}: ${d.detail}`);
+    } else {
+      countsByReason.set(d.reason, (countsByReason.get(d.reason) ?? 0) + 1);
+    }
+  }
+  for (const [reason, count] of countsByReason) parts.push(`${count} ${reason}`);
+  return parts.join("; ");
+}
+
 interface InlineImageRef {
   contentId: string;
   mimeType: string;
@@ -398,10 +419,8 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   }
   logger?.trackPoint("attachments_processed", { attachmentRefCount: attachmentRefs.length, inlineImageCount: inlineImages.length, inlineImageRefCount: inlineImageRefs.length, droppedCount: droppedAttachments.length });
   if (droppedAttachments.length > 0) {
-    const reasonCounts = new Map<string, number>();
-    for (const d of droppedAttachments) reasonCounts.set(d.reason, (reasonCounts.get(d.reason) ?? 0) + 1);
-    const reasonSummary = [...reasonCounts.entries()].map(([reason, count]) => `${count} ${reason}`).join(", ");
-    logger?.track(`Attachment(s) dropped from message: ${reasonSummary}.`, {
+    const reasonSummary = summarizeDroppedReasons(droppedAttachments);
+    logger?.track(`Attachment(s) dropped from message: ${reasonSummary}`, {
       code: "content_sanitizer.attachments_dropped",
       accountId: event.accountId,
       droppedCount: droppedAttachments.length,
