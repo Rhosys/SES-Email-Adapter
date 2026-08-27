@@ -336,7 +336,7 @@ export class ThreadsApi {
       }
 
       const enrichedSignals = signals.map(signal => {
-        const withUrls = contentCdnBaseUrl ? withResolvedContentUrls(signal, contentCdnBaseUrl) : signal;
+        const withUrls = withResolvedContentUrls(signal, contentCdnBaseUrl);
         const apiSignal = toApiSignal(withUrls);
         if (isCalendarEventSignal(withUrls) && enrichments.has(withUrls.data.veventUid)) {
           return { ...apiSignal, latestResponse: enrichments.get(withUrls.data.veventUid) };
@@ -773,7 +773,7 @@ export class ThreadsApi {
       }
       const signal = signalResult.value;
       if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-      const withUrls = contentCdnBaseUrl ? withResolvedContentUrls(signal, contentCdnBaseUrl) : signal;
+      const withUrls = withResolvedContentUrls(signal, contentCdnBaseUrl);
       return c.json(toApiSignal(withUrls), 200);
     });
 
@@ -805,7 +805,7 @@ export class ThreadsApi {
       // The true raw original at signal.data.s3Key is never exposed through this path —
       // it stays available server-side only, e.g. for reprocessing.
       const displayRawS3Key = (signal.data as InboundEmailSignalData).displayRawS3Key;
-      if (displayRawS3Key && contentCdnBaseUrl) {
+      if (displayRawS3Key) {
         return c.redirect(`${contentCdnBaseUrl}/${displayRawS3Key}`, 307);
       }
 

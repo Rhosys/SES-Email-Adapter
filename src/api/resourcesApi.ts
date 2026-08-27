@@ -43,7 +43,7 @@ function toApiResource(resource: DbResource, contentCdnBaseUrl: string): Api.Res
       label: a.label,
       rawValue: a.rawValue,
       sourceSignalId: a.sourceSignalId,
-      ...(a.s3Key && contentCdnBaseUrl ? { url: `${contentCdnBaseUrl}/${a.s3Key}` } : {}),
+      ...(a.s3Key ? { url: `${contentCdnBaseUrl}/${a.s3Key}` } : {}),
       extractedAt: a.extractedAt,
     })),
     createdAt: resource.createdAt,

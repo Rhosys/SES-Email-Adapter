@@ -94,7 +94,7 @@ export class SignalsApi {
         items = items.filter(s => isEmailSignal(s) && s.data.from.address.toLowerCase().includes(senderLower));
       }
 
-      const itemsWithUrls = contentCdnBaseUrl ? items.map(s => withResolvedContentUrls(s, contentCdnBaseUrl)) : items;
+      const itemsWithUrls = items.map(s => withResolvedContentUrls(s, contentCdnBaseUrl));
       return c.json(page("signals", itemsWithUrls.map(toApiSignal), result.value.nextCursor), 200);
     });
 
@@ -233,7 +233,7 @@ export class SignalsApi {
         }
       }
 
-      const signalWithUrls = contentCdnBaseUrl ? withResolvedContentUrls(signal, contentCdnBaseUrl) : signal;
+      const signalWithUrls = withResolvedContentUrls(signal, contentCdnBaseUrl);
       logger.info("Signal activated", { code: "api.signals.activated", accountId, signalId, threadId: thread.id });
       return c.json({ thread: toApiThread(thread), signal: toApiSignal({ ...signalWithUrls, status: "active", threadId: thread.id }) }, 200);
     });
