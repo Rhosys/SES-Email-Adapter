@@ -322,3 +322,38 @@ describe("coerceDate — noise stripping safety", () => {
     expect(coerceDate("15/03/2025", RECEIVED_AT)).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Weekday prefix + abbreviated-month period stripping
+// ---------------------------------------------------------------------------
+
+describe("coerceDate — weekday prefix and abbreviated month period stripping", () => {
+  it("strips weekday prefix and period after abbreviated month with time", () => {
+    expect(coerceDate("Fri, Nov. 20, 2026 07:30", RECEIVED_AT)).toBe("2026-11-20T07:30");
+  });
+
+  it("strips full weekday name prefix", () => {
+    expect(coerceDate("Friday, Nov. 20, 2026", RECEIVED_AT)).toBe("2026-11-20");
+  });
+
+  it("strips period after abbreviated month without weekday prefix", () => {
+    expect(coerceDate("Nov. 20, 2026", RECEIVED_AT)).toBe("2026-11-20");
+  });
+
+  it("strips weekday prefix without abbreviated month period", () => {
+    expect(coerceDate("Fri, Nov 20, 2026", RECEIVED_AT)).toBe("2026-11-20");
+  });
+
+  it("handles weekday prefix on d MMM yyyy form", () => {
+    expect(coerceDate("Fri, 20 Nov. 2026", RECEIVED_AT)).toBe("2026-11-20");
+  });
+
+  it("does not strip a leading month name mistaken for a weekday", () => {
+    expect(coerceDate("March 15, 2025", RECEIVED_AT)).toBe("2025-03-15");
+  });
+
+  it("handles a French weekday prefix via locale hint — generic, not English-only", () => {
+    // "ven." (vendredi) — proves the weekday token is locale-resolved, not a hardcoded English list
+    expect(coerceDate("ven. 20 novembre 2026", RECEIVED_AT, ["fr"])).toBe("2026-11-20");
+  });
+});

@@ -153,6 +153,27 @@ interface ProcessingOutcome {
   doPong: boolean;
 }
 
+/**
+ * Builds a human-readable reason summary for the dropped-attachments log title — not
+ * just the payload. Reasons carrying a `detail` (currently only "upload_failed") are
+ * listed individually with their full detail text, since that's the actual "why" and
+ * different attachments can fail for different reasons; reasons with no further detail
+ * (e.g. "too_large") are collapsed into a single count.
+ */
+function summarizeDroppedReasons(dropped: { reason: string; detail?: string }[]): string {
+  const parts: string[] = [];
+  const countsByReason = new Map<string, number>();
+  for (const d of dropped) {
+    if (d.detail) {
+      parts.push(`${d.reason}: ${d.detail}`);
+    } else {
+      countsByReason.set(d.reason, (countsByReason.get(d.reason) ?? 0) + 1);
+    }
+  }
+  for (const [reason, count] of countsByReason) parts.push(`${count} ${reason}`);
+  return parts.join("; ");
+}
+
 function emptyOutcome(): ProcessingOutcome {
   return {
     blockDisposition: null,
@@ -888,11 +909,12 @@ export class SignalProcessor {
     const sanitizerAssets = sanitizedParsed.assets ?? [];
 
     if (sanitizedParsed.droppedAttachments && sanitizedParsed.droppedAttachments.length > 0) {
-      this.logger.warn("Message had attachment(s) dropped by content sanitizer", {
+      const reasonSummary = summarizeDroppedReasons(sanitizedParsed.droppedAttachments);
+      this.logger.warn(`Message had attachment(s) dropped by content sanitizer: ${reasonSummary}`, {
         code: "processor.attachments_dropped",
         accountId,
         droppedCount: sanitizedParsed.droppedAttachments.length,
-        dropped: sanitizedParsed.droppedAttachments.map(d => ({ mimeType: d.mimeType, sizeBytes: d.sizeBytes, reason: d.reason })),
+        dropped: sanitizedParsed.droppedAttachments.map(d => ({ mimeType: d.mimeType, sizeBytes: d.sizeBytes, reason: d.reason, detail: d.detail })),
       });
     }
 

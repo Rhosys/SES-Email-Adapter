@@ -121,3 +121,63 @@ describe("content-sanitizer — oversized attachments", () => {
     expect(result.parsed.droppedAttachments).toBeUndefined();
   });
 });
+
+describe("content-sanitizer — upload failures", () => {
+  function mockFetchWithFailingUpload(raw: string) {
+    const buf = Buffer.from(raw, "utf-8");
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (url === "https://example.com/get") {
+        return {
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+        };
+      }
+      // presigned POST upload fails with a realistic S3 error body
+      return {
+        ok: false,
+        status: 403,
+        text: async () => "<Error><Code>AccessDenied</Code><Message>Request has expired</Message></Error>",
+      };
+    }));
+  }
+
+  it("captures the S3 failure detail and surfaces it in the log title, not just 'upload_failed'", async () => {
+    mockFetchWithFailingUpload(buildEmailWithOversizedAttachment(1024));
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const result = await handler({
+      presignedGetUrl: "https://example.com/get",
+      presignedPost: { url: "https://example.com/post", fields: {} },
+      accountId: "acct-test",
+      senderEtld1: "example.com",
+      keyPrefix: "emails/msg-upload-failed/",
+      retentionTag: null,
+      invocationId: "inv-upload-failed",
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.parsed.droppedAttachments).toEqual([
+      {
+        filename: "huge.bin",
+        mimeType: "application/octet-stream",
+        sizeBytes: 1024,
+        reason: "upload_failed",
+        detail: "HTTP 403: <Error><Code>AccessDenied</Code><Message>Request has expired</Message></Error>",
+      },
+    ]);
+
+    const trackEntry = logSpy.mock.calls
+      .map(call => call[0])
+      .find((entry): entry is Record<string, unknown> =>
+        typeof entry === "object" && entry !== null && (entry as Record<string, unknown>).code === "content_sanitizer.attachments_dropped");
+
+    expect(trackEntry).toBeDefined();
+    const title = (trackEntry as Record<string, unknown>).title;
+    expect(typeof title).toBe("string");
+    expect(title as string).toContain("AccessDenied");
+    expect(title as string).toContain("Request has expired");
+  });
+});

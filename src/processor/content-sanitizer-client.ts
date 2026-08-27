@@ -25,6 +25,8 @@ export interface DroppedAttachment {
   mimeType: string;
   sizeBytes: number;
   reason: "too_large" | "upload_failed";
+  /** Populated for "upload_failed" — the HTTP status or error that made the S3 upload fail. */
+  detail?: string;
 }
 
 export interface InlineImageRef {

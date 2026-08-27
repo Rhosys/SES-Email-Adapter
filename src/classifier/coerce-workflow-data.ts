@@ -256,7 +256,7 @@ function coerceEnumValue(raw: unknown, enumValues: Array<{ value: string }>): st
  * Formats for human-readable date parsing (first match wins after ISO).
  * Slash-separated numeric formats are explicitly excluded — they are ambiguous.
  */
-const DATE_FORMATS_WITH_YEAR = [
+const BASE_DATE_FORMATS_WITH_YEAR = [
   "d MMMM yyyy",
   "MMMM d, yyyy",
   "d MMM yyyy",
@@ -264,12 +264,38 @@ const DATE_FORMATS_WITH_YEAR = [
   "dd.MM.yyyy",
 ];
 
-const DATE_FORMATS_YEARFREE = [
+const BASE_DATE_FORMATS_YEARFREE = [
   "d MMMM",
   "MMMM d",
   "d MMM",
   "MMM d",
 ];
+
+/**
+ * Expands a format list with a leading-weekday variant of each entry, using luxon's
+ * own "ccc"/"cccc" weekday tokens rather than an enumerated word list — those tokens
+ * resolve locale-specific weekday names via Intl (same mechanism already relied on for
+ * MMM/MMMM month names below), so this covers "Fri, ...", "Friday, ...", and their
+ * equivalents in any locale hint without us hardcoding weekday names per language.
+ */
+function withWeekdayPrefix(formats: string[]): string[] {
+  return formats.flatMap(fmt => [fmt, `ccc, ${fmt}`, `cccc, ${fmt}`, `ccc ${fmt}`, `cccc ${fmt}`]);
+}
+
+/**
+ * Expands a format list with a trailing-period variant for any bare "MMM" token (not
+ * "MMMM"), e.g. "MMM d, yyyy" → also try "MMM. d, yyyy". Many locales abbreviate months
+ * with a trailing period (English "Nov.", French "janv."); luxon's MMM token already
+ * resolves the locale-specific abbreviation itself, so adding the period as a literal
+ * in the format string covers it without us enumerating month abbreviations.
+ */
+function withAbbrevMonthPeriod(formats: string[]): string[] {
+  const bareMmm = /(?<!M)MMM(?!M)/;
+  return formats.flatMap(fmt => (bareMmm.test(fmt) ? [fmt, fmt.replace(bareMmm, "MMM.")] : [fmt]));
+}
+
+const DATE_FORMATS_WITH_YEAR = withWeekdayPrefix(withAbbrevMonthPeriod(BASE_DATE_FORMATS_WITH_YEAR));
+const DATE_FORMATS_YEARFREE = withWeekdayPrefix(withAbbrevMonthPeriod(BASE_DATE_FORMATS_YEARFREE));
 
 const TIME_SUFFIXES = ["", " HH:mm", " h:mm a", " 'at' HH:mm", " 'at' h:mm a"];
 
