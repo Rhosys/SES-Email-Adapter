@@ -888,11 +888,14 @@ export class SignalProcessor {
     const sanitizerAssets = sanitizedParsed.assets ?? [];
 
     if (sanitizedParsed.droppedAttachments && sanitizedParsed.droppedAttachments.length > 0) {
-      this.logger.warn("Message had attachment(s) dropped by content sanitizer", {
+      const reasonCounts = new Map<string, number>();
+      for (const d of sanitizedParsed.droppedAttachments) reasonCounts.set(d.reason, (reasonCounts.get(d.reason) ?? 0) + 1);
+      const reasonSummary = [...reasonCounts.entries()].map(([reason, count]) => `${count} ${reason}`).join(", ");
+      this.logger.warn(`Message had attachment(s) dropped by content sanitizer: ${reasonSummary}`, {
         code: "processor.attachments_dropped",
         accountId,
         droppedCount: sanitizedParsed.droppedAttachments.length,
-        dropped: sanitizedParsed.droppedAttachments.map(d => ({ mimeType: d.mimeType, sizeBytes: d.sizeBytes, reason: d.reason })),
+        dropped: sanitizedParsed.droppedAttachments.map(d => ({ mimeType: d.mimeType, sizeBytes: d.sizeBytes, reason: d.reason, detail: d.detail })),
       });
     }
 

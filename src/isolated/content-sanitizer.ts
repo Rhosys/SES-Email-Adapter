@@ -36,6 +36,8 @@ interface DroppedAttachment {
   mimeType: string;
   sizeBytes: number;
   reason: "too_large" | "upload_failed";
+  /** Populated for "upload_failed" — the HTTP status or caught error that made the S3 upload fail. */
+  detail?: string;
 }
 
 interface InlineImageRef {
@@ -155,7 +157,7 @@ async function uploadViaPresignedPost(
   content: Buffer | Uint8Array,
   contentType: string,
   retentionTag: "365" | "3650" | null,
-): Promise<boolean> {
+): Promise<{ ok: true } | { ok: false; detail: string }> {
   const formData = new FormData();
 
   // Add all pre-signed fields
@@ -179,9 +181,19 @@ async function uploadViaPresignedPost(
       method: "POST",
       body: formData,
     });
-    return response.ok || response.status === 204;
-  } catch {
-    return false;
+    if (response.ok || response.status === 204) return { ok: true };
+    // S3 presigned POST failures are almost always an expired/mismatched policy
+    // (clock skew, a key/condition that no longer matches what the URL was signed
+    // for) — the body carries the actual S3 error code, worth surfacing.
+    let body = "";
+    try {
+      body = await response.text();
+    } catch {
+      // best-effort — fall back to the status alone below
+    }
+    return { ok: false, detail: `HTTP ${response.status}${body ? `: ${body.slice(0, 300)}` : ""}` };
+  } catch (e) {
+    return { ok: false, detail: e instanceof Error ? e.message : "unknown fetch error" };
   }
 }
 
@@ -255,9 +267,9 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   try {
     const displayRaw = buildDisplayRawEmail(rawMime.toString("latin1"));
     const key = `${event.keyPrefix}raw-display.eml`;
-    const uploaded = await uploadViaPresignedPost(event.presignedPost, key, Buffer.from(displayRaw, "latin1"), "message/rfc822", event.retentionTag);
-    if (uploaded) displayRawS3Key = key;
-    logger?.trackPoint("display_raw_build_complete", { uploaded });
+    const uploadResult = await uploadViaPresignedPost(event.presignedPost, key, Buffer.from(displayRaw, "latin1"), "message/rfc822", event.retentionTag);
+    if (uploadResult.ok) displayRawS3Key = key;
+    logger?.trackPoint("display_raw_build_complete", { uploaded: uploadResult.ok, ...(uploadResult.ok ? {} : { detail: uploadResult.detail }) });
   } catch {
     logger?.trackPoint("display_raw_build_failed");
   }
@@ -354,17 +366,17 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
         // attachment instead of embedding. Its `cid:` reference is deliberately left
         // unresolved below; the API layer resolves it to a CDN url at read time.
         const s3Key = `${event.keyPrefix}${uploadIndex}`;
-        const uploaded = await uploadViaPresignedPost(event.presignedPost, s3Key, attachment.content, contentType, event.retentionTag);
+        const uploadResult = await uploadViaPresignedPost(event.presignedPost, s3Key, attachment.content, contentType, event.retentionTag);
         const filename = attachment.filename ?? `inline-${uploadIndex}`;
 
-        if (uploaded) {
+        if (uploadResult.ok) {
           inlineImageRefs.push({ contentId: cid, mimeType: contentType, sizeBytes: attachment.size, s3Key });
           // Still eligible for QR scanning via the attachment-image path in extractAssets
           if (contentType.startsWith("image/")) {
             attachmentsWithBytes.push({ filename, mimeType: contentType, content: attachment.content, s3Key });
           }
         } else {
-          droppedAttachments.push({ filename, mimeType: contentType, sizeBytes: attachment.size, reason: "upload_failed" });
+          droppedAttachments.push({ filename, mimeType: contentType, sizeBytes: attachment.size, reason: "upload_failed", detail: uploadResult.detail });
         }
         uploadIndex++;
       }
@@ -372,25 +384,28 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
     }
 
     const s3Key = `${event.keyPrefix}${uploadIndex}`;
-    const uploaded = await uploadViaPresignedPost(event.presignedPost, s3Key, attachment.content, contentType, event.retentionTag);
+    const uploadResult = await uploadViaPresignedPost(event.presignedPost, s3Key, attachment.content, contentType, event.retentionTag);
 
     const filename = attachment.filename ?? `attachment-${uploadIndex}`;
-    if (uploaded) {
+    if (uploadResult.ok) {
       attachmentRefs.push({ filename, mimeType: contentType, sizeBytes: attachment.size, s3Key });
       attachmentsWithBytes.push({ filename, mimeType: contentType, content: attachment.content, s3Key });
     } else {
-      droppedAttachments.push({ filename, mimeType: contentType, sizeBytes: attachment.size, reason: "upload_failed" });
+      droppedAttachments.push({ filename, mimeType: contentType, sizeBytes: attachment.size, reason: "upload_failed", detail: uploadResult.detail });
     }
 
     uploadIndex++;
   }
   logger?.trackPoint("attachments_processed", { attachmentRefCount: attachmentRefs.length, inlineImageCount: inlineImages.length, inlineImageRefCount: inlineImageRefs.length, droppedCount: droppedAttachments.length });
   if (droppedAttachments.length > 0) {
-    logger?.track("Attachment(s) dropped from message.", {
+    const reasonCounts = new Map<string, number>();
+    for (const d of droppedAttachments) reasonCounts.set(d.reason, (reasonCounts.get(d.reason) ?? 0) + 1);
+    const reasonSummary = [...reasonCounts.entries()].map(([reason, count]) => `${count} ${reason}`).join(", ");
+    logger?.track(`Attachment(s) dropped from message: ${reasonSummary}.`, {
       code: "content_sanitizer.attachments_dropped",
       accountId: event.accountId,
       droppedCount: droppedAttachments.length,
-      dropped: droppedAttachments.map(d => ({ mimeType: d.mimeType, sizeBytes: d.sizeBytes, reason: d.reason })),
+      dropped: droppedAttachments.map(d => ({ mimeType: d.mimeType, sizeBytes: d.sizeBytes, reason: d.reason, detail: d.detail })),
     });
   }
 

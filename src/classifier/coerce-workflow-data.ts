@@ -294,6 +294,19 @@ function resolveYearFree(month: number, day: number, receivedAt: DateTime): Date
 const LOCALE_TIME_NOISE = /(?<=\d)\s*(?:Uhr|o'clock|h(?:rs?)?|heure[s]?|ч(?:ас(?:ов|а)?)?|uur|ore|godzin[ay]?)\s*$/i;
 
 /**
+ * Leading weekday name (e.g. "Fri, ", "Friday, ") — carries no date information
+ * once the day/month/year are parsed, but blocks every DATE_FORMATS entry point
+ * since none of them declare a leading weekday token.
+ */
+const WEEKDAY_PREFIX = /^(?:Sun(?:day)?|Mon(?:day)?|Tue(?:s(?:day)?)?|Wed(?:nesday)?|Thu(?:rs?(?:day)?)?|Fri(?:day)?|Sat(?:urday)?)\.?,?\s+/i;
+
+/**
+ * Trailing period after an abbreviated month name (e.g. "Nov." → "Nov") — common
+ * in US-style dates but not matched by luxon's "MMM" token, which expects no punctuation.
+ */
+const ABBREV_MONTH_PERIOD = /\b(Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.(?=\s|,|$)/gi;
+
+/**
  * Coerces a raw date value into a Display_Date string.
  *
  * Parse order:
@@ -325,8 +338,13 @@ export function coerceDate(value: unknown, receivedAt: string, localeHints: stri
     return formatDisplayDate(iso, trimmed);
   }
 
-  // Strip locale time noise (e.g. "Uhr", "o'clock") for format-based parsing
-  const cleaned = trimmed.replace(LOCALE_TIME_NOISE, "").trim();
+  // Strip locale time noise (e.g. "Uhr", "o'clock"), a leading weekday name, and
+  // the period after an abbreviated month, for format-based parsing
+  const cleaned = trimmed
+    .replace(LOCALE_TIME_NOISE, "")
+    .replace(WEEKDAY_PREFIX, "")
+    .replace(ABBREV_MONTH_PERIOD, "$1")
+    .trim();
   const input = cleaned || trimmed;
 
   // 2. Try human-readable formats with year + time variants
