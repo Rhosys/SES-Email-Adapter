@@ -34,7 +34,7 @@ export class S3ContentStore {
   }
 
   async getPresignedPost(keyPrefix: string, retentionTag: string | null): Promise<PresignedPost> {
-    return createPresignedPost(this.s3Client, {
+    const post = await createPresignedPost(this.s3Client, {
       Bucket: this.bucket,
       Key: `${keyPrefix}\${filename}`,
       Conditions: [
@@ -47,6 +47,14 @@ export class S3ContentStore {
       },
       Expires: 30,
     });
+
+    // The SDK always bakes `key` into the returned fields (from the `Key` param above),
+    // but the content sanitizer sets the actual per-object key on each upload — a duplicate
+    // `key` field in the FormData causes S3 to reject with "POST only supports one key
+    // parameter per request". Strip it here; the `starts-with` policy condition still
+    // constrains which keys are allowed.
+    const { key: _templateKey, ...fields } = post.fields;
+    return { url: post.url, fields };
   }
 }
 

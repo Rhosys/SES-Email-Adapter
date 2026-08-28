@@ -181,12 +181,11 @@ async function uploadViaPresignedPost(
 ): Promise<{ ok: true } | { ok: false; detail: string }> {
   const formData = new FormData();
 
-  // Add all pre-signed fields
-  for (const [key, value] of Object.entries(presignedPost.fields)) {
-    formData.append(key, value);
+  // Add all pre-signed fields (key is not included — set per-upload below)
+  for (const [field, value] of Object.entries(presignedPost.fields)) {
+    formData.append(field, value);
   }
 
-  // Override the key with our specific key
   formData.append("key", s3Key);
   formData.append("Content-Type", contentType);
 
