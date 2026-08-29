@@ -177,21 +177,20 @@ async function uploadViaPresignedPost(
   s3Key: string,
   content: Buffer | Uint8Array,
   contentType: string,
-  retentionTag: "365" | "3650" | null,
 ): Promise<{ ok: true } | { ok: false; detail: string }> {
   const formData = new FormData();
 
-  // Add all pre-signed fields (key is not included — set per-upload below)
+  // Add all pre-signed fields (key is not included — set per-upload below).
+  // This already includes x-amz-tagging when the post was signed with a
+  // retention tag, so it must not be appended again here — S3's policy
+  // ["eq", "$x-amz-tagging", ...] rejects the upload if the field appears
+  // twice in the multipart body.
   for (const [field, value] of Object.entries(presignedPost.fields)) {
     formData.append(field, value);
   }
 
   formData.append("key", s3Key);
   formData.append("Content-Type", contentType);
-
-  if (retentionTag) {
-    formData.append("x-amz-tagging", `retention=${retentionTag}`);
-  }
 
   // The file must be the last field
   formData.append("file", new Blob([Buffer.from(content)], { type: contentType }));
@@ -287,7 +286,7 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   try {
     const displayRaw = buildDisplayRawEmail(rawMime.toString("latin1"));
     const key = `${event.keyPrefix}raw-display.eml`;
-    const uploadResult = await uploadViaPresignedPost(event.presignedPost, key, Buffer.from(displayRaw, "latin1"), "message/rfc822", event.retentionTag);
+    const uploadResult = await uploadViaPresignedPost(event.presignedPost, key, Buffer.from(displayRaw, "latin1"), "message/rfc822");
     if (uploadResult.ok) displayRawS3Key = key;
     logger?.trackPoint("display_raw_build_complete", { uploaded: uploadResult.ok, ...(uploadResult.ok ? {} : { detail: uploadResult.detail }) });
   } catch {
@@ -386,7 +385,7 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
         // attachment instead of embedding. Its `cid:` reference is deliberately left
         // unresolved below; the API layer resolves it to a CDN url at read time.
         const s3Key = `${event.keyPrefix}${uploadIndex}`;
-        const uploadResult = await uploadViaPresignedPost(event.presignedPost, s3Key, attachment.content, contentType, event.retentionTag);
+        const uploadResult = await uploadViaPresignedPost(event.presignedPost, s3Key, attachment.content, contentType);
         const filename = attachment.filename ?? `inline-${uploadIndex}`;
 
         if (uploadResult.ok) {
@@ -404,7 +403,7 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
     }
 
     const s3Key = `${event.keyPrefix}${uploadIndex}`;
-    const uploadResult = await uploadViaPresignedPost(event.presignedPost, s3Key, attachment.content, contentType, event.retentionTag);
+    const uploadResult = await uploadViaPresignedPost(event.presignedPost, s3Key, attachment.content, contentType);
 
     const filename = attachment.filename ?? `attachment-${uploadIndex}`;
     if (uploadResult.ok) {

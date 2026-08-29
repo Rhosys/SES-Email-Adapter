@@ -30,13 +30,14 @@ const RAW_EMAIL_WITH_ATTACHMENT = [
   "------=_Part_boundary--",
 ].join("\r\n");
 
-function mockFetch(raw: string, uploads: Array<{ key: string; body: string }>) {
+function mockFetch(raw: string, uploads: Array<{ key: string; body: string }>, forms: FormData[] = []) {
   const buf = Buffer.from(raw, "utf-8");
   vi.stubGlobal("fetch", vi.fn(async (url: unknown, init?: RequestInit) => {
     if (url === "https://example.com/get") {
       return { ok: true, status: 200, arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) };
     }
     if (url === "https://example.com/post" && init?.body instanceof FormData) {
+      forms.push(init.body);
       const key = init.body.get("key") as string;
       const file = init.body.get("file") as File;
       uploads.push({ key, body: await file.text() });
@@ -74,5 +75,31 @@ describe("content-sanitizer — display-safe raw email upload", () => {
     expect(displayUpload!.body).toContain("Body text.");
     expect(displayUpload!.body).toContain("[attachment content omitted: document.pdf");
     expect(displayUpload!.body).not.toContain("QQ==QQ==");
+  });
+
+  // Regression: the presigned post's `fields` already carries x-amz-tagging when
+  // it was signed with a retention tag (see S3ContentStore.getPresignedPost). The
+  // upload path must not append it again — S3's ["eq", "$x-amz-tagging", ...]
+  // policy condition rejects the request if the field appears twice in the
+  // multipart body.
+  it("does not duplicate x-amz-tagging when the presigned post fields already include it", async () => {
+    const uploads: Array<{ key: string; body: string }> = [];
+    const forms: FormData[] = [];
+    mockFetch(RAW_EMAIL_WITH_ATTACHMENT, uploads, forms);
+
+    const result = await handler({
+      presignedGetUrl: "https://example.com/get",
+      presignedPost: { url: "https://example.com/post", fields: { "x-amz-tagging": "retention=365" } },
+      accountId: "acct-test",
+      senderEtld1: "example.com",
+      keyPrefix: "emails/msg-display-raw-tag/",
+      retentionTag: "365",
+    });
+
+    expect(result.success).toBe(true);
+    expect(forms.length).toBeGreaterThan(0);
+    for (const form of forms) {
+      expect(form.getAll("x-amz-tagging")).toEqual(["retention=365"]);
+    }
   });
 });
