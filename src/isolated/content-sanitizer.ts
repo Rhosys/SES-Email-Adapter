@@ -180,20 +180,20 @@ async function uploadViaPresignedPost(
 ): Promise<{ ok: true } | { ok: false; detail: string }> {
   const formData = new FormData();
 
-  // Add all pre-signed fields (key is not included — set per-upload below).
-  // This already includes x-amz-tagging when the post was signed with a
-  // retention tag, so it must not be appended again here — S3's policy
-  // ["eq", "$x-amz-tagging", ...] rejects the upload if the field appears
-  // twice in the multipart body.
+  // Use set() (overwrite), not append(), for every field: S3's exact-match
+  // policy conditions (e.g. ["eq", "$x-amz-tagging", ...]) reject the upload
+  // if a field appears twice in the multipart body, so a later field with the
+  // same name must replace an earlier one rather than duplicate it. Only use
+  // append() where a field is deliberately meant to carry multiple values.
   for (const [field, value] of Object.entries(presignedPost.fields)) {
-    formData.append(field, value);
+    formData.set(field, value);
   }
 
-  formData.append("key", s3Key);
-  formData.append("Content-Type", contentType);
+  formData.set("key", s3Key);
+  formData.set("Content-Type", contentType);
 
   // The file must be the last field
-  formData.append("file", new Blob([Buffer.from(content)], { type: contentType }));
+  formData.set("file", new Blob([Buffer.from(content)], { type: contentType }));
 
   try {
     const response = await fetch(presignedPost.url, {
