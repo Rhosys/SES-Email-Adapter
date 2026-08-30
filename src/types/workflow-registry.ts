@@ -150,6 +150,7 @@ export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
         e("other", "payment-related email that does not fit the above categories"),
       ] },
       { name: "vendor", type: "string", required: true, identity: true },
+      { name: "date", type: "date", required: true, notes: "The transaction or payment date — when the charge, refund, or transfer occurred. If not stated in the email, leave empty." },
       { name: "amount", type: "number", required: false },
       { name: "currency", type: "string", required: false },
       { name: "dueDate", type: "date", required: false },

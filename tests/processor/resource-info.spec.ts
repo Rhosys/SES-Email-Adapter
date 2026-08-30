@@ -73,20 +73,20 @@ describe("deriveResourceInfo", () => {
     it("returns the same shape regardless of paymentType", () => {
       for (const paymentType of ["invoice", "receipt", "subscription_renewal", "payment_failed", "plan_changed", "tax", "wire_transfer", "refund", "statement", "other"] as const) {
         const info = deriveResourceInfo("payments", {
-          workflow: "payments", paymentType, vendor: "AWS", dueDate: "2024-03-01T00:00:00Z", invoiceNumber: "INV-1",
+          workflow: "payments", paymentType, vendor: "AWS", date: "2024-01-15", dueDate: "2024-03-01T00:00:00Z", invoiceNumber: "INV-1",
         });
         expect(info).toEqual({ expectedResolutionDate: "2024-03-01T00:00:00.000Z", displayDate: "2024-03-01T00:00:00Z", resourceKey: "INV-1", assets: [] });
       }
     });
 
     it("returns null when dueDate or invoiceNumber is missing", () => {
-      expect(deriveResourceInfo("payments", { workflow: "payments", paymentType: "invoice", vendor: "AWS", invoiceNumber: "INV-1" })).toBeNull();
-      expect(deriveResourceInfo("payments", { workflow: "payments", paymentType: "invoice", vendor: "AWS", dueDate: "2024-03-01T00:00:00Z" })).toBeNull();
+      expect(deriveResourceInfo("payments", { workflow: "payments", paymentType: "invoice", vendor: "AWS", date: "2024-01-15", invoiceNumber: "INV-1" })).toBeNull();
+      expect(deriveResourceInfo("payments", { workflow: "payments", paymentType: "invoice", vendor: "AWS", date: "2024-01-15", dueDate: "2024-03-01T00:00:00Z" })).toBeNull();
     });
 
     it("returns null when dueDate is not a parseable date", () => {
       expect(deriveResourceInfo("payments", {
-        workflow: "payments", paymentType: "invoice", vendor: "AWS", dueDate: "not-a-date", invoiceNumber: "INV-1",
+        workflow: "payments", paymentType: "invoice", vendor: "AWS", date: "2024-01-15", dueDate: "not-a-date", invoiceNumber: "INV-1",
       })).toBeNull();
     });
   });
@@ -208,7 +208,7 @@ describe("deriveResourceInfo", () => {
       // deriveResourceInfo defaults to "Europe/London" when no tz passed
       const info = deriveResourceInfo("payments", {
         workflow: "payments", paymentType: "invoice", vendor: "AWS",
-        dueDate: "2027-01-15T09:00", invoiceNumber: "INV-99",
+        date: "2027-01-15", dueDate: "2027-01-15T09:00", invoiceNumber: "INV-99",
       });
       expect(info).not.toBeNull();
       // January in London is GMT (+00:00), so 09:00 → 09:00 UTC

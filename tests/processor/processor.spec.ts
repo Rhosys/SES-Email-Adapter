@@ -1096,7 +1096,7 @@ describe("SignalProcessor", () => {
     });
 
     it("uses senderETLD1 grouping for payments workflow", () => {
-      expect(deriveGroupingKey("payments", { workflow: "payments", paymentType: "receipt", vendor: "Stripe" }, "me@example.com", "stripe.com"))
+      expect(deriveGroupingKey("payments", { workflow: "payments", paymentType: "receipt", vendor: "Stripe", date: "2024-01-15" }, "me@example.com", "stripe.com"))
         .toBe("me@example.com:payments:stripe.com");
     });
 
@@ -1153,13 +1153,13 @@ describe("SignalProcessor", () => {
     });
 
     it("payments is critical on payment_failed", () => {
-      expect(baseUrgency("payments", { workflow: "payments", paymentType: "payment_failed", vendor: "Stripe" })).toBe("critical");
+      expect(baseUrgency("payments", { workflow: "payments", paymentType: "payment_failed", vendor: "Stripe", date: "2024-01-15" })).toBe("critical");
     });
 
     it("payments is normal for all other payment types", () => {
-      expect(baseUrgency("payments", { workflow: "payments", paymentType: "invoice", vendor: "Stripe" })).toBe("normal");
-      expect(baseUrgency("payments", { workflow: "payments", paymentType: "receipt", vendor: "AWS" })).toBe("normal");
-      expect(baseUrgency("payments", { workflow: "payments", paymentType: "subscription_renewal", vendor: "GitHub" })).toBe("normal");
+      expect(baseUrgency("payments", { workflow: "payments", paymentType: "invoice", vendor: "Stripe", date: "2024-01-15" })).toBe("normal");
+      expect(baseUrgency("payments", { workflow: "payments", paymentType: "receipt", vendor: "AWS", date: "2024-01-15" })).toBe("normal");
+      expect(baseUrgency("payments", { workflow: "payments", paymentType: "subscription_renewal", vendor: "GitHub", date: "2024-01-15" })).toBe("normal");
     });
 
     it("test is always high (user is actively waiting for inbox confirmation)", () => {

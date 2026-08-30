@@ -198,6 +198,7 @@ export const PaymentsData = z.object({
   workflow: z.literal("payments"),
   paymentType: z.enum(["invoice", "receipt", "subscription_renewal", "payment_failed", "plan_changed", "tax", "wire_transfer", "refund", "statement", "other"]),
   vendor: z.string(),
+  date: z.string(),
   amount: z.number().optional(),
   currency: z.string().optional(),
   dueDate: z.string().optional(),

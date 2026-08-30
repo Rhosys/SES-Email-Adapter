@@ -103,6 +103,7 @@ export interface PaymentsData {
   // money flows both ways: invoice = owed to someone, receipt = already paid, subscription = recurring
   paymentType: "invoice" | "receipt" | "subscription_renewal" | "payment_failed" | "plan_changed" | "tax" | "wire_transfer" | "refund" | "statement" | "other";
   vendor: string;
+  date: string;
   amount?: string;
   currency?: string;
   dueDate?: string;

@@ -240,6 +240,14 @@ export function coerceWorkflowData(
     }
   }
 
+  // Post-coercion defaults — workflow-specific fields that should never be empty
+  if (workflow === "payments" && !result.date) {
+    const dt = DateTime.fromISO(receivedAt, { zone: "utc" });
+    if (dt.isValid) {
+      result.date = dt.toFormat("yyyy-MM-dd");
+    }
+  }
+
   return result;
 }
 
