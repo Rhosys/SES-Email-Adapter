@@ -18,8 +18,10 @@ import { shouldDispatchDigest, buildDigestSubject } from "./digest-frequency-fil
 import type { DigestFrequency } from "./digest-frequency-filter.js"
 import type { UnsubscribeTokenGenerator } from "../email/unsubscribe-token-generator.js"
 import { renderTemplate } from "../email/template-renderer.js"
+import { getEmailTheme } from "../email/email-theme.js"
 import { buildEmailTags } from "../email/tag-sanitizer.js"
 import { buildUnsubscribeHeaders } from "../email/unsubscribe-headers.js"
+import { mapThreadToCard } from "./digest-data-mapper.js"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -107,23 +109,41 @@ export class DigestWorker {
       return ok(undefined)
     }
 
-    // 7. Generate unsubscribe JWT
+    // 7. Fetch latest signal per thread for workflow detail (parallel, best-effort)
+    const theme = getEmailTheme()
+    const cardResults = await Promise.all(
+      threads.map(async (thread) => {
+        const signalsResult = await threadDb.listSignals(accountId, thread.id, { limit: 1 })
+        const latestSignal = signalsResult.isOk() ? signalsResult.value.items[0] ?? null : null
+        return mapThreadToCard({
+          thread,
+          latestSignal,
+          appBaseUrl: emailService.appBaseUrl,
+          theme,
+        })
+      }),
+    )
+
+    // 8. Generate unsubscribe JWT
     const unsubscribeCode = await this.deps.unsubscribeTokenGenerator.generate({ accountId, emailType: "digest" })
 
-    // 8. Render digest template
+    // 9. Render digest template
     const subject = buildDigestSubject(frequency as DigestFrequency, today)
     const fullDate = today.toISODate()!
     const htmlBody = await renderTemplate("digest", {
-      threads,
+      cards: cardResults,
+      hasThreads: cardResults.length > 0,
+      threadCount: cardResults.length,
       quarantineCount,
       hasQuarantine: quarantineCount > 0,
       unsubscribeCode,
       domain: emailService.appDomain,
       emailType: "digest",
       appBaseUrl: emailService.appBaseUrl,
+      subject,
     })
 
-    // 9. Build tags and headers
+    // 10. Build tags and headers
     const triggerId = `digest-${accountId}-${fullDate}`
     const tags = buildEmailTags({
       accountId,
@@ -133,7 +153,7 @@ export class DigestWorker {
     })
     const headers = buildUnsubscribeHeaders(accountId, API_DOMAIN, unsubscribeCode)
 
-    // 10. Send via EmailService — terminal operation, no post-send writes
+    // 11. Send via EmailService — terminal operation, no post-send writes
     const textBody = `Your ${frequency} Numaeel digest is ready. ${threads.length} active conversations.${quarantineCount > 0 ? ` ${quarantineCount} emails awaiting review in quarantine.` : ""} View your dashboard: ${emailService.appBaseUrl}/a/`
 
     // Resolve sender domain: prefer customer's own domain if sender setup is complete
