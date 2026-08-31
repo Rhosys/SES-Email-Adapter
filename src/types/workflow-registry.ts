@@ -357,7 +357,7 @@ export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
   },
   {
     name: "test",
-    description: "Emails sent by the account owner to their own domain — triggers pong",
+    description: "Self-sent test email — the sender address matches one of the recipient addresses. Typical when users verify their domain setup, check email delivery, or send themselves a test. The body is usually short and mentions testing, checking, or domain setup.",
     fields: [],
   },
   {
