@@ -24,6 +24,7 @@ import type { Result } from "../errors.js";
 import { ok, err } from "../errors.js";
 import { buildOutboundTags } from "../email/ses-tags.js";
 import { buildMimeMessage } from "../email/mime-builder.js";
+import { renderMarkdownToHtml } from "../email/markdown.js";
 import { buildOutboundMsgId } from "../processor/message-id.js";
 import type { Logger } from "../logger.js";
 
@@ -80,10 +81,14 @@ export class ReplySenderService implements ReplySender {
     if (routeResult.isErr()) return err(routeResult.error);
     const exchange = routeResult.value;
 
+    // Every composer that writes `body` (reply/compose box, auto-reply templates) is Markdown
+    // — see src/email/markdown.ts — so it's rendered to HTML once here, for both send routes.
+    const htmlBody = renderMarkdownToHtml(opts.body);
+
     if (exchange) {
-      return this.sendViaProvider(exchange, { ...opts, accountId: resolvedAccountId, subject, headers });
+      return this.sendViaProvider(exchange, { ...opts, htmlBody, accountId: resolvedAccountId, subject, headers });
     }
-    return this.sendViaSes({ ...opts, accountId: resolvedAccountId, subject, headers });
+    return this.sendViaSes({ ...opts, htmlBody, accountId: resolvedAccountId, subject, headers });
   }
 
   // ---------------------------------------------------------------------------
@@ -144,7 +149,7 @@ export class ReplySenderService implements ReplySender {
 
   private async sendViaProvider(
     emx: ExternalMailExchange,
-    opts: { to: string; from: string; subject: string; body: string; accountId: string; signalId?: string; headers: Array<{ Name: string; Value: string }> },
+    opts: { to: string; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; headers: Array<{ Name: string; Value: string }> },
   ): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
     const adapter = this.adapters[emx.platform];
     // resolveExchangeRoute already established this; narrowing for the type checker.
@@ -155,6 +160,7 @@ export class ReplySenderService implements ReplySender {
       to: opts.to,
       subject: opts.subject,
       textBody: opts.body,
+      htmlBody: opts.htmlBody,
       headers: opts.headers,
     });
 
@@ -177,7 +183,7 @@ export class ReplySenderService implements ReplySender {
   }
 
   private async sendViaSes(
-    opts: { to: string; from: string; subject: string; body: string; accountId: string; signalId?: string; threadId?: string; headers: Array<{ Name: string; Value: string }> },
+    opts: { to: string; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; threadId?: string; headers: Array<{ Name: string; Value: string }> },
   ): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
     const tags = buildOutboundTags("reply", {
       accountId: opts.accountId,
@@ -190,6 +196,7 @@ export class ReplySenderService implements ReplySender {
       fromOverride: opts.from,
       subject: opts.subject,
       textBody: opts.body,
+      htmlBody: opts.htmlBody,
       accountId: opts.accountId,
       headers: opts.headers,
       tags,

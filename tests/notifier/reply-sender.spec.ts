@@ -118,6 +118,7 @@ describe("ReplySenderService.sendReply()", () => {
       fromOverride: "sender@example.com",
       subject: "Re: Original Subject",
       textBody: "Reply body text",
+      htmlBody: "<p>Reply body text</p>\n",
       accountId: "acct-test",
       headers: [
         { Name: "In-Reply-To", Value: "<original-id@mail.example.com>" },
@@ -159,6 +160,26 @@ describe("ReplySenderService.sendReply()", () => {
     });
 
     expect(result._unsafeUnwrap().outboundMsgId).toMatch(/^ses-reply-456@.*amazonses\.com$/);
+  });
+
+  // The composer (DraftSignalCard.vue, TemplatesView.vue) stores the body as Markdown and
+  // only ever renders it client-side for a live preview — the server has to do the same
+  // rendering at send time so SES gets a real HTML part, not raw "**bold**" markup.
+  it("renders the Markdown body to HTML and passes both parts through", async () => {
+    (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "m-md" }));
+
+    await handler.sendReply({
+      to: "recipient@example.com",
+      from: "sender@example.com",
+      subject: "Original Subject",
+      body: "Hello **world**\n\n- one\n- two",
+      accountId: "acct-test",
+    });
+
+    const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(call.textBody).toBe("Hello **world**\n\n- one\n- two");
+    expect(call.htmlBody).toContain("<strong>world</strong>");
+    expect(call.htmlBody).toContain("<li>one</li>");
   });
 });
 
@@ -322,6 +343,23 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     expect(message).toContain("Subject: Re: Original");
     expect(message).toContain("In-Reply-To: <original@mail.example.com>");
     expect(message).toContain("References: <original@mail.example.com>");
+  });
+
+  it("builds a multipart/alternative message carrying the rendered HTML alongside the Markdown source", async () => {
+    const adapter = makeGmailAdapter(ok({ providerMessageId: "gmail-msg-1" }));
+    const handler = makeSender({
+      emailService: makeEmailService(),
+      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE }), exchangesDb: makeExchangesDb({ exchange: ACTIVE_GMAIL_EXCHANGE }),
+      adapters: { gmail: adapter },
+    });
+
+    await handler.sendReply({ ...REPLY, body: "Hi **there**" });
+
+    const rawMime = (adapter.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Uint8Array;
+    const message = Buffer.from(rawMime).toString("utf8");
+    expect(message).toContain("Content-Type: multipart/alternative");
+    expect(message).toContain("Content-Type: text/plain; charset=UTF-8");
+    expect(message).toContain("Content-Type: text/html; charset=UTF-8");
   });
 
   it("surfaces a missing send scope as a permanent error rather than falling back to SES", async () => {
