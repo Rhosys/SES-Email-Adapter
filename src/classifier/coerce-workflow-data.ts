@@ -328,6 +328,92 @@ function resolveYearFree(month: number, day: number, receivedAt: DateTime): Date
 const LOCALE_TIME_NOISE = /(?<=\d)\s*(?:Uhr|o'clock|h(?:rs?)?|heure[s]?|ч(?:ас(?:ов|а)?)?|uur|ore|godzin[ay]?)\s*$/i;
 
 /**
+ * Dotted meridiem markers (a.m./p.m. and locale-cased variants) that luxon's `a`
+ * token does not match — it expects the undotted form (am/AM). Only the meridiem
+ * is normalized; other periods (dd.MM.yyyy separators, MMM. month abbreviations)
+ * are left intact. Requires a preceding digit so it can't collide with sentence text.
+ */
+const DOTTED_MERIDIEM = /(?<=\d)\s*([ap])\.\s*m\.?/gi;
+
+/**
+ * Date connectors by base language subtag. Emails often phrase appointments
+ * time-first ("9:30 a.m. on February 1"), but every parse format is date-first.
+ * These connectors introduce the DATE portion in a time-first string; we use the
+ * classifier-detected locale to pick the right one and reorder to date-first.
+ *
+ * Ordering within each list matters: multi-word/longer connectors first so they
+ * match before a shorter substring (e.g. "a las" before any bare token).
+ */
+const DATE_CONNECTORS_BY_LANG: Record<string, string[]> = {
+  en: ["on"],
+  de: ["am"],
+  fr: ["le"],
+  es: ["el"],
+  it: ["il"],
+  nl: ["op"],
+};
+
+/**
+ * Leading time connectors that introduce the TIME portion when it comes first
+ * (German "um 17:00", French "à 14:30"). Stripped from the front before reorder
+ * so the residual time token is clean. English "at" is handled by TIME_SUFFIXES.
+ */
+const LEADING_TIME_CONNECTOR = /^(?:um|à|a las|alle|om)\s+/i;
+
+/** A bare clock time at the start of the string: "9:30", "14:30". */
+const LEADING_TIME = /^\d{1,2}:\d{2}/;
+
+/** An optional meridiem token immediately following a leading time: " am", " p.m.". */
+const LEADING_MERIDIEM = /^\s*[ap]\.?\s*m\.?/i;
+
+/**
+ * Reorders a time-first string ("TIME <connector> DATE") into date-first
+ * ("DATE TIME") so the existing date-first format machinery can parse it.
+ * Returns the original string unchanged if it is not time-first.
+ *
+ * Locale-driven: the DATE connector is chosen from the detected language subtags,
+ * which avoids cross-locale collisions (German "am" is a connector only under a
+ * German hint, never treated as the English meridiem).
+ */
+function reorderTimeFirst(input: string, localeHints: string[]): string {
+  const withoutLeadConnector = input.replace(LEADING_TIME_CONNECTOR, "");
+  const timeMatch = withoutLeadConnector.match(LEADING_TIME);
+  if (!timeMatch) return input;
+
+  // Text after the bare clock time, before any meridiem token is consumed.
+  const afterTime = withoutLeadConnector.slice(timeMatch[0].length);
+
+  const langs = new Set(localeHints.map(h => h.split("-")[0]!.toLowerCase()));
+  langs.add("en"); // English "on" is always in scope regardless of hint
+  const connectors = [...langs].flatMap(lang => DATE_CONNECTORS_BY_LANG[lang] ?? []);
+
+  // Try connector match twice: once treating a bare meridiem word as a connector
+  // (German "am"), once treating it as the time's meridiem (English "9:30 am on").
+  // Prefer the meridiem-inclusive read so "9:30 am on <date>" keeps its meridiem;
+  // fall back to bare-time read so "17:00 am <date>" (de) reorders correctly.
+  const meridiemMatch = afterTime.match(LEADING_MERIDIEM);
+  const candidates: Array<{ time: string; rest: string }> = [];
+  if (meridiemMatch) {
+    candidates.push({
+      time: (timeMatch[0] + meridiemMatch[0]).trim(),
+      rest: afterTime.slice(meridiemMatch[0].length).trimStart(),
+    });
+  }
+  candidates.push({ time: timeMatch[0].trim(), rest: afterTime.trimStart() });
+
+  for (const { time, rest } of candidates) {
+    for (const connector of connectors) {
+      const re = new RegExp(`^${connector}\\s+`, "i");
+      if (re.test(rest)) {
+        const datePart = rest.replace(re, "");
+        return `${datePart} ${time}`;
+      }
+    }
+  }
+  return input;
+}
+
+/**
  * Coerces a raw date value into a Display_Date string.
  *
  * Parse order:
@@ -359,8 +445,12 @@ export function coerceDate(value: unknown, receivedAt: string, localeHints: stri
     return formatDisplayDate(iso, trimmed);
   }
 
-  // Strip locale time noise (e.g. "Uhr", "o'clock") for format-based parsing
-  const cleaned = trimmed.replace(LOCALE_TIME_NOISE, "").trim();
+  // Reorder time-first phrasings ("9:30 a.m. on February 1") into date-first,
+  // then normalize dotted meridiem (a.m. → am) so luxon's `a` token matches, then
+  // strip locale time noise (e.g. "Uhr", "o'clock") for format-based parsing.
+  const reordered = reorderTimeFirst(trimmed, localeHints);
+  const normalized = reordered.replace(DOTTED_MERIDIEM, " $1m");
+  const cleaned = normalized.replace(LOCALE_TIME_NOISE, "").trim();
   const input = cleaned || trimmed;
 
   // 2. Try human-readable formats with year + time variants

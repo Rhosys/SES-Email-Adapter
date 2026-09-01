@@ -357,3 +357,191 @@ describe("coerceDate — weekday prefix and abbreviated month period stripping",
     expect(coerceDate("ven. 20 novembre 2026", RECEIVED_AT, ["fr"])).toBe("2026-11-20");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Dotted meridiem (a.m. / p.m.) — the reported bug
+// These assert DESIRED behavior; they fail until meridiem normalization lands.
+// ---------------------------------------------------------------------------
+
+describe("coerceDate — dotted meridiem (a.m./p.m.)", () => {
+  it("lowercase a.m. with 'at' prefix", () => {
+    expect(coerceDate("February 01, 2027 at 9:30 a.m.", RECEIVED_AT)).toBe("2027-02-01T09:30");
+  });
+
+  it("lowercase p.m. with 'at' prefix", () => {
+    expect(coerceDate("February 01, 2027 at 9:30 p.m.", RECEIVED_AT)).toBe("2027-02-01T21:30");
+  });
+
+  it("lowercase a.m. without 'at' prefix", () => {
+    expect(coerceDate("March 15, 2025 9:30 a.m.", RECEIVED_AT)).toBe("2025-03-15T09:30");
+  });
+
+  it("lowercase p.m. without 'at' prefix", () => {
+    expect(coerceDate("March 15, 2025 2:30 p.m.", RECEIVED_AT)).toBe("2025-03-15T14:30");
+  });
+
+  it("uppercase A.M.", () => {
+    expect(coerceDate("March 15, 2025 9:30 A.M.", RECEIVED_AT)).toBe("2025-03-15T09:30");
+  });
+
+  it("uppercase P.M.", () => {
+    expect(coerceDate("March 15, 2025 2:30 P.M.", RECEIVED_AT)).toBe("2025-03-15T14:30");
+  });
+
+  it("mixed-case a.M.", () => {
+    expect(coerceDate("March 15, 2025 9:30 a.M.", RECEIVED_AT)).toBe("2025-03-15T09:30");
+  });
+
+  it("dotted meridiem on d MMMM yyyy form", () => {
+    expect(coerceDate("15 March 2025 2:30 p.m.", RECEIVED_AT)).toBe("2025-03-15T14:30");
+  });
+
+  it("year-free with dotted meridiem", () => {
+    expect(coerceDate("August 15 2:30 p.m.", RECEIVED_AT)).toBe("2024-08-15T14:30");
+  });
+
+  it("undotted AM/PM still works (regression guard)", () => {
+    expect(coerceDate("March 15, 2025 2:30 PM", RECEIVED_AT)).toBe("2025-03-15T14:30");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Broad locale × format matrix
+// Discovery harness: enumerate plausible classifier date strings per locale.
+// Cases that fail today reveal parser gaps — do not delete failures, triage them.
+// ---------------------------------------------------------------------------
+
+interface MatrixCase {
+  input: string;
+  locales: string[];
+  expected: string;
+}
+
+const MATRIX: Record<string, MatrixCase[]> = {
+  english: [
+    { input: "March 15, 2025", locales: [], expected: "2025-03-15" },
+    { input: "15 March 2025", locales: [], expected: "2025-03-15" },
+    { input: "Mar 15, 2025", locales: [], expected: "2025-03-15" },
+    { input: "Mar. 15, 2025", locales: [], expected: "2025-03-15" },
+    { input: "Saturday, March 15, 2025", locales: [], expected: "2025-03-15" },
+    { input: "March 15, 2025 2:30 PM", locales: [], expected: "2025-03-15T14:30" },
+    { input: "March 15, 2025 at 2:30 PM", locales: [], expected: "2025-03-15T14:30" },
+    { input: "March 15, 2025 2:30 p.m.", locales: [], expected: "2025-03-15T14:30" },
+    { input: "March 15, 2025 14:30", locales: [], expected: "2025-03-15T14:30" },
+  ],
+  german: [
+    { input: "15 März 2025", locales: ["de"], expected: "2025-03-15" },
+    { input: "15.03.2025", locales: ["de"], expected: "2025-03-15" },
+    { input: "15 März 2025 17:00 Uhr", locales: ["de"], expected: "2025-03-15T17:00" },
+    { input: "Samstag, 15 März 2025", locales: ["de"], expected: "2025-03-15" },
+  ],
+  french: [
+    { input: "15 mars 2025", locales: ["fr"], expected: "2025-03-15" },
+    { input: "15 janvier 2025", locales: ["fr"], expected: "2025-01-15" },
+    { input: "15 mars 2025 14:30", locales: ["fr"], expected: "2025-03-15T14:30" },
+    { input: "samedi 15 mars 2025", locales: ["fr"], expected: "2025-03-15" },
+  ],
+  spanish: [
+    { input: "15 marzo 2025", locales: ["es"], expected: "2025-03-15" },
+    { input: "15 enero 2025", locales: ["es"], expected: "2025-01-15" },
+  ],
+  italian: [
+    { input: "15 marzo 2025", locales: ["it"], expected: "2025-03-15" },
+  ],
+  dutch: [
+    { input: "15 maart 2025", locales: ["nl"], expected: "2025-03-15" },
+    { input: "15 maart 2025 09:30 uur", locales: ["nl"], expected: "2025-03-15T09:30" },
+  ],
+};
+
+describe("coerceDate — locale × format discovery matrix", () => {
+  for (const [locale, cases] of Object.entries(MATRIX)) {
+    describe(locale, () => {
+      for (const { input, locales, expected } of cases) {
+        it(`${input} → ${expected}`, () => {
+          expect(coerceDate(input, RECEIVED_AT, locales)).toBe(expected);
+        });
+      }
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Time-first ordering ("TIME <connector> DATE")
+// The classifier extracts dates verbatim from email text (see prompt-builder),
+// so time-first phrasings reach coerceDate. These assert DESIRED behavior and
+// fail until a locale-driven reorder step lands. Connector is locale-specific:
+//   en: on   de: am/um   fr: le/à   es: el/a las   it: il/alle   nl: op/om
+// ---------------------------------------------------------------------------
+
+describe("coerceDate — time-first ordering", () => {
+  describe("english (on)", () => {
+    it("dotted meridiem, 'on', full month — the motivating shape", () => {
+      expect(coerceDate("9:30 a.m. on February 1, 2027", RECEIVED_AT)).toBe("2027-02-01T09:30");
+    });
+
+    it("undotted PM, 'on', full month", () => {
+      expect(coerceDate("5:00 PM on August 26, 2026", RECEIVED_AT)).toBe("2026-08-26T17:00");
+    });
+
+    it("24h time, 'on', d MMMM yyyy", () => {
+      expect(coerceDate("14:30 on 15 March 2025", RECEIVED_AT)).toBe("2025-03-15T14:30");
+    });
+
+    it("time-first, 'on', year-free resolves to next occurrence", () => {
+      expect(coerceDate("2:30 p.m. on August 15", RECEIVED_AT)).toBe("2024-08-15T14:30");
+    });
+
+    it("abbreviated month with period, 'on'", () => {
+      expect(coerceDate("07:30 on Nov. 20, 2026", RECEIVED_AT)).toBe("2026-11-20T07:30");
+    });
+  });
+
+  describe("german (am/um)", () => {
+    it("time 'um' ... date 'am' — full connector phrase", () => {
+      expect(coerceDate("um 17:00 am 15 März 2025", RECEIVED_AT, ["de"])).toBe("2025-03-15T17:00");
+    });
+
+    it("time-first with 'am' connector before date", () => {
+      expect(coerceDate("17:00 am 15 März 2025", RECEIVED_AT, ["de"])).toBe("2025-03-15T17:00");
+    });
+  });
+
+  describe("french (le/à)", () => {
+    it("time 'à' ... date 'le'", () => {
+      expect(coerceDate("à 14:30 le 15 mars 2025", RECEIVED_AT, ["fr"])).toBe("2025-03-15T14:30");
+    });
+
+    it("time-first with 'le' connector", () => {
+      expect(coerceDate("14:30 le 15 mars 2025", RECEIVED_AT, ["fr"])).toBe("2025-03-15T14:30");
+    });
+  });
+
+  describe("spanish (el/a las)", () => {
+    it("time-first with 'el' connector", () => {
+      expect(coerceDate("14:30 el 15 marzo 2025", RECEIVED_AT, ["es"])).toBe("2025-03-15T14:30");
+    });
+  });
+
+  describe("italian (il/alle)", () => {
+    it("time-first with 'il' connector", () => {
+      expect(coerceDate("14:30 il 15 marzo 2025", RECEIVED_AT, ["it"])).toBe("2025-03-15T14:30");
+    });
+  });
+
+  describe("dutch (op/om)", () => {
+    it("time-first with 'op' connector", () => {
+      expect(coerceDate("09:30 op 15 maart 2025", RECEIVED_AT, ["nl"])).toBe("2025-03-15T09:30");
+    });
+  });
+
+  describe("does not misfire on date-first with an 'at'/'on' word", () => {
+    it("date-first 'at' time is unchanged (regression guard)", () => {
+      expect(coerceDate("March 15, 2025 at 2:30 PM", RECEIVED_AT)).toBe("2025-03-15T14:30");
+    });
+
+    it("plain date-first is unchanged", () => {
+      expect(coerceDate("February 01, 2027 at 9:30 a.m.", RECEIVED_AT)).toBe("2027-02-01T09:30");
+    });
+  });
+});
