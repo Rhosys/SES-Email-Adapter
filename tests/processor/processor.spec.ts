@@ -1353,23 +1353,15 @@ describe("SignalProcessor", () => {
   // Test email detection
   // -------------------------------------------------------------------------
 
-  describe("test email detection", () => {
-    it("overrides workflow to 'test' when the from-domain is one the account owns", async () => {
-      // Default mime parser mock returns from: { address: "sender@example.com" }
-      // getETLD1("sender@example.com") = "example.com" — a domain owned by the account.
+  describe("workflow assignment", () => {
+    it("keeps the classifier's workflow even when the from-domain is one the account owns (no test override)", async () => {
+      // Default mime parser mock returns from: { address: "sender@example.com" }, whose eTLD+1
+      // matches an account-owned domain. The processor no longer overrides workflow to "test" —
+      // the classifier owns the workflow; test-email handling is a side-effect (pong) concern.
       vi.mocked(accountDb.listDomains).mockReturnValueOnce(Promise.resolve(ok([{
         accountId: TEST_ACCOUNT_ID, domain: "example.com", status: "active", receivingSetupComplete: true, senderSetupComplete: true, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z",
       } as never])));
 
-      await processor.processInbound(makeMessage(), 1);
-
-      const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(signal.data.workflow).toBe("test");
-      expect(signal.data.workflowData).toMatchObject({ workflow: "test" });
-    });
-
-    it("does not override workflow when the from-domain is not owned by the account", async () => {
-      // Default listDomains mock returns [] → sender domain is not the account's own.
       await processor.processInbound(makeMessage(), 1);
 
       const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
@@ -1600,15 +1592,14 @@ describe("SignalProcessor", () => {
       processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...SHARED_NEW_DEPS, threadDb, accountDb, processingDb, contentSanitizer, emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, classifier, embeddingGenerator, auroraWriter, threadMatcher, ruleEvaluator, sqsDispatcher, logger: mockLogger, notifier: makeNotifier(), forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: makeReplySender(), draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() } });
     });
 
-    it("dispatches side-effect with pong action when workflow is 'test'", async () => {
+    it("dispatches a side-effect for a test-workflow signal (pong decided in the side-effect pass)", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(testClassification));
 
       await processor.processInbound(makeMessage(), 1);
 
       expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
-      const pongActions = payload.signal.data.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "pong")) ?? [];
-      expect(pongActions.length).toBeGreaterThan(0);
+      expect(payload.signal.data.workflow).toBe("test");
     });
 
     it("dispatches side-effect payload with signal containing from address and subject for pong", async () => {
@@ -1640,14 +1631,14 @@ describe("SignalProcessor", () => {
       expect(payload.signal.id).toMatch(/^sgn-/);
     });
 
-    it("does not include pong action for non-test workflows", async () => {
+    it("does not carry a pong action on non-test workflows (pong is no longer a rule action)", async () => {
       // classifier returns conversation by default (no mockResolvedValueOnce override)
       await processor.processInbound(makeMessage(), 1);
 
       expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
-      const pongActions = payload.signal.data.matchedRules?.flatMap((r) => r.actions.filter((a) => a.type === "pong")) ?? [];
-      expect(pongActions).toHaveLength(0);
+      const actionTypes = payload.signal.data.matchedRules?.flatMap((r) => r.actions.map((a) => a.type)) ?? [];
+      expect(actionTypes).not.toContain("pong");
     });
 
     it("still dispatches side-effect when replySender is configured", async () => {

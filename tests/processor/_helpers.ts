@@ -26,6 +26,7 @@ export function makeThreadDbMock(): ThreadDatabase {
     saveThread: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     updateThread: vi.fn().mockReturnValue(Promise.resolve(ok({ id: "arc-mock" }))),
     setThreadTtl: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    listActiveThreads: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
   } as unknown as ThreadDatabase;
 }
 
@@ -59,6 +60,7 @@ export function makeAccountDbMock(accountId = "acct-default", recipientAddress =
       filtering: null,
       billingPlan: "Paid" as const,
       onboarding: { completed: true },
+      createdAt: "2024-01-01T00:00:00Z",
     }))),
     // Recipient resolution. Default: no alias row, but the recipient's domain is owned by
     // the test account — mirrors the old default processor context where aliasConfig was
@@ -81,6 +83,7 @@ export function makeAccountDbMock(accountId = "acct-default", recipientAddress =
     getTemplate: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     getDomainByName: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     listDomains: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
+    updateAccount: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     incrementStatMetric: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     annotateTemplateError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
@@ -126,6 +129,10 @@ export interface CtxLike {
   aliasConfig?: Alias | null;
   billingPlan?: string;
   onboardingCompleted?: boolean;
+  /** Onboarding: whether the account has already recorded a test email. Gates pong eligibility. */
+  testEmailReceived?: boolean;
+  /** Account creation timestamp (ISO). Gates the "recently created" pong branch. */
+  createdAt?: string;
   /** Accepted but ignored — test-email detection now uses a getDomainByName point-read. */
   registeredDomains?: string[];
   /** Accepted but ignored — the userEmails test-detection clause was removed. */
@@ -137,7 +144,8 @@ export function applyCtx(accountDb: AccountDatabase, ctx: CtxLike, opts?: { once
     retentionDuration: ctx.retentionDuration ?? "P3M",
     filtering: ctx.filtering ?? null,
     billingPlan: ctx.billingPlan ?? "Paid",
-    onboarding: { completed: ctx.onboardingCompleted ?? true },
+    onboarding: { completed: ctx.onboardingCompleted ?? true, ...(ctx.testEmailReceived !== undefined ? { testEmailReceived: ctx.testEmailReceived } : {}) },
+    createdAt: ctx.createdAt ?? "2024-01-01T00:00:00Z",
   } as unknown as Account);
   const aliasRes = ok(ctx.aliasConfig ?? null);
   if (opts?.once) {

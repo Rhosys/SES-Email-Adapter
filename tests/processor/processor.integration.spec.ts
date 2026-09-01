@@ -492,19 +492,14 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(notifier.notify).toHaveBeenCalledWith(TEST_ACCOUNT_ID, arc, signal, "normal");
     });
 
-    it("executes pong when doPong action is present", async () => {
+    it("executes pong for a test-workflow signal from an account-owned sender", async () => {
+      // Sender belongs to the account (registered domain). getDomainByName default (null) →
+      // sender setup incomplete → pong sends from the platform noreply address.
+      vi.mocked(accountDb.listDomains).mockReturnValue(Promise.resolve(ok([{ domain: "example.com", senderSetupComplete: false } as never])));
       const signal = makeExistingSignal({
-        data: {
-          matchedRules: [
-            {
-              ruleId: "rule-pong",
-              actions: [{ type: "pong" }],
-              labelsAdded: [],
-            },
-          ],
-        },
+        data: { workflow: "test", workflowData: { workflow: "test" } },
       });
-      const arc = makeExistingArc();
+      const arc = makeExistingArc({ workflow: "test" });
 
       const payload = makeSideEffectPayload({ signal, arc });
 

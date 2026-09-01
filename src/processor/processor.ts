@@ -150,7 +150,6 @@ interface ProcessingOutcome {
   suppressNotification: boolean;
   forwardAddresses: string[];
   additionalLabels: string[];
-  doPong: boolean;
 }
 
 /**
@@ -184,7 +183,6 @@ function emptyOutcome(): ProcessingOutcome {
     suppressNotification: false,
     forwardAddresses: [],
     additionalLabels: [],
-    doPong: false,
   };
 }
 
@@ -283,7 +281,6 @@ function deriveOutcome(matchedRules: MatchedRuleResult[]): ProcessingOutcome {
         case "set_urgency":           if (!urgencySet && action.value) { outcome.urgency = action.value as ThreadUrgency; urgencySet = true; } break;
         case "assign_label":          if (action.value) outcome.additionalLabels.push(action.value); break;
         case "forward":               if (action.value) outcome.forwardAddresses.push(action.value); break;
-        case "pong":                  outcome.doPong = true; break;
       }
     }
   }
@@ -403,6 +400,56 @@ export class SignalProcessor {
     return ok({ accountId: owner.accountId, aliasConfig: null });
   }
 
+  /**
+   * A pong (test auto-reply) is sent only when the sender belongs to the account AND the moment
+   * is a "test" moment. Sender ownership: the from-address eTLD+1 matches one of the account's
+   * registered domains. Test moment: the classifier tagged it "test", OR the account is fresh
+   * (created within 4 weeks) and has no threads yet, OR onboarding has not yet recorded a test
+   * email. The thread lookup is gated behind the cheap createdAt check so mature accounts skip it.
+   */
+  private async shouldPong(accountId: string, signal: Signal): Promise<Result<boolean, DbError>> {
+    const domainsResult = await this.accountDb.listDomains(accountId);
+    if (domainsResult.isErr()) return err(domainsResult.error);
+
+    const fromETLD1 = getETLD1(signal.data.from.address);
+    const senderBelongsToAccount = domainsResult.value.some(d => getETLD1(d.domain) === fromETLD1);
+    if (!senderBelongsToAccount) return ok(false);
+
+    if (signal.data.workflow === "test") return ok(true);
+
+    const accountResult = await this.accountDb.getAccount(accountId);
+    if (accountResult.isErr()) return err(accountResult.error);
+    const account = accountResult.value;
+
+    if (account?.onboarding?.testEmailReceived !== true) return ok(true);
+
+    const recentlyCreated = !!account?.createdAt &&
+      DateTime.fromISO(account.createdAt) > DateTime.utc().minus({ weeks: 4 });
+    if (!recentlyCreated) return ok(false);
+
+    const threadsResult = await this.threadDb.listActiveThreads(accountId, 1);
+    if (threadsResult.isErr()) return err(threadsResult.error);
+    return ok(threadsResult.value.length === 0);
+  }
+
+  /** Record that the account has received its first test email (onboarding milestone). No-op if already completed. */
+  private async markTestEmailReceived(accountId: string): Promise<void> {
+    const accountResult = await this.accountDb.getAccount(accountId);
+    if (accountResult.isErr()) {
+      this.logger.warn("Failed to load account for onboarding testEmailReceived mark.", { code: "processor.onboarding_mark_load_failed", accountId, error: accountResult.error });
+      return;
+    }
+    if (accountResult.value?.onboarding?.completed) return;
+    if (accountResult.value?.onboarding?.testEmailReceived === true) return;
+
+    const updateResult = await this.accountDb.updateAccount(accountId, {
+      onboarding: { completed: false, testEmailReceived: true, testEmailReceivedAt: DateTime.utc().toISO()! },
+    });
+    if (updateResult.isErr()) {
+      this.logger.warn("Failed to mark onboarding testEmailReceived.", { code: "processor.onboarding_mark_failed", accountId, error: updateResult.error });
+    }
+  }
+
   async processSideEffect(payload: SideEffectPayload, receiveCount = 1): Promise<Result<void, ProcessorError>> {
     const { signal, thread: payloadThread } = payload;
     const accountId = signal.accountId;
@@ -427,7 +474,6 @@ export class SignalProcessor {
     const effectTypes: string[] = [];
     if (outcome.forwardAddresses.length > 0) effectTypes.push("forward");
     if (!outcome.suppressNotification) effectTypes.push("notify");
-    if (outcome.doPong) effectTypes.push("pong");
     if (autoDraftActions.length > 0) effectTypes.push("auto_draft");
     this.logger.info("Outcome derived from matchedRules — executing side-effects.", { code: "processor.side_effect.outcome_derived", accountId, signalId: signal.id, threadId: thread.id, effectTypes });
 
@@ -477,8 +523,15 @@ export class SignalProcessor {
       criticalFailures.push(dispatchResult.error);
     }
 
-    // Pong (critical — the test confirmation is the product's first impression)
-    if (outcome.doPong) {
+    // Pong (critical — the test confirmation is the product's first impression).
+    // Whether to pong is computed here from account state, not carried as a rule action:
+    // the sender must belong to the account AND this must be a test moment (classifier said
+    // "test", or the account is new with no threads yet, or onboarding hasn't seen a test).
+    const pongResult = await this.shouldPong(accountId, signal);
+    if (pongResult.isErr()) {
+      this.logger.warn("Failed to evaluate pong eligibility — skipping pong.", { code: "processor.side_effect.pong_eligibility_failed", accountId, signalId: signal.id, error: pongResult.error });
+    }
+    if (pongResult.isOk() && pongResult.value) {
       try {
         this.logger.trackPoint("side_effect_pong_start");
         const recipientDomain = signal.data.recipientAddress.split("@")[1] ?? "";
@@ -488,7 +541,7 @@ export class SignalProcessor {
         const from = usePlatformDomain
           ? `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`
           : signal.data.recipientAddress;
-        const pongResult = await this.replySender.sendReply({
+        const sendResult = await this.replySender.sendReply({
           to: signal.data.from.address,
           from,
           subject: signal.data.subject ?? "",
@@ -498,11 +551,12 @@ export class SignalProcessor {
           signalId: signal.id,
           threadId: thread.id,
         });
-        if (pongResult.isErr()) {
-          this.logger.track(`Side-effect pong failed — will force retry: ${"message" in pongResult.error ? pongResult.error.message : pongResult.error.kind}`, { code: "processor.side_effect.pong_failed", signal, thread, payload, error: pongResult.error });
-          criticalFailures.push(pongResult.error);
+        if (sendResult.isErr()) {
+          this.logger.track(`Side-effect pong failed — will force retry: ${"message" in sendResult.error ? sendResult.error.message : sendResult.error.kind}`, { code: "processor.side_effect.pong_failed", signal, thread, payload, error: sendResult.error });
+          criticalFailures.push(sendResult.error);
         } else {
           this.logger.trackPoint("side_effect_pong_complete");
+          await this.markTestEmailReceived(accountId);
         }
       } catch (e) {
         this.logger.track(`Side-effect pong failed — will force retry: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.pong_failed", signal, thread, payload, error: e });
@@ -867,7 +921,6 @@ export class SignalProcessor {
     const configuredRetentionDuration = account?.retentionDuration ?? "P3M";
     const filtering = account?.filtering ?? null;
     const billingPlan: BillingPlan = account?.billingPlan ?? "Paid";
-    const onboardingCompleted = account?.onboarding?.completed ?? false;
 
     // Alias invariant: any accepted inbound email is addressed to a real address on a registered
     // domain, so its alias record must exist regardless of the disposition (active / quarantine /
@@ -1087,29 +1140,8 @@ export class SignalProcessor {
       ? Math.floor(Date.now() / 1000) + retentionSecsForTtl
       : undefined;
 
-    // 5. Test detection override — the account owner emailing one of their own registered
-    // domains. Compares eTLD+1 of sender against eTLD+1 of each registered domain.
-    const fromETLD1 = getETLD1(parsed.from.address);
-    const domainsResult = await this.accountDb.listDomains(accountId);
-    const isTestEmail = domainsResult.isOk() &&
-      domainsResult.value.some(d => getETLD1(d.domain) === fromETLD1);
-    if (isTestEmail) {
-      classificationOutput.workflow = "test";
-      classificationOutput.workflowData = { workflow: "test" };
-
-      // Auto-mark onboarding testEmailReceived if not yet completed
-      if (!onboardingCompleted) {
-        const onboardingResult = await this.accountDb.updateAccount(accountId, {
-          onboarding: { completed: false, testEmailReceived: true, testEmailReceivedAt: DateTime.utc().toISO()! },
-        });
-        if (onboardingResult.isErr()) {
-          this.logger.warn("Failed to mark onboarding testEmailReceived", { code: "processor.onboarding_mark_failed", accountId, error: onboardingResult.error });
-        }
-      }
-    }
-
-    // 5b. SYSTEM account override — healthcheck emails always get workflow "healthcheck"
-    // regardless of classifier output or test detection. Fires after isTestEmail so it takes precedence.
+    // 5. SYSTEM account override — healthcheck emails always get workflow "healthcheck"
+    // regardless of classifier output.
     if (isSystemAccount(accountId)) {
       classificationOutput.workflow = "healthcheck" as Workflow;
       classificationOutput.workflowData = { workflow: "healthcheck" } as unknown as WorkflowData;

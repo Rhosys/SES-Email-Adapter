@@ -706,7 +706,7 @@ export interface Label {
 export const RULE_ACTION_TYPES = [
   "assign_label", "assign_workflow", "archive", "forward",
   "block_hidden", "block_reject", "quarantine_visible", "quarantine_hidden",
-  "set_urgency", "suppress_notification", "pong", "approve_sender",
+  "set_urgency", "suppress_notification", "approve_sender",
   "auto_draft", "forwardCalendarInvite",
 ] as const;
 export type RuleActionType = (typeof RULE_ACTION_TYPES)[number];

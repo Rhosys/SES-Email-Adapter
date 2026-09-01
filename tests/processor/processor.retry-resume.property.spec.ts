@@ -1025,10 +1025,6 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       matchedRules: [{ ruleId: "rule-1", actions: [{ type: "forward", value: "fwd@example.com" }], labelsAdded: [], statusChange: undefined }],
     },
     {
-      label: "pong action (triggers test reply side-effect)",
-      matchedRules: [{ ruleId: "rule-pong", actions: [{ type: "pong" }], labelsAdded: [], statusChange: undefined }],
-    },
-    {
       label: "suppress_notification (suppresses notify side-effect)",
       matchedRules: [{ ruleId: "rule-suppress", actions: [{ type: "suppress_notification" }], labelsAdded: [], statusChange: undefined }],
     },

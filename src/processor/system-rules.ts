@@ -27,7 +27,6 @@ export const SYSTEM_RULES: Rule[] = [
   { id: "SR-13", accountId: "SYSTEM", name: "Support: low urgency for low-priority tickets", condition: JSON.stringify({ "and": [wf_("support"), { "==": [wfData_("priority"), "low"] }, { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 1300, createdAt: "", updatedAt: "" },
   // ticket_opened/resolved/closed are passive lifecycle events — low unless urgency field says otherwise (fired after priority rules so those win)
   { id: "SR-14", accountId: "SYSTEM", name: "Support: low urgency for passive lifecycle events", condition: JSON.stringify({ "and": [wf_("support"), { "in": [wfData_("eventType"), ["ticket_opened", "ticket_resolved", "ticket_closed"]] }, { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 1400, createdAt: "", updatedAt: "" },
-  { id: "SR-15", accountId: "SYSTEM", name: "Auto-reply to test emails (pong)", condition: JSON.stringify(wf_("test")), actions: [{ type: "pong" }], status: "enabled", priorityOrder: 1500, createdAt: "", updatedAt: "" },
   // --- Calendar forwarding ----------------------------------------
   { id: "SR-16", accountId: "SYSTEM", name: "Forward calendar invite to user's real calendar", condition: JSON.stringify(in_("system:calendar")), actions: [{ type: "forwardCalendarInvite" }], status: "enabled", priorityOrder: 1600, createdAt: "", updatedAt: "" },
 ];

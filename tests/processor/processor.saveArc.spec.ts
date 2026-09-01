@@ -58,15 +58,14 @@ describe("Single saveThread call with complete mutations", () => {
     workflow: "conversation" | "test";
     additionalLabels: string[];
     hasRetention: boolean;
-    doPong: boolean;
   }
 
   const cases: TestCase[] = [
-    { label: "conversation workflow, no extras", workflow: "conversation", additionalLabels: [], hasRetention: false, doPong: false },
-    { label: "conversation workflow with user labels", workflow: "conversation", additionalLabels: ["urgent", "finance"], hasRetention: false, doPong: false },
-    { label: "conversation workflow with retention", workflow: "conversation", additionalLabels: [], hasRetention: true, doPong: false },
-    { label: "test workflow triggers pong", workflow: "test", additionalLabels: [], hasRetention: false, doPong: true },
-    { label: "all features combined", workflow: "test", additionalLabels: ["important"], hasRetention: true, doPong: true },
+    { label: "conversation workflow, no extras", workflow: "conversation", additionalLabels: [], hasRetention: false },
+    { label: "conversation workflow with user labels", workflow: "conversation", additionalLabels: ["urgent", "finance"], hasRetention: false },
+    { label: "conversation workflow with retention", workflow: "conversation", additionalLabels: [], hasRetention: true },
+    { label: "test workflow", workflow: "test", additionalLabels: [], hasRetention: false },
+    { label: "all features combined", workflow: "test", additionalLabels: ["important"], hasRetention: true },
   ];
 
   it.each(cases)("$label — saveThread called exactly once with accumulated mutations", async (testCase) => {
@@ -171,12 +170,8 @@ describe("Single saveThread call with complete mutations", () => {
       deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)),
     };
 
-    let pongMessageId: string | null = null;
     const replySender: ReplySender = {
-      sendReply: vi.fn().mockImplementation(() => {
-        pongMessageId = "pong-msg-001";
-        return Promise.resolve(ok({ messageId: pongMessageId }));
-      }),
+      sendReply: vi.fn().mockResolvedValue(ok({ messageId: "pong-msg-001" })),
     };
 
     const retentionService: S3RetentionService | undefined = testCase.hasRetention
@@ -216,10 +211,6 @@ describe("Single saveThread call with complete mutations", () => {
 
     if (testCase.hasRetention) {
       expect(arc.ttl).toBeDefined();
-    }
-
-    if (testCase.doPong && pongMessageId) {
-      expect(arc.sentMessageIds).toContain(pongMessageId);
     }
   });
 });

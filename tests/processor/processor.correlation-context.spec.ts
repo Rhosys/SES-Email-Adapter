@@ -49,6 +49,8 @@ describe("processSideEffect — correlation context", () => {
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     const processingDb = makeProcessingDbMock();
     vi.mocked(accountDb.getDomainByName).mockReturnValue(Promise.resolve(ok({ domain: "example.com", senderSetupComplete: true } as never)));
+    // Pong eligibility: the sender (sender@example.com) belongs to the account via a registered domain.
+    vi.mocked(accountDb.listDomains).mockReturnValue(Promise.resolve(ok([{ domain: "example.com", senderSetupComplete: true } as never])));
     return { threadDb, accountDb, processingDb };
   }
 
@@ -102,10 +104,10 @@ describe("processSideEffect — correlation context", () => {
     };
   }
 
-  function makeProcessor(opts: { replySender: ReplySender; forwardingService: IForwardingService }) {
+  function makeProcessor(opts: { replySender: ReplySender; forwardingService: IForwardingService; store?: ReturnType<typeof makeStore> }) {
     mockLogger = createMockLogger();
     return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
-      ...makeStore(),
+      ...(opts.store ?? makeStore()),
       contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
       emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://signed-url"), getObject: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://signed-url") } as never,
       contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://signed-url"), getObject: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://signed-url") } as never,
@@ -135,10 +137,8 @@ describe("processSideEffect — correlation context", () => {
       const forwardingService: IForwardingService = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) };
       const processor = makeProcessor({ replySender, forwardingService });
 
-      const signal = makeSignal({
-        id: "sgn-pong-123",
-        data: { matchedRules: [{ ruleId: "SR-15", actions: [{ type: "pong" }], labelsAdded: [] }] },
-      });
+      // workflow "test" + sender belongs to the account (listDomains stub) satisfies pong eligibility.
+      const signal = makeSignal({ id: "sgn-pong-123" });
       const thread = makeThread({ id: "arc-pong-456" });
       const payload: SideEffectPayload = { signal, thread };
 
@@ -149,6 +149,33 @@ describe("processSideEffect — correlation context", () => {
       expect(opts.accountId).toBe(TEST_ACCOUNT_ID);
       expect(opts.signalId).toBe("sgn-pong-123");
       expect(opts.threadId).toBe("arc-pong-456");
+    });
+
+    it("does not pong when the sender does not belong to the account", async () => {
+      const replySender: ReplySender = { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "pong-msg-001" })) };
+      const forwardingService: IForwardingService = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) };
+      const processor = makeProcessor({ replySender, forwardingService });
+
+      const signal = makeSignal({ data: { from: { address: "stranger@outsider.com", name: "Stranger" } } });
+      const payload: SideEffectPayload = { signal, thread: makeThread() };
+
+      await processor.processSideEffect(payload);
+
+      expect(replySender.sendReply).not.toHaveBeenCalled();
+    });
+
+    it("ponging marks onboarding testEmailReceived when not yet completed", async () => {
+      const replySender: ReplySender = { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "pong-msg-001" })) };
+      const forwardingService: IForwardingService = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) };
+      const store = makeStore();
+      // Onboarding not yet complete and no test email recorded — the mark should be written.
+      vi.mocked(store.accountDb.getAccount).mockReturnValue(Promise.resolve(ok({ retentionDuration: "P3M", filtering: null, billingPlan: "Paid", onboarding: { completed: false }, createdAt: "2024-01-01T00:00:00Z" } as never)));
+      const processor = makeProcessor({ replySender, forwardingService, store });
+
+      await processor.processSideEffect({ signal: makeSignal(), thread: makeThread() });
+
+      expect(replySender.sendReply).toHaveBeenCalledOnce();
+      expect(store.accountDb.updateAccount).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.objectContaining({ onboarding: expect.objectContaining({ testEmailReceived: true }) }));
     });
   });
 
