@@ -22,6 +22,19 @@ vi.mock("imapflow", () => ({
 }));
 
 // ---------------------------------------------------------------------------
+// Mock nodemailer — must be before ImapAdapter import
+// ---------------------------------------------------------------------------
+
+const mockTransport = {
+  sendMail: vi.fn().mockResolvedValue({ messageId: "<abc@example.com>", response: "250 OK" }),
+  close: vi.fn(),
+};
+
+vi.mock("nodemailer", () => ({
+  createTransport: vi.fn().mockImplementation(() => mockTransport),
+}));
+
+// ---------------------------------------------------------------------------
 // Dependencies
 // ---------------------------------------------------------------------------
 
@@ -103,6 +116,8 @@ beforeEach(() => {
   mockClient.search.mockResolvedValue([]);
   mockClient.fetchOne.mockResolvedValue(null);
   (mockClient as { mailbox: typeof mockMailbox }).mailbox = mockMailbox;
+  mockTransport.sendMail.mockReset().mockResolvedValue({ messageId: "<abc@example.com>", response: "250 OK" });
+  mockTransport.close.mockReset();
 });
 
 describe("ImapAdapter.activate", () => {
@@ -249,6 +264,65 @@ describe("ImapAdapter.fetchMessage", () => {
     expect(result.isErr()).toBe(true);
     const error = result._unsafeUnwrapErr();
     expect(error.kind).toBe("provider_message_not_found");
+  });
+});
+
+describe("ImapAdapter.sendMessage", () => {
+  it("sends via SMTP submission on the same host/credentials, requiring TLS", async () => {
+    const adapter = createAdapter();
+    const emx = makeEmx();
+    const rawMime = new TextEncoder().encode("From: user@example.com\r\nSubject: Test\r\n\r\nBody");
+
+    const result = await adapter.sendMessage(rawMime, emx);
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().providerMessageId).toBe("<abc@example.com>");
+    expect(result._unsafeUnwrap().messageId).toBe("<abc@example.com>");
+
+    const { createTransport } = await import("nodemailer");
+    expect(createTransport).toHaveBeenCalledWith(expect.objectContaining({
+      host: "imap.example.com",
+      port: 587,
+      secure: false,
+      requireTLS: true,
+      auth: { user: "user@example.com", pass: "decrypted-password" },
+    }));
+    expect(mockTransport.sendMail).toHaveBeenCalledWith({ raw: Buffer.from(rawMime) });
+    expect(mockTransport.close).toHaveBeenCalled();
+  });
+
+  it("does not require TLS when the exchange's tlsConfig is DISABLED", async () => {
+    const adapter = createAdapter();
+    const emx = makeEmx({ imapConfig: { host: "imap.example.com", tlsConfig: "DISABLED", username: "user@example.com", encryptedPassword: "blob" } });
+
+    await adapter.sendMessage(new TextEncoder().encode("raw"), emx);
+
+    const { createTransport } = await import("nodemailer");
+    expect(createTransport).toHaveBeenCalledWith(expect.objectContaining({ requireTLS: false }));
+  });
+
+  it("returns provider_send_rejected on SMTP auth failure", async () => {
+    const adapter = createAdapter();
+    const emx = makeEmx();
+    const authError = Object.assign(new Error("Invalid login"), { code: "EAUTH" });
+    mockTransport.sendMail.mockRejectedValueOnce(authError);
+
+    const result = await adapter.sendMessage(new TextEncoder().encode("raw"), emx);
+
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("provider_send_rejected");
+    expect(mockTransport.close).toHaveBeenCalled();
+  });
+
+  it("returns provider_send_failed on transient SMTP errors", async () => {
+    const adapter = createAdapter();
+    const emx = makeEmx();
+    mockTransport.sendMail.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
+
+    const result = await adapter.sendMessage(new TextEncoder().encode("raw"), emx);
+
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("provider_send_failed");
   });
 });
 

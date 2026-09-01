@@ -1,4 +1,5 @@
 import { ImapFlow } from "imapflow";
+import { createTransport } from "nodemailer";
 import { DateTime } from "luxon";
 import { ok, err } from "../errors.js";
 import type { Result } from "../errors.js";
@@ -13,6 +14,8 @@ import {
   type ProviderRenewalError,
   type ProviderDeactivationError,
   type ProviderFetchError,
+  type ProviderSendError,
+  type SendResult,
 } from "./provider-adapter.js";
 import type { EncryptionManager } from "../secrets/encryption-manager.js";
 import type { ExchangesDatabase } from "../database/exchanges-database.js";
@@ -548,6 +551,63 @@ export class ImapAdapter implements ProviderAdapter {
       return err({ kind: "provider_message_not_found" });
     }
     return ok(message);
+  }
+
+  /**
+   * Sends via SMTP submission (port 587) on the same host and credentials already stored for
+   * IMAP — the two protocols are near-universally served off the same mailbox account, so no
+   * separate SMTP config is collected from the user. STARTTLS is required whenever the IMAP
+   * side is configured for TLS; a mailbox explicitly configured without TLS submits in the
+   * clear too, matching the trust level the user already accepted for IMAP.
+   *
+   * The server never discloses a copy in a "Sent" folder the way OAuth providers do — IMAP has
+   * no equivalent of Gmail/Graph's authenticated send API, only bare SMTP submission — so
+   * nothing here files a sent copy.
+   */
+  async sendMessage(rawMime: Uint8Array, emx: ExternalMailExchange): Promise<Result<SendResult, ProviderSendError>> {
+    const imapConfig = emx.imapConfig;
+    if (!imapConfig) {
+      return err({ kind: "provider_send_failed", cause: "Missing imapConfig" });
+    }
+
+    const decryptResult = await this.encryptionManager.decrypt(imapConfig.encryptedPassword);
+    if (decryptResult.isErr()) return err({ kind: "provider_send_failed", cause: "decryption failed" });
+    const password = decryptResult.value;
+
+    const transport = createTransport({
+      host: imapConfig.host,
+      port: 587,
+      secure: false,
+      requireTLS: imapConfig.tlsConfig === "TLS",
+      auth: { user: imapConfig.username, pass: password },
+      connectionTimeout: 30_000,
+      greetingTimeout: 30_000,
+      socketTimeout: 30_000,
+    });
+
+    try {
+      const info = await transport.sendMail({ raw: Buffer.from(rawMime) });
+      transport.close();
+      const providerMessageId = info.messageId || info.response || "sent";
+      this.logger.info("IMAP/SMTP send succeeded", { code: "emx.imap.send_success", emxId: emx.id, providerMessageId });
+      return ok({ providerMessageId, ...(info.messageId ? { messageId: info.messageId } : {}) });
+    } catch (e) {
+      transport.close();
+      const reason = e instanceof Error ? e.message : String(e);
+      const code = e instanceof Error ? (e as NodeJS.ErrnoException & { responseCode?: number }).code : undefined;
+      const responseCode = e instanceof Error ? (e as Error & { responseCode?: number }).responseCode : undefined;
+
+      if (code === "EAUTH" || responseCode === 535) {
+        this.logger.error("IMAP/SMTP send rejected — authentication failed", { code: "emx.imap.send_auth_failed", emxId: emx.id, reason });
+        return err({ kind: "provider_send_rejected", cause: reason });
+      }
+      if (responseCode !== undefined && responseCode >= 500 && responseCode < 600) {
+        this.logger.warn("IMAP/SMTP send rejected", { code: "emx.imap.send_rejected", emxId: emx.id, responseCode, reason });
+        return err({ kind: "provider_send_rejected", cause: reason });
+      }
+      this.logger.warn("IMAP/SMTP send failed", { code: "emx.imap.send_failed", emxId: emx.id, reason });
+      return err({ kind: "provider_send_failed", cause: reason });
+    }
   }
 
   // ---------------------------------------------------------------------------
