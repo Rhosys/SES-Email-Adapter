@@ -460,6 +460,132 @@ describe("JmapAdapter.fetchMessage", () => {
   });
 });
 
+describe("JmapAdapter.sendMessage", () => {
+  let originalFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  const SESSION_WITH_SUBMISSION = {
+    apiUrl: "https://jmap.example.com/api",
+    downloadUrl: "https://jmap.example.com/download/{accountId}/{blobId}/{name}",
+    uploadUrl: "https://jmap.example.com/upload/{accountId}",
+    primaryAccounts: {
+      "urn:ietf:params:jmap:mail": "acct-jmap-001",
+      "urn:ietf:params:jmap:submission": "acct-jmap-001",
+    },
+    capabilities: {},
+  };
+
+  it("uploads the blob, imports it as an Email, and submits it — moving it into Sent", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+
+    // 1. session
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(SESSION_WITH_SUBMISSION), { status: 200 }));
+    // 2. blob upload
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ blobId: "blob-new-1" }), { status: 200 }));
+    // 3. Identity/get + Mailbox/query(drafts) + Mailbox/query(sent)
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      methodResponses: [
+        ["Identity/get", { list: [{ id: "identity-1", email: "user@example.com" }] }, "id0"],
+        ["Mailbox/query", { ids: ["drafts-001"] }, "mq0"],
+        ["Mailbox/query", { ids: ["sent-001"] }, "mq1"],
+      ],
+    }), { status: 200 }));
+    // 4. Email/import + EmailSubmission/set
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      methodResponses: [
+        ["Email/import", { created: { E0: { id: "email-001" } } }, "ei0"],
+        ["EmailSubmission/set", { created: { S0: { id: "sub-001" } } }, "es0"],
+      ],
+    }), { status: 200 }));
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new JmapAdapter({
+      encryptionManager: mockEncryptionManager(),
+      db: mockDb(),
+      signalQueue: mockSignalQueue(),
+      logger: mockLogger(),
+    });
+
+    const emx = makeEmx();
+    const rawMime = new TextEncoder().encode("From: user@example.com\r\nSubject: Test\r\n\r\nBody");
+    const result = await adapter.sendMessage(rawMime, emx);
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().providerMessageId).toBe("sub-001");
+
+    // Blob upload posts the raw MIME to the account-scoped upload URL
+    const uploadCall = fetchMock.mock.calls[1]!;
+    expect(uploadCall[0]).toBe("https://jmap.example.com/upload/acct-jmap-001");
+
+    // Submit request moves the email out of Drafts into Sent, clearing the draft flag
+    const submitBody = JSON.parse((fetchMock.mock.calls[3]![1] as RequestInit).body as string) as { methodCalls: unknown[][] };
+    const submissionCall = submitBody.methodCalls[1] as [string, Record<string, unknown>, string];
+    expect(submissionCall[1]["onSuccessUpdateEmail"]).toEqual({
+      "#S0": { "mailboxIds/drafts-001": null, "mailboxIds/sent-001": true, "keywords/$draft": null },
+    });
+  });
+
+  it("returns provider_send_scope_missing when the server does not advertise EmailSubmission", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(VALID_SESSION), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new JmapAdapter({
+      encryptionManager: mockEncryptionManager(),
+      db: mockDb(),
+      signalQueue: mockSignalQueue(),
+      logger: mockLogger(),
+    });
+
+    const emx = makeEmx();
+    const result = await adapter.sendMessage(new TextEncoder().encode("raw"), emx);
+
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("provider_send_scope_missing");
+  });
+
+  it("returns provider_send_rejected when EmailSubmission/set reports notCreated", async () => {
+    const fetchMock = vi.fn<typeof fetch>();
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify(SESSION_WITH_SUBMISSION), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ blobId: "blob-new-1" }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      methodResponses: [
+        ["Identity/get", { list: [{ id: "identity-1", email: "user@example.com" }] }, "id0"],
+        ["Mailbox/query", { ids: [] }, "mq0"],
+        ["Mailbox/query", { ids: [] }, "mq1"],
+      ],
+    }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+      methodResponses: [
+        ["Email/import", { created: { E0: { id: "email-001" } } }, "ei0"],
+        ["EmailSubmission/set", { notCreated: { S0: { type: "invalidRecipients", description: "bad address" } } }, "es0"],
+      ],
+    }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const adapter = new JmapAdapter({
+      encryptionManager: mockEncryptionManager(),
+      db: mockDb(),
+      signalQueue: mockSignalQueue(),
+      logger: mockLogger(),
+    });
+
+    const emx = makeEmx();
+    const result = await adapter.sendMessage(new TextEncoder().encode("raw"), emx);
+
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr().kind).toBe("provider_send_rejected");
+  });
+});
+
 describe("JmapAdapter.deactivate", () => {
   it("returns ok without making any network calls", async () => {
     const fetchMock = vi.fn<typeof fetch>();
