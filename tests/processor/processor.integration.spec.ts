@@ -493,8 +493,9 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     });
 
     it("executes pong for a test-workflow signal from an account-owned sender", async () => {
-      // Sender belongs to the account (registered domain). getDomainByName default (null) →
-      // sender setup incomplete → pong sends from the platform noreply address.
+      // Sender belongs to the account (registered domain). The processor hands the reply sender
+      // the recipient alias as the from-address under the real account, with platform fallback
+      // permitted — the sender owns the routing (provider / aligned SES / platform degrade).
       vi.mocked(accountDb.listDomains).mockReturnValue(Promise.resolve(ok([{ domain: "example.com", senderSetupComplete: false } as never])));
       const signal = makeExistingSignal({
         data: { workflow: "test", workflowData: { workflow: "test" } },
@@ -509,7 +510,9 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(replySender.sendReply).toHaveBeenCalledOnce();
       expect(replySender.sendReply).toHaveBeenCalledWith(expect.objectContaining({
         to: signal.data.from.address,
-        from: `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`,
+        from: signal.data.recipientAddress,
+        accountId: TEST_ACCOUNT_ID,
+        allowFallbackToPlatformSending: true,
       }));
     });
 

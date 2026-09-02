@@ -102,6 +102,12 @@ export interface ReplySender {
     accountId?: string;
     signalId?: string;
     threadId?: string;
+    /**
+     * Whether this send may degrade to a platform-domain send when the from-address cannot send
+     * as itself (no capable exchange AND unverified domain). True for pongs, false for user draft
+     * sends. Provider send *failures* are always errors regardless of this flag.
+     */
+    allowFallbackToPlatformSending: boolean;
   }): Promise<Result<{
     messageId: string;
     /**
@@ -573,22 +579,21 @@ export class SignalProcessor {
     if (pongResult.isOk() && pongResult.value) {
       try {
         this.logger.trackPoint("side_effect_pong_start");
-        const recipientDomain = signal.data.recipientAddress.split("@")[1] ?? "";
-        const domainResult = await this.accountDb.getDomainByName(accountId, recipientDomain);
-        const domain = domainResult.isOk() ? domainResult.value : null;
-        const usePlatformDomain = !domain?.senderSetupComplete;
-        const from = usePlatformDomain
-          ? `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`
-          : signal.data.recipientAddress;
+        // Send as the alias the test landed on, under the real account. The reply sender owns
+        // routing: it sends through the alias's exchange (Gmail/Graph) or an aligned SES domain,
+        // and — because a pong is worth sending even off the platform domain — degrades to a
+        // platform-domain send when the alias can't send as itself (e.g. IMAP/JMAP, or a domain
+        // the account never verified). allowFallbackToPlatformSending makes that degrade explicit.
         const sendResult = await this.replySender.sendReply({
           to: signal.data.from.address,
-          from,
+          from: signal.data.recipientAddress,
           subject: signal.data.subject ?? "",
           body: "textBody" in signal.data ? (signal.data.textBody ?? "") : "",
           ...(signal.data.headers["message-id"] ? { inReplyTo: signal.data.headers["message-id"] } : {}),
-          accountId: usePlatformDomain ? this.platformTenantName : accountId,
+          accountId,
           signalId: signal.id,
           threadId: thread.id,
+          allowFallbackToPlatformSending: true,
         });
         if (sendResult.isErr()) {
           this.logger.track(`Side-effect pong failed — will force retry: ${"message" in sendResult.error ? sendResult.error.message : sendResult.error.kind}`, { code: "processor.side_effect.pong_failed", signal, thread, payload, error: sendResult.error });

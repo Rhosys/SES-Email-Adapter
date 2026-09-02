@@ -24,14 +24,20 @@ function makeLogger(): Logger {
   return { track: vi.fn(), error: vi.fn(), info: vi.fn(), warn: vi.fn() } as unknown as Logger;
 }
 
-/** Account DB stub. Default: the from-address is a plain alias with no exchange behind it. */
+/**
+ * Account DB stub. Default: the from-address is a plain address with no exchange, on a domain the
+ * account has verified for sending — so it sends as itself over SES (the common aligned case).
+ * Pass senderSetupComplete: false to model an unverified domain (drives the platform-fallback
+ * decision).
+ */
 function makeAccountDb(overrides: {
   alias?: Alias | null;
   senderSetupComplete?: boolean;
 } = {}): AccountDatabase {
+  const verified = overrides.senderSetupComplete ?? true;
   return {
     getAlias: vi.fn().mockResolvedValue(ok(overrides.alias ?? null)),
-    getDomainByName: vi.fn().mockResolvedValue(ok(overrides.senderSetupComplete ? { senderSetupComplete: true } : null)),
+    getDomainByName: vi.fn().mockResolvedValue(ok(verified ? { senderSetupComplete: true } : null)),
   } as unknown as AccountDatabase;
 }
 
@@ -111,6 +117,7 @@ describe("ReplySenderService.sendReply()", () => {
       body: "Reply body text",
       inReplyTo: "<original-id@mail.example.com>",
       accountId: "acct-test",
+      allowFallbackToPlatformSending: false,
     });
 
     expect(emailService.send).toHaveBeenCalledWith({
@@ -140,6 +147,7 @@ describe("ReplySenderService.sendReply()", () => {
       body: "Content",
       inReplyTo: "<abc@test.com>",
       accountId: "acct-test",
+      allowFallbackToPlatformSending: false,
     });
 
     expect(result.isOk()).toBe(true);
@@ -156,6 +164,7 @@ describe("ReplySenderService.sendReply()", () => {
       body: "Content",
       inReplyTo: "<abc@test.com>",
       accountId: "acct-test",
+      allowFallbackToPlatformSending: false,
     });
 
     expect(result._unsafeUnwrap().outboundMsgId).toMatch(/^ses-reply-456@.*amazonses\.com$/);
@@ -186,6 +195,7 @@ describe("ReplySenderService tag integration", () => {
         body: "Hello",
         inReplyTo: "<ref@x.com>",
         accountId: "acct-test",
+        allowFallbackToPlatformSending: false,
       });
 
       const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
@@ -207,6 +217,7 @@ describe("ReplySenderService tag integration", () => {
         accountId: "acct-1",
         signalId: "sig-2",
         threadId: "arc-3",
+        allowFallbackToPlatformSending: false,
       });
 
       const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
@@ -238,6 +249,7 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     body: "Reply body",
     inReplyTo: "<original@mail.example.com>",
     accountId: "acct-test",
+    allowFallbackToPlatformSending: false,
   };
 
   it("sends through the provider when the from-alias is exchange-backed, not through SES", async () => {
@@ -282,7 +294,8 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     delete legacy.connectionId;
     const handler = makeSender({
       emailService,
-      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE }), exchangesDb: makeExchangesDb({ exchange: legacy }),
+      // Unverified domain + REPLY forbids platform fallback → the unusable exchange refuses.
+      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, senderSetupComplete: false }), exchangesDb: makeExchangesDb({ exchange: legacy }),
       adapters: { gmail: makeGmailAdapter(ok({ providerMessageId: "unused" })) },
     });
 
@@ -346,8 +359,9 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     const handler = makeSender({
       emailService,
       logger,
-      // Alias still points at emx-1, but the exchange has been deleted.
-      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE }), exchangesDb: makeExchangesDb({ exchange: null }),
+      // Alias still points at emx-1, but the exchange has been deleted. Domain unverified, and
+      // REPLY does not permit platform fallback — so the send is refused.
+      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, senderSetupComplete: false }), exchangesDb: makeExchangesDb({ exchange: null }),
       adapters: {},
     });
 
@@ -395,6 +409,7 @@ describe("ReplySenderService — routing to an external mailbox", () => {
       subject: "Original",
       body: "Reply body",
       inReplyTo: "<original@mail.example.com>",
+      allowFallbackToPlatformSending: true,
     });
 
     expect(result.isOk()).toBe(true);
@@ -425,6 +440,107 @@ describe("ReplySenderService — routing to an external mailbox", () => {
   });
 });
 
+// ─── Platform-fallback flag ──────────────────────────────────────────────────
+//
+// The from-address is on a domain the account never verified for sending, and there is no
+// exchange that can send as it. Whether that degrades to a platform-domain send or hard-fails
+// is decided solely by the caller via allowFallbackToPlatformSending: a pong may degrade, a
+// user's draft send must not (it errors so the draft can be parked with a reason).
+
+describe("ReplySenderService — allowFallbackToPlatformSending", () => {
+  const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud";
+
+  const REPLY_UNVERIFIED = {
+    to: "recipient@example.com",
+    from: "me@unverified.com",
+    subject: "Original",
+    body: "Reply body",
+    inReplyTo: "<original@mail.example.com>",
+    accountId: "acct-test",
+  };
+
+  function makeImapAdapter(): ProviderAdapter {
+    // No sendMessage — an IMAP-style adapter that cannot send.
+    return { activate: vi.fn(), renew: vi.fn(), deactivate: vi.fn(), fetchMessage: vi.fn() } as unknown as ProviderAdapter;
+  }
+
+  it("rewrites to the platform sender + tenant when fallback is allowed and the address cannot send as itself", async () => {
+    const emailService = makeEmailService();
+    (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "ses-1" }));
+    (emailService as unknown as { platformTenant: string }).platformTenant = "platform-tenant";
+    // No alias, unverified domain → cannot send as itself.
+    const handler = makeSender({ emailService, accountDb: makeAccountDb({ alias: null, senderSetupComplete: false }) });
+
+    const result = await handler.sendReply({ ...REPLY_UNVERIFIED, allowFallbackToPlatformSending: true });
+
+    expect(result.isOk()).toBe(true);
+    const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(call.fromOverride).toBe(`noreply@${MAIL_DOMAIN}`);
+    expect(call.accountId).toBe("platform-tenant");
+  });
+
+  it("errors instead of degrading when fallback is NOT allowed and the address cannot send as itself", async () => {
+    const emailService = makeEmailService();
+    const handler = makeSender({ emailService, accountDb: makeAccountDb({ alias: null, senderSetupComplete: false }) });
+
+    const result = await handler.sendReply({ ...REPLY_UNVERIFIED, allowFallbackToPlatformSending: false });
+
+    expect(result.isErr()).toBe(true);
+    expect(emailService.send).not.toHaveBeenCalled();
+  });
+
+  it("does not rewrite when the address can send as itself via a verified SES domain, even with fallback allowed", async () => {
+    const emailService = makeEmailService();
+    (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "ses-1" }));
+    // No exchange, but the domain is verified — a legitimate aligned SES send.
+    const handler = makeSender({ emailService, accountDb: makeAccountDb({ alias: aliasWithoutExchange(), senderSetupComplete: true }) });
+
+    const result = await handler.sendReply({ ...REPLY_UNVERIFIED, from: "user@gmail.com", allowFallbackToPlatformSending: true });
+
+    expect(result.isOk()).toBe(true);
+    const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(call.fromOverride).toBe("user@gmail.com");
+    expect(call.accountId).toBe("acct-test");
+  });
+
+  it("errors (never degrades) when an exchange-backed alias cannot send, regardless of the flag", async () => {
+    const emailService = makeEmailService();
+    // Exchange-backed alias on an unverified domain, exchange is IMAP (cannot send). Even with
+    // fallback allowed, the provider-capability failure is an error — but only because the
+    // domain is unverified; the flag then decides platform rewrite vs error.
+    const handler = makeSender({
+      emailService,
+      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, senderSetupComplete: false }),
+      exchangesDb: makeExchangesDb({ exchange: { ...ACTIVE_GMAIL_EXCHANGE, platform: "imap" } }),
+      adapters: { imap: makeImapAdapter() },
+    });
+
+    const result = await handler.sendReply({ ...REPLY_UNVERIFIED, from: "user@gmail.com", allowFallbackToPlatformSending: false });
+
+    expect(result.isErr()).toBe(true);
+    expect(emailService.send).not.toHaveBeenCalled();
+  });
+
+  it("degrades an exchange-backed alias that cannot send to platform when fallback is allowed", async () => {
+    const emailService = makeEmailService();
+    (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "ses-1" }));
+    (emailService as unknown as { platformTenant: string }).platformTenant = "platform-tenant";
+    const handler = makeSender({
+      emailService,
+      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, senderSetupComplete: false }),
+      exchangesDb: makeExchangesDb({ exchange: { ...ACTIVE_GMAIL_EXCHANGE, platform: "imap" } }),
+      adapters: { imap: makeImapAdapter() },
+    });
+
+    const result = await handler.sendReply({ ...REPLY_UNVERIFIED, from: "user@gmail.com", allowFallbackToPlatformSending: true });
+
+    expect(result.isOk()).toBe(true);
+    const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(call.fromOverride).toBe(`noreply@${MAIL_DOMAIN}`);
+    expect(call.accountId).toBe("platform-tenant");
+  });
+});
+
 // ─── Permanent SES error handling ────────────────────────────────────────────
 
 describe("ReplySenderService — permanent SES error", () => {
@@ -441,6 +557,7 @@ describe("ReplySenderService — permanent SES error", () => {
       body: "Content",
       inReplyTo: "<ref@test.com>",
       accountId: "acct-test",
+      allowFallbackToPlatformSending: false,
     });
 
     expect(result.isOk()).toBe(true);

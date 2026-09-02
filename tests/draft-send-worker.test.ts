@@ -112,6 +112,7 @@ describe("DraftSendWorker", () => {
       accountId: "acct-001",
       signalId: "USR#signal-001",
       threadId: "thr-001",
+      allowFallbackToPlatformSending: false,
     });
     expect(threadDb.updateSignalSendStatus).toHaveBeenCalledWith("acct-001", "USR#signal-001", {
       status: "sent",

@@ -97,6 +97,9 @@ export class DraftSendWorker {
       accountId,
       signalId: signal.id,
       threadId,
+      // A user's draft must go out aligned as the chosen from-address or fail — never silently
+      // degrade to the platform domain. On failure the draft is parked with a reason.
+      allowFallbackToPlatformSending: false,
     });
 
     if (sendResult.isErr()) {

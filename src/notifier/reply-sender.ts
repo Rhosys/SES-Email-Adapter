@@ -62,6 +62,16 @@ export class ReplySenderService implements ReplySender {
     accountId?: string;
     signalId?: string;
     threadId?: string;
+    /**
+     * Whether this send may degrade to a platform-domain send (`noreply@MAIL_DOMAIN` under the
+     * platform tenant) when the from-address cannot send as itself — i.e. it is not backed by an
+     * exchange that can send AND its domain is not verified for SES. A pong sets this true (the
+     * test confirmation is worth sending even off the platform domain); a user's draft send sets
+     * it false, so an unsendable from-address errors and the draft is parked rather than silently
+     * going out from an address the user didn't choose. Provider send *failures* are always errors
+     * regardless of this flag — degradation only covers "cannot send as itself in the first place".
+     */
+    allowFallbackToPlatformSending: boolean;
   }): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
     const subject = `Re: ${opts.subject}`;
     const headers = opts.inReplyTo
@@ -76,12 +86,16 @@ export class ReplySenderService implements ReplySender {
     // route resolution below is deliberately given the original, possibly-absent accountId.
     const resolvedAccountId = opts.accountId ?? this.emailService.platformTenant;
 
-    const routeResult = await this.resolveExchangeRoute(opts.accountId, opts.from);
+    const routeResult = await this.resolveRoute(opts.accountId, opts.from, opts.allowFallbackToPlatformSending);
     if (routeResult.isErr()) return err(routeResult.error);
-    const exchange = routeResult.value;
+    const route = routeResult.value;
 
-    if (exchange) {
-      return this.sendViaProvider(exchange, { ...opts, accountId: resolvedAccountId, subject, headers });
+    if (route.kind === "provider") {
+      return this.sendViaProvider(route.exchange, { ...opts, accountId: resolvedAccountId, subject, headers });
+    }
+    if (route.kind === "platform") {
+      // Degrade to the platform domain: rewrite the from and send under the platform tenant.
+      return this.sendViaSes({ ...opts, from: `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`, accountId: this.emailService.platformTenant, subject, headers });
     }
     return this.sendViaSes({ ...opts, accountId: resolvedAccountId, subject, headers });
   }
@@ -91,50 +105,72 @@ export class ReplySenderService implements ReplySender {
   // ---------------------------------------------------------------------------
 
   /**
-   * Decides whether this from-address must go out through an external mailbox.
-   *
-   * Returns the exchange to send through, or null to use SES. An alias linked to an exchange
-   * that cannot send (IMAP/JMAP, or one that has been deleted or deactivated) only falls back
-   * to SES when the account has actually verified that domain for sending — otherwise the
-   * send is refused, because emitting unaligned mail is worse than failing visibly.
+   * Decides how this from-address goes out:
+   *   • provider — the address is an alias backed by an exchange that can send. Mail goes through
+   *     the provider. A send *failure* here is always an error, never a degrade.
+   *   • ses      — the address can send as itself over SES (no exchange, but the domain is verified
+   *     for sending, or the send is platform-originated with no account).
+   *   • platform — the address cannot send as itself (no capable exchange AND unverified domain).
+   *     Only produced when the caller allows platform fallback; otherwise this is an error.
    */
-  private async resolveExchangeRoute(accountId: string | undefined, from: string): Promise<Result<ExternalMailExchange | null, ReplySendError>> {
-    if (!accountId) return ok(null);
+  private async resolveRoute(accountId: string | undefined, from: string, allowFallbackToPlatformSending: boolean): Promise<Result<{ kind: "provider"; exchange: ExternalMailExchange } | { kind: "ses" } | { kind: "platform" }, ReplySendError>> {
+    // Platform-originated mail (no account) has no alias to route on — send as-is under the
+    // platform tenant (the caller supplied the platform from-address and omitted the account).
+    if (!accountId) return ok({ kind: "ses" });
     // Pulls the bare addr-spec out of a From value that may be `"Name" <addr@host>`.
     const fromAddress = (/<([^>]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
 
     const aliasResult = await this.accountDb.getAlias(accountId, fromAddress);
     if (aliasResult.isErr()) return err(aliasResult.error);
     const alias = aliasResult.value;
-    if (!alias?.emxId) return ok(null);
+
+    // Not exchange-backed: the address sends as itself over SES if its domain is verified,
+    // otherwise it cannot send as itself and the platform-fallback decision applies.
+    if (!alias?.emxId) {
+      return this.sesOrFallback(accountId, fromAddress, allowFallbackToPlatformSending, "the from-address is not backed by an exchange and its domain is not verified for sending");
+    }
 
     const emxResult = await this.exchangesDb.getExternalExchange(accountId, alias.emxId);
     if (emxResult.isErr()) return err(emxResult.error);
     const emx = emxResult.value;
 
+    // Exchange-backed but cannot send (deleted/inactive, non-sending platform, or no recorded
+    // identity): the address cannot send as itself. Fall back to SES on a verified domain, or
+    // else apply the platform-fallback decision.
     if (!emx || emx.status !== "active") {
-      return this.fallbackOrRefuse(accountId, fromAddress, emx ? `exchange status is ${emx.status}` : "exchange no longer exists");
+      return this.sesOrFallback(accountId, fromAddress, allowFallbackToPlatformSending, emx ? `exchange status is ${emx.status}` : "exchange no longer exists");
     }
     if (!this.adapters[emx.platform]?.sendMessage) {
-      return this.fallbackOrRefuse(accountId, fromAddress, `${emx.platform} exchanges cannot send`);
+      return this.sesOrFallback(accountId, fromAddress, allowFallbackToPlatformSending, `${emx.platform} exchanges cannot send`);
     }
     if (!exchangeCredentials(emx)) {
-      return this.fallbackOrRefuse(accountId, fromAddress, "exchange has no linked identity recorded — it predates connection tracking and must be reconnected");
+      return this.sesOrFallback(accountId, fromAddress, allowFallbackToPlatformSending, "exchange has no linked identity recorded — it predates connection tracking and must be reconnected");
     }
-    return ok(emx);
+    return ok({ kind: "provider", exchange: emx });
   }
 
-  private async fallbackOrRefuse(accountId: string, fromAddress: string, reason: string): Promise<Result<ExternalMailExchange | null, ReplySendError>> {
+  /**
+   * The from-address cannot send through a provider. If the account has verified its domain for
+   * sending, SES is a DMARC-aligned sender — use it. Otherwise the address cannot send as itself:
+   * degrade to the platform domain if the caller allows it, else refuse (emitting unaligned mail
+   * from an unverified domain is worse than failing visibly).
+   */
+  private async sesOrFallback(accountId: string, fromAddress: string, allowFallbackToPlatformSending: boolean, reason: string): Promise<Result<{ kind: "ses" } | { kind: "platform" }, ReplySendError>> {
     const domain = fromAddress.split("@")[1] ?? "";
     const domainResult = await this.accountDb.getDomainByName(accountId, domain);
     if (domainResult.isErr()) return err(domainResult.error);
 
     if (domainResult.value?.senderSetupComplete) {
-      this.logger.info("Provider send unavailable for exchange-backed alias — falling back to SES on a domain this account has verified for sending", { code: "reply_sender.provider_fallback_ses", accountId, fromAddress, reason });
-      return ok(null);
+      this.logger.info("From-address cannot send via a provider — sending via SES on a domain this account has verified for sending", { code: "reply_sender.provider_fallback_ses", accountId, fromAddress, reason });
+      return ok({ kind: "ses" });
     }
 
-    this.logger.error("Refusing to send: the from-address is backed by an external mailbox that cannot currently send, and this account has not verified the domain for sending through us. Sending via SES anyway would emit mail that fails DMARC at the recipient.", { code: "reply_sender.provider_unavailable", accountId, fromAddress, reason });
+    if (allowFallbackToPlatformSending) {
+      this.logger.info("From-address cannot send as itself — degrading to a platform-domain send", { code: "reply_sender.platform_fallback", accountId, fromAddress, reason });
+      return ok({ kind: "platform" });
+    }
+
+    this.logger.error("Refusing to send: the from-address cannot send as itself (no capable exchange, and this account has not verified the domain for sending through us), and platform fallback is not permitted for this send. Sending via SES anyway would emit mail that fails DMARC at the recipient.", { code: "reply_sender.provider_unavailable", accountId, fromAddress, reason });
     return err({ kind: "provider_send_rejected", cause: `Cannot send from ${fromAddress}: ${reason}` });
   }
 
