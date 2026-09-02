@@ -296,6 +296,7 @@ export class CompositeRoot {
       logger,
       emailContentStore: new EmailContentStore(s3),
       contentStore: new ContentStore(s3),
+      accessService: new AuthressAccessService(),
       platformTenantName: PLATFORM_TENANT,
     });
 

@@ -139,6 +139,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     billingHandler: new BillingHandler(),
     handlerRegistry: { dispatch: async () => ok(undefined) } as unknown as HandlerRegistry,
     schedulerClient: { createFollowup: async () => ok(undefined), deleteFollowup: async () => ok(undefined) } as unknown as SchedulerClient,
+    accessService: { listUsers: async () => ok([]), getUserProfile: async () => ok({}) },
     platformTenantName: "test-platform",
     calendarForwarderDeps: {
       emailService: { send: async () => ok({ messageId: 'stub-cal' }), sendRaw: async () => {} } as unknown as EmailService,

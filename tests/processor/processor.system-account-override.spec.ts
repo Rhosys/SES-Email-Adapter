@@ -58,6 +58,7 @@ const SHARED_NEW_DEPS = {
   billingHandler: new BillingHandler(),
   handlerRegistry: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as HandlerRegistry,
   schedulerClient: { createFollowup: vi.fn().mockResolvedValue(ok(undefined)), deleteFollowup: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as SchedulerClient,
+  accessService: { listUsers: vi.fn().mockResolvedValue(ok([])), getUserProfile: vi.fn().mockResolvedValue(ok({})) },
   platformTenantName: "test-platform",
 };
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ok } from "neverthrow";
+import { ok, err } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
 import type { ThreadMatcherPort, SqsDispatcher, Notifier, ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
@@ -270,5 +270,162 @@ describe("processSideEffect — forward dispatches to ForwardingService", () => 
 
     expect(result.isOk()).toBe(true);
     expect(forwarder.forward).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: pong eligibility — ownership by registered domain OR account user email
+//
+// A test-workflow signal pongs only when the sender belongs to the account. Ownership is
+// proven by the sender's eTLD+1 matching a registered domain, OR — the new fallback — by the
+// sender's exact address matching the email of a user on the account (case-insensitive). This
+// covers IMAP/JMAP onboarding, where the test lands on an alias whose domain the account never
+// registered, but the sender is the account owner's personal address.
+// ---------------------------------------------------------------------------
+
+describe("processSideEffect — pong eligibility (sender ownership)", () => {
+  let mockLogger: MockLogger;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockLogger = createMockLogger();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function makeReplySenderSpy() {
+    return { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "pong-msg-001" })) } as unknown as ReplySender;
+  }
+
+  function makeProcessorWithAccess(opts: {
+    store: ReturnType<typeof makeStore>;
+    replySender: ReplySender;
+    accessService: { listUsers: ReturnType<typeof vi.fn>; getUserProfile: ReturnType<typeof vi.fn> };
+    logger: MockLogger;
+  }): SignalProcessor {
+    return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+      accessService: opts.accessService as never,
+      ...opts.store,
+      contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
+      classifier: { classify: vi.fn() } as unknown as Pick<SignalClassifier, "classify">,
+      embeddingGenerator: { generateForModel: vi.fn(), generateForSecondaryClusters: vi.fn() } as unknown as EmbeddingGenerator,
+      auroraWriter: { upsertEmbedding: vi.fn(), findMatch: vi.fn() } as unknown as MultiClusterAuroraWriter,
+      threadMatcher: { findMatch: vi.fn(), upsertEmbedding: vi.fn(), deleteEmbeddingsForThread: vi.fn() } as unknown as ThreadMatcherPort,
+      ruleEvaluator: makeRuleEvaluator3(opts.logger),
+      logger: opts.logger,
+      retentionService: { applyPlanRetention: vi.fn() } as unknown as S3RetentionService,
+      sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as unknown as SqsDispatcher,
+      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as unknown as Notifier,
+      forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as IForwardingService,
+      replySender: opts.replySender,
+      draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
+      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
+      billingHandler: new BillingHandler(),
+      emailContentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never,
+      contentStore: { getSignedUrl: vi.fn().mockResolvedValue("https://presigned-get"), getObject: vi.fn().mockResolvedValue(new Uint8Array()), putObject: vi.fn().mockResolvedValue(undefined), getPresignedPost: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never,
+    });
+  }
+
+  // A test-workflow signal whose sender's domain is NOT a registered domain (listDomains → []).
+  function makeImapTestSignal(fromAddress: string): Signal {
+    return makeSignal({
+      data: {
+        from: { address: fromAddress, name: "Owner" },
+        recipientAddress: "me@gmail.com",
+        workflow: "test",
+        workflowData: { workflow: "test" },
+        subject: "Test",
+        textBody: "ping",
+        matchedRules: [],
+      },
+    });
+  }
+
+  it("pongs when the sender is not on a registered domain but matches an account user's email", async () => {
+    const store = makeStore("Paid");
+    // No registered domains — the domain ownership check must fail, forcing the user-email path.
+    vi.mocked(store.accountDb.listDomains).mockResolvedValue(ok([]));
+    const replySender = makeReplySenderSpy();
+    const accessService = {
+      listUsers: vi.fn().mockResolvedValue(ok([{ userId: "user-1", role: "admin" }])),
+      getUserProfile: vi.fn().mockResolvedValue(ok({ email: "owner@personal.com" })),
+    };
+    const processor = makeProcessorWithAccess({ store, replySender, accessService, logger: mockLogger });
+
+    const result = await processor.processSideEffect({ signal: makeImapTestSignal("owner@personal.com"), thread: makeThread() });
+
+    expect(result.isOk()).toBe(true);
+    expect(replySender.sendReply).toHaveBeenCalledOnce();
+  });
+
+  it("matches the user email case-insensitively", async () => {
+    const store = makeStore("Paid");
+    vi.mocked(store.accountDb.listDomains).mockResolvedValue(ok([]));
+    const replySender = makeReplySenderSpy();
+    const accessService = {
+      listUsers: vi.fn().mockResolvedValue(ok([{ userId: "user-1", role: "admin" }])),
+      getUserProfile: vi.fn().mockResolvedValue(ok({ email: "Owner@Personal.com" })),
+    };
+    const processor = makeProcessorWithAccess({ store, replySender, accessService, logger: mockLogger });
+
+    const result = await processor.processSideEffect({ signal: makeImapTestSignal("owner@personal.com"), thread: makeThread() });
+
+    expect(result.isOk()).toBe(true);
+    expect(replySender.sendReply).toHaveBeenCalledOnce();
+  });
+
+  it("does not pong when the sender matches neither a registered domain nor any user email", async () => {
+    const store = makeStore("Paid");
+    vi.mocked(store.accountDb.listDomains).mockResolvedValue(ok([]));
+    const replySender = makeReplySenderSpy();
+    const accessService = {
+      listUsers: vi.fn().mockResolvedValue(ok([{ userId: "user-1", role: "admin" }])),
+      getUserProfile: vi.fn().mockResolvedValue(ok({ email: "someone-else@personal.com" })),
+    };
+    const processor = makeProcessorWithAccess({ store, replySender, accessService, logger: mockLogger });
+
+    const result = await processor.processSideEffect({ signal: makeImapTestSignal("stranger@random.com"), thread: makeThread() });
+
+    expect(result.isOk()).toBe(true);
+    expect(replySender.sendReply).not.toHaveBeenCalled();
+  });
+
+  it("skips the user-email lookup entirely when the sender is already on a registered domain", async () => {
+    const store = makeStore("Paid");
+    vi.mocked(store.accountDb.listDomains).mockResolvedValue(ok([
+      { accountId: TEST_ACCOUNT_ID, domain: "example.com", status: "active", receivingSetupComplete: true, senderSetupComplete: true, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" },
+    ] as never));
+    const replySender = makeReplySenderSpy();
+    const accessService = {
+      listUsers: vi.fn().mockResolvedValue(ok([])),
+      getUserProfile: vi.fn().mockResolvedValue(ok({})),
+    };
+    const processor = makeProcessorWithAccess({ store, replySender, accessService, logger: mockLogger });
+
+    // Sender sender@example.com — eTLD+1 example.com matches the registered domain.
+    const result = await processor.processSideEffect({ signal: makeSignal({ data: { workflow: "test", workflowData: { workflow: "test" }, matchedRules: [] } }), thread: makeThread() });
+
+    expect(result.isOk()).toBe(true);
+    expect(replySender.sendReply).toHaveBeenCalledOnce();
+    expect(accessService.listUsers).not.toHaveBeenCalled();
+  });
+
+  it("does not force a retry when the Authress user lookup fails — tracks and skips the pong", async () => {
+    const store = makeStore("Paid");
+    vi.mocked(store.accountDb.listDomains).mockResolvedValue(ok([]));
+    const replySender = makeReplySenderSpy();
+    const accessService = {
+      listUsers: vi.fn().mockResolvedValue(err({ kind: "authress_service_error", message: "Authress unavailable", cause: new Error("Authress unavailable") })),
+      getUserProfile: vi.fn().mockResolvedValue(ok({})),
+    };
+    const processor = makeProcessorWithAccess({ store, replySender, accessService, logger: mockLogger });
+
+    const result = await processor.processSideEffect({ signal: makeImapTestSignal("owner@personal.com"), thread: makeThread() });
+
+    // Pong eligibility failure is non-critical: the side-effect pass still succeeds (no retry).
+    expect(result.isOk()).toBe(true);
+    expect(replySender.sendReply).not.toHaveBeenCalled();
   });
 });

@@ -5,7 +5,8 @@ import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import type { IForwardingService } from "../forwarding/forwarding-service.js";
 import { ok, err, dbError, processorError, noAccountError, notFoundError } from "../errors.js";
-import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, NoAccountError } from "../errors.js";
+import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, NoAccountError, AuthressServiceError } from "../errors.js";
+import type { AccessService } from "../api/accountsApi.js";
 import type { EmailServiceError } from "../email/email-service.js";
 import type { ProviderSendError } from "../external-exchanges/provider-adapter.js";
 import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, UnsubscribeInfo, InboundEmailSignalData } from "../types/index.js";
@@ -322,6 +323,7 @@ interface SignalProcessorOptions {
   schedulerClient: SchedulerClient;
   emailContentStore: EmailContentStore;
   contentStore: ContentStore;
+  accessService: Pick<AccessService, "listUsers" | "getUserProfile">;
   platformTenantName: string;
 }
 
@@ -350,6 +352,7 @@ export class SignalProcessor {
   private readonly schedulerClient: SchedulerClient;
   private readonly emailContentStore: EmailContentStore;
   private readonly contentStore: ContentStore;
+  private readonly accessService: Pick<AccessService, "listUsers" | "getUserProfile">;
   private readonly platformTenantName: string;
 
   constructor(opts: SignalProcessorOptions) {
@@ -377,6 +380,7 @@ export class SignalProcessor {
     this.schedulerClient = opts.schedulerClient;
     this.emailContentStore = opts.emailContentStore;
     this.contentStore = opts.contentStore;
+    this.accessService = opts.accessService;
     this.platformTenantName = opts.platformTenantName;
   }
 
@@ -402,17 +406,30 @@ export class SignalProcessor {
 
   /**
    * A pong (test auto-reply) is sent only when the sender belongs to the account AND the moment
-   * is a "test" moment. Sender ownership: the from-address eTLD+1 matches one of the account's
-   * registered domains. Test moment: the classifier tagged it "test", OR the account is fresh
-   * (created within 4 weeks) and has no threads yet, OR onboarding has not yet recorded a test
-   * email. The thread lookup is gated behind the cheap createdAt check so mature accounts skip it.
+   * is a "test" moment. Sender ownership is proven by either:
+   *   • the from-address eTLD+1 matching one of the account's registered domains (domain-based
+   *     onboarding — the owner emails from an address on a domain they verified with us), or
+   *   • the from-address exactly matching (case-insensitive) the email of a user on the account.
+   *     This covers IMAP/JMAP onboarding: the test lands on an alias whose domain the account
+   *     never registered, but the sender is the owner's own personal address. The user lookup
+   *     goes to Authress, so it is done only after the cheap domain check misses.
+   * Test moment: the classifier tagged it "test", OR the account is fresh (created within 4 weeks)
+   * and has no threads yet, OR onboarding has not yet recorded a test email. The thread lookup is
+   * gated behind the cheap createdAt check so mature accounts skip it.
    */
-  private async shouldPong(accountId: string, signal: Signal): Promise<Result<boolean, DbError>> {
+  private async shouldPong(accountId: string, signal: Signal): Promise<Result<boolean, DbError | AuthressServiceError>> {
     const domainsResult = await this.accountDb.listDomains(accountId);
     if (domainsResult.isErr()) return err(domainsResult.error);
 
-    const fromETLD1 = getETLD1(signal.data.from.address);
-    const senderBelongsToAccount = domainsResult.value.some(d => getETLD1(d.domain) === fromETLD1);
+    const fromAddress = signal.data.from.address;
+    const fromETLD1 = getETLD1(fromAddress);
+    let senderBelongsToAccount = domainsResult.value.some(d => getETLD1(d.domain) === fromETLD1);
+
+    if (!senderBelongsToAccount) {
+      const ownedByUserResult = await this.senderMatchesAccountUser(accountId, fromAddress);
+      if (ownedByUserResult.isErr()) return err(ownedByUserResult.error);
+      senderBelongsToAccount = ownedByUserResult.value;
+    }
     if (!senderBelongsToAccount) return ok(false);
 
     if (signal.data.workflow === "test") return ok(true);
@@ -430,6 +447,28 @@ export class SignalProcessor {
     const threadsResult = await this.threadDb.listActiveThreads(accountId, 1);
     if (threadsResult.isErr()) return err(threadsResult.error);
     return ok(threadsResult.value.length === 0);
+  }
+
+  /**
+   * True when the sender address exactly matches (case-insensitive) the email of any user on the
+   * account. Ownership signal for pong eligibility when the sender is not on a registered domain.
+   * Reads user list + profiles from Authress; an Authress failure is surfaced as an error so the
+   * caller can decide (it tracks and skips the pong — never a fatal, never a retry).
+   */
+  private async senderMatchesAccountUser(accountId: string, fromAddress: string): Promise<Result<boolean, AuthressServiceError>> {
+    const usersResult = await this.accessService.listUsers(accountId);
+    if (usersResult.isErr()) return err(usersResult.error);
+    const users = usersResult.value;
+    if (users.length === 0) return ok(false);
+
+    const target = fromAddress.trim().toLowerCase();
+    const profileResults = await Promise.all(users.map(u => this.accessService.getUserProfile(u.userId)));
+    for (const profileResult of profileResults) {
+      if (profileResult.isErr()) return err(profileResult.error);
+      const email = profileResult.value.email?.trim().toLowerCase();
+      if (email && email === target) return ok(true);
+    }
+    return ok(false);
   }
 
   /** Record that the account has received its first test email (onboarding milestone). No-op if already completed. */
@@ -529,7 +568,7 @@ export class SignalProcessor {
     // "test", or the account is new with no threads yet, or onboarding hasn't seen a test).
     const pongResult = await this.shouldPong(accountId, signal);
     if (pongResult.isErr()) {
-      this.logger.warn("Failed to evaluate pong eligibility — skipping pong.", { code: "processor.side_effect.pong_eligibility_failed", accountId, signalId: signal.id, error: pongResult.error });
+      this.logger.track("Failed to evaluate pong eligibility — skipping pong.", { code: "processor.side_effect.pong_eligibility_failed", accountId, signalId: signal.id, error: pongResult.error });
     }
     if (pongResult.isOk() && pongResult.value) {
       try {

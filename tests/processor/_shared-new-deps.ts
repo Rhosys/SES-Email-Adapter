@@ -9,6 +9,7 @@ import { BillingHandler } from "../../src/billing/billing-handler.js";
 import type { HandlerRegistry } from "../../src/workflow/registry.js";
 import type { SchedulerClient } from "../../src/scheduler/scheduler-client.js";
 import type { Logger } from "../../src/logger.js";
+import type { AccessService } from "../../src/api/accountsApi.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 
 export function makeSharedNewDeps() {
@@ -17,6 +18,9 @@ export function makeSharedNewDeps() {
     billingHandler: new BillingHandler(),
     handlerRegistry: { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as HandlerRegistry,
     schedulerClient: { createFollowup: vi.fn().mockResolvedValue(ok(undefined)), deleteFollowup: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as SchedulerClient,
+    // Default: account has no users, so the user-email ownership fallback in shouldPong is a no-op
+    // unless a test overrides listUsers/getUserProfile.
+    accessService: { listUsers: vi.fn().mockResolvedValue(ok([])), getUserProfile: vi.fn().mockResolvedValue(ok({})) } as unknown as Pick<AccessService, "listUsers" | "getUserProfile">,
     platformTenantName: "test-platform",
   };
 }
