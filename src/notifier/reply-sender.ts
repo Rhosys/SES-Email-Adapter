@@ -35,6 +35,12 @@ interface ReplySenderDeps {
   logger: Logger;
 }
 
+/** Normalizes a subject to a single "Re: " prefix — strips an existing "Re:"/"Fwd:"/"Fw:" prefix (any casing) before adding one, instead of stacking. */
+function buildReplySubject(subject: string): string {
+  const stripped = subject.replace(/^\s*(?:(?:re|fwd?|fw)\s*:\s*)+/i, "");
+  return `Re: ${stripped}`;
+}
+
 export class ReplySenderService implements ReplySender {
   private readonly emailService: EmailService;
   private readonly accountDb: AccountDatabase;
@@ -63,7 +69,7 @@ export class ReplySenderService implements ReplySender {
     signalId?: string;
     threadId?: string;
   }): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
-    const subject = `Re: ${opts.subject}`;
+    const subject = buildReplySubject(opts.subject);
     const headers = opts.inReplyTo
       ? [
           { Name: "In-Reply-To", Value: opts.inReplyTo },

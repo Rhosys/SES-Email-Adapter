@@ -408,6 +408,12 @@ export class SignalProcessor {
    * email. The thread lookup is gated behind the cheap createdAt check so mature accounts skip it.
    */
   private async shouldPong(accountId: string, signal: Signal): Promise<Result<boolean, DbError>> {
+    // The SYSTEM account only ever receives the daily healthcheck email, which it also sends —
+    // sender and account domain are the same, so without this guard shouldPong would fire a
+    // pong back to the healthcheck sender every time, which the pipeline re-ingests as a new
+    // signal and pongs again: an immediate, self-sustaining reply loop.
+    if (isSystemAccount(accountId)) return ok(false);
+
     const domainsResult = await this.accountDb.listDomains(accountId);
     if (domainsResult.isErr()) return err(domainsResult.error);
 
