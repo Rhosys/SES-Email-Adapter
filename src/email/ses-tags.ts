@@ -10,6 +10,22 @@ export const TAG_THREAD_ID = `${TAG_PREFIX}ThreadId`;
 export const TAG_PURPOSE = `${TAG_PREFIX}Purpose`;
 /** Correlates a daily healthcheck email with any SES bounce/complaint we later receive for it. */
 export const TAG_HEALTHCHECK_ID = `${TAG_PREFIX}Healthcheck-Id`;
+/**
+ * Mail-loop guard (RFC 3834 §5 rate-limiting spirit, applied generically): carries how many
+ * times a message has been auto-replied-to/forwarded through the platform. Incremented by
+ * ReplySenderService on every send; a value that would exceed MAX_HOP_COUNT refuses the send
+ * outright rather than perpetuating a loop between two systems that keep answering each other.
+ */
+export const TAG_HOP_COUNT = `${TAG_PREFIX}Hop-Count`;
+export const MAX_HOP_COUNT = 100;
+
+/** Parses the hop-count header off an inbound message's headers map; missing/malformed reads as no prior hop. */
+export function parseHopCount(headers: Record<string, string>): number | undefined {
+  const value = headers[TAG_HOP_COUNT.toLowerCase()];
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+}
 
 
 

@@ -122,6 +122,7 @@ describe("ReplySenderService.sendReply()", () => {
       headers: [
         { Name: "In-Reply-To", Value: "<original-id@mail.example.com>" },
         { Name: "References", Value: "<original-id@mail.example.com>" },
+        { Name: "X-Numaeel-Hop-Count", Value: "1" },
       ],
       tags: [
         { Name: "X-Numaeel-Type", Value: "reply" },
@@ -422,6 +423,79 @@ describe("ReplySenderService — routing to an external mailbox", () => {
 
     expect(accountDb.getAlias).toHaveBeenCalledWith("acct-test", "user@gmail.com");
     expect(adapter.sendMessage).toHaveBeenCalledOnce();
+  });
+});
+
+// ─── Reply subject normalization ────────────────────────────────────────────
+
+describe("ReplySenderService — reply subject normalization", () => {
+  it.each([
+    ["Original Subject", "Re: Original Subject"],
+    ["Re: Original Subject", "Re: Original Subject"],
+    ["re: Original Subject", "Re: Original Subject"],
+    ["RE: RE: Original Subject", "Re: Original Subject"],
+    ["Fwd: Original Subject", "Re: Original Subject"],
+    ["FW: Original Subject", "Re: Original Subject"],
+    ["Fwd: Re: Original Subject", "Re: Original Subject"],
+  ])("normalizes %j to %j", async (input, expected) => {
+    const emailService = makeEmailService();
+    (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "m-1" }));
+    const handler = makeSender({ emailService });
+
+    await handler.sendReply({ to: "a@b.com", from: "c@d.com", subject: input, body: "Hello", accountId: "acct-test" });
+
+    expect((emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0].subject).toBe(expected);
+  });
+});
+
+// ─── Mail-loop guard (hop count + Auto-Submitted) ───────────────────────────
+
+describe("ReplySenderService — mail-loop guard", () => {
+  it("stamps hop count 1 when the message being replied to carried none", async () => {
+    const emailService = makeEmailService();
+    (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "m-1" }));
+    const handler = makeSender({ emailService });
+
+    await handler.sendReply({ to: "a@b.com", from: "c@d.com", subject: "Hi", body: "Hello", accountId: "acct-test" });
+
+    const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(call.headers).toContainEqual({ Name: "X-Numaeel-Hop-Count", Value: "1" });
+  });
+
+  it("increments the hop count carried on the message being replied to", async () => {
+    const emailService = makeEmailService();
+    (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "m-1" }));
+    const handler = makeSender({ emailService });
+
+    await handler.sendReply({ to: "a@b.com", from: "c@d.com", subject: "Hi", body: "Hello", accountId: "acct-test", hopCount: 41 });
+
+    const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(call.headers).toContainEqual({ Name: "X-Numaeel-Hop-Count", Value: "42" });
+  });
+
+  it("refuses to send and logs an error once the hop count would exceed the guard limit", async () => {
+    const emailService = makeEmailService();
+    const logger = createMockLogger();
+    const handler = makeSender({ emailService, logger });
+
+    const result = await handler.sendReply({ to: "a@b.com", from: "c@d.com", subject: "Hi", body: "Hello", accountId: "acct-test", hopCount: 100 });
+
+    expect(result.isErr()).toBe(true);
+    expect(result._unsafeUnwrapErr()).toEqual({ kind: "loop_guard_tripped", hopCount: 101 });
+    expect(emailService.send).not.toHaveBeenCalled();
+    expect(logger.calls.some(c => c.method === "error" && c.context?.code === "reply_sender.loop_guard_tripped")).toBe(true);
+  });
+
+  it("stamps Auto-Submitted: auto-replied only when the caller marks the send as automated", async () => {
+    const emailService = makeEmailService();
+    (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValue(ok({ messageId: "m-1" }));
+    const handler = makeSender({ emailService });
+
+    await handler.sendReply({ to: "a@b.com", from: "c@d.com", subject: "Hi", body: "Hello", accountId: "acct-test" });
+    expect((emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0].headers).not.toContainEqual(expect.objectContaining({ Name: "Auto-Submitted" }));
+
+    await handler.sendReply({ to: "a@b.com", from: "c@d.com", subject: "Hi", body: "Hello", accountId: "acct-test", autoSubmitted: true });
+    expect((emailService.send as ReturnType<typeof vi.fn>).mock.calls[1]![0].headers).toContainEqual({ Name: "Auto-Submitted", Value: "auto-replied" });
   });
 });
 
