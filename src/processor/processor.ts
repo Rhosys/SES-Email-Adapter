@@ -141,6 +141,18 @@ export interface InboundSignalMessage {
   dmarcVerdict: SESReceiptStatus["status"];
 }
 
+/**
+ * RFC 3834 §5: true when a message is itself automated — a non-"no" Auto-Submitted header, or a
+ * null Return-Path (the bounce/MDN convention). Used to suppress any automated response to it
+ * (pong, auto-send) — answering an automated message is exactly how two automated systems end up
+ * replying to each other forever.
+ */
+function isAutomatedMessage(headers: Record<string, string>): boolean {
+  const autoSubmitted = headers["auto-submitted"]?.trim().toLowerCase();
+  if (autoSubmitted && autoSubmitted !== "no") return true;
+  return headers["return-path"]?.trim() === "<>";
+}
+
 // ---------------------------------------------------------------------------
 // Processing outcome
 // ---------------------------------------------------------------------------
@@ -413,6 +425,11 @@ export class SignalProcessor {
    * email. The thread lookup is gated behind the cheap createdAt check so mature accounts skip it.
    */
   private async shouldPong(accountId: string, signal: Signal): Promise<Result<boolean, DbError>> {
+    // Emailing your own alias has no separate sender to confirm anything to — this is also what
+    // made the SYSTEM account's healthcheck loop unconditional (its "sender" and "recipient" are
+    // the same address), so it doubles as a general, DB-independent version of that guard.
+    if (signal.data.from.address.toLowerCase() === signal.data.recipientAddress.toLowerCase()) return ok(false);
+
     // The SYSTEM account only ever receives the daily healthcheck email, which it also sends —
     // sender and account domain are the same, so without this guard shouldPong would fire a
     // pong back to the healthcheck sender every time, which the pipeline re-ingests as a new
@@ -421,12 +438,8 @@ export class SignalProcessor {
 
     // RFC 3834 §5: never auto-respond to a message that is itself automated (another system's
     // auto-reply, bounce, or notification) — doing so is exactly how two auto-responders end up
-    // answering each other forever. A non-"no" Auto-Submitted header, or a null return path
-    // (the bounce/MDN convention), both mark the incoming message as such.
-    const autoSubmitted = signal.data.headers["auto-submitted"]?.trim().toLowerCase();
-    if (autoSubmitted && autoSubmitted !== "no") return ok(false);
-    const returnPath = signal.data.headers["return-path"]?.trim();
-    if (returnPath === "<>") return ok(false);
+    // answering each other forever.
+    if (isAutomatedMessage(signal.data.headers)) return ok(false);
 
     const domainsResult = await this.accountDb.listDomains(accountId);
     if (domainsResult.isErr()) return err(domainsResult.error);
@@ -704,6 +717,24 @@ export class SignalProcessor {
                 if (autoSendBlockedResult.isErr()) { this.logger.warn("Failed to save auto_send_blocked signal", { code: "processor.save_auto_send_blocked_failed", accountId, threadId: thread.id, error: autoSendBlockedResult.error }); }
               }
             }
+          }
+
+          // RFC 3834 §5 gate — never auto-send in response to a message that is itself automated
+          // (see isAutomatedMessage / shouldPong). Otherwise an auto-draft-and-send rule fires
+          // right back at whatever auto-responder sent the triggering message, unbounded except
+          // by ReplySenderService's hop-count cap.
+          if (shouldAutoSend && isAutomatedMessage(signal.data.headers)) {
+            shouldAutoSend = false;
+            this.logger.track("Auto-send suppressed — inbound message is itself automated (Auto-Submitted/null Return-Path).", {
+              code: "processor.side_effect.auto_send_suppressed_automated",
+              signal, thread, payload,
+              fromAddress: signal.data.from.address,
+              recipientAddress: signal.data.recipientAddress,
+            });
+            const sigId = generateId("sgn-");
+            const sigTs = DateTime.utc().toISO()!;
+            const autoSendBlockedResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "auto_send_blocked", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration, data: { recipientAddress: signal.data.recipientAddress } });
+            if (autoSendBlockedResult.isErr()) { this.logger.warn("Failed to save auto_send_blocked signal", { code: "processor.save_auto_send_blocked_failed", accountId, threadId: thread.id, error: autoSendBlockedResult.error }); }
           }
 
           const sendInitiatedAt = shouldAutoSend ? now : undefined;
