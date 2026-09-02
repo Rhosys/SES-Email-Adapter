@@ -34,6 +34,7 @@ import { buildActiveThread } from "./thread-factory.js";
 import { getPrimaryThreadMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
 import { getETLD1, assignSystemLabels } from "./filter.js";
 import { isSystemAccount } from "../database/system-account-db.js";
+import { parseHopCount } from "../email/ses-tags.js";
 import { toRuleSignalContext, toRuleThreadContext } from "./rule-context.js";
 import { statusToMetric } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
@@ -87,7 +88,7 @@ export interface Notifier {
  * Failure modes of an outbound send, across both routes: SES rejections, provider-side
  * rejections (Gmail/Graph), and the database reads that decide which route to take.
  */
-export type ReplySendError = EmailServiceError | ProviderSendError | DbError;
+export type ReplySendError = EmailServiceError | ProviderSendError | DbError | { kind: "loop_guard_tripped"; hopCount: number };
 
 export interface ReplySender {
   sendReply(opts: {
@@ -101,6 +102,10 @@ export interface ReplySender {
     accountId?: string;
     signalId?: string;
     threadId?: string;
+    /** Hop count off the message being replied to — see ReplySenderService.sendReply. */
+    hopCount?: number;
+    /** RFC 3834 — set for pongs/auto-replies, never for a user's own draft send. */
+    autoSubmitted?: boolean;
   }): Promise<Result<{
     messageId: string;
     /**
@@ -408,6 +413,21 @@ export class SignalProcessor {
    * email. The thread lookup is gated behind the cheap createdAt check so mature accounts skip it.
    */
   private async shouldPong(accountId: string, signal: Signal): Promise<Result<boolean, DbError>> {
+    // The SYSTEM account only ever receives the daily healthcheck email, which it also sends —
+    // sender and account domain are the same, so without this guard shouldPong would fire a
+    // pong back to the healthcheck sender every time, which the pipeline re-ingests as a new
+    // signal and pongs again: an immediate, self-sustaining reply loop.
+    if (isSystemAccount(accountId)) return ok(false);
+
+    // RFC 3834 §5: never auto-respond to a message that is itself automated (another system's
+    // auto-reply, bounce, or notification) — doing so is exactly how two auto-responders end up
+    // answering each other forever. A non-"no" Auto-Submitted header, or a null return path
+    // (the bounce/MDN convention), both mark the incoming message as such.
+    const autoSubmitted = signal.data.headers["auto-submitted"]?.trim().toLowerCase();
+    if (autoSubmitted && autoSubmitted !== "no") return ok(false);
+    const returnPath = signal.data.headers["return-path"]?.trim();
+    if (returnPath === "<>") return ok(false);
+
     const domainsResult = await this.accountDb.listDomains(accountId);
     if (domainsResult.isErr()) return err(domainsResult.error);
 
@@ -541,6 +561,7 @@ export class SignalProcessor {
         const from = usePlatformDomain
           ? `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`
           : signal.data.recipientAddress;
+        const hopCount = parseHopCount(signal.data.headers);
         const sendResult = await this.replySender.sendReply({
           to: signal.data.from.address,
           from,
@@ -550,8 +571,13 @@ export class SignalProcessor {
           accountId: usePlatformDomain ? this.platformTenantName : accountId,
           signalId: signal.id,
           threadId: thread.id,
+          ...(hopCount !== undefined ? { hopCount } : {}),
+          autoSubmitted: true,
         });
-        if (sendResult.isErr()) {
+        if (sendResult.isErr() && sendResult.error.kind === "loop_guard_tripped") {
+          // Already logged an ERROR with full context inside sendReply — retrying would hit
+          // the exact same hop count again and never succeed, so this is handled, not failed.
+        } else if (sendResult.isErr()) {
           this.logger.track(`Side-effect pong failed — will force retry: ${"message" in sendResult.error ? sendResult.error.message : sendResult.error.kind}`, { code: "processor.side_effect.pong_failed", signal, thread, payload, error: sendResult.error });
           criticalFailures.push(sendResult.error);
         } else {

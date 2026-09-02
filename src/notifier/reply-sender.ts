@@ -22,7 +22,7 @@ import { exchangeCredentials } from "../external-exchanges/provider-adapter.js";
 import type { ExternalMailExchange } from "../types/index.js";
 import type { Result } from "../errors.js";
 import { ok, err } from "../errors.js";
-import { buildOutboundTags } from "../email/ses-tags.js";
+import { buildOutboundTags, TAG_HOP_COUNT, MAX_HOP_COUNT } from "../email/ses-tags.js";
 import { buildMimeMessage } from "../email/mime-builder.js";
 import { buildOutboundMsgId } from "../processor/message-id.js";
 import type { Logger } from "../logger.js";
@@ -33,6 +33,12 @@ interface ReplySenderDeps {
   exchangesDb: ExchangesDatabase;
   adapters: Record<string, ProviderAdapter>;
   logger: Logger;
+}
+
+/** Normalizes a subject to a single "Re: " prefix — strips an existing "Re:"/"Fwd:"/"Fw:" prefix (any casing) before adding one, instead of stacking. */
+function buildReplySubject(subject: string): string {
+  const stripped = subject.replace(/^\s*(?:(?:re|fwd?|fw)\s*:\s*)+/i, "");
+  return `Re: ${stripped}`;
 }
 
 export class ReplySenderService implements ReplySender {
@@ -62,14 +68,40 @@ export class ReplySenderService implements ReplySender {
     accountId?: string;
     signalId?: string;
     threadId?: string;
+    /** Hop count read off the message being replied to (its `X-Numaeel-Hop-Count` header, if any). Omit for a compose-from-scratch with no prior hop. */
+    hopCount?: number;
+    /** RFC 3834 — set for messages a human did not compose (pongs, vacation-style auto-replies). Never set for a user's own draft send. */
+    autoSubmitted?: boolean;
   }): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
-    const subject = `Re: ${opts.subject}`;
-    const headers = opts.inReplyTo
-      ? [
-          { Name: "In-Reply-To", Value: opts.inReplyTo },
-          { Name: "References", Value: opts.inReplyTo },
-        ]
-      : [];
+    // Mail-loop guard: every send through this funnel (draft sends, auto-replies, pongs)
+    // increments the hop count carried on the message it answers. Two systems that keep
+    // auto-replying to each other run this number up fast — refuse rather than perpetuate it.
+    const hopCount = (opts.hopCount ?? 0) + 1;
+    if (hopCount > MAX_HOP_COUNT) {
+      this.logger.error(`Refusing to send — hop count ${hopCount} exceeds the mail-loop guard limit of ${MAX_HOP_COUNT}. This message is almost certainly part of a reply loop.`, {
+        code: "reply_sender.loop_guard_tripped",
+        hopCount,
+        to: opts.to,
+        from: opts.from,
+        subject: opts.subject,
+        accountId: opts.accountId,
+        signalId: opts.signalId,
+        threadId: opts.threadId,
+      });
+      return err({ kind: "loop_guard_tripped", hopCount });
+    }
+
+    const subject = buildReplySubject(opts.subject);
+    const headers = [
+      ...(opts.inReplyTo
+        ? [
+            { Name: "In-Reply-To", Value: opts.inReplyTo },
+            { Name: "References", Value: opts.inReplyTo },
+          ]
+        : []),
+      { Name: TAG_HOP_COUNT, Value: String(hopCount) },
+      ...(opts.autoSubmitted ? [{ Name: "Auto-Submitted", Value: "auto-replied" }] : []),
+    ];
 
     // Platform-originated mail (a pong from the platform domain) carries no account. It sends
     // under the platform tenant, and having no alias it never routes through a provider —

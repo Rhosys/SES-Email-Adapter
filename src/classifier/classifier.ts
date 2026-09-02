@@ -85,10 +85,13 @@ interface GuardrailTrace {
 }
 
 interface BedrockResponseWithTrace {
-  choices: Array<{ message: { content: string } }>;
+  choices: Array<{ message: { content: string }; finish_reason?: string }>;
   "amazon-bedrock-guardrailAction"?: string;
   "amazon-bedrock-trace"?: GuardrailTrace;
 }
+
+/** Used when the model output cannot be parsed (guardrail block, truncation) — never a hard failure for the pipeline. */
+const UNSPECIFIED_FALLBACK: ClassificationOutput = { workflow: "unspecified", workflowData: { workflow: "unspecified" }, tags: [], summary: "", labels: [], actions: [] };
 
 export class SignalClassifier {
   private readonly client: BedrockRuntimeClient;
@@ -147,6 +150,28 @@ export class SignalClassifier {
     this.handleGuardrailTrace(result, input.signalId, input.accountId);
 
     const text = result.choices?.[0]?.message?.content ?? "";
+
+    // The model ran out of output tokens mid-response — the JSON is truncated by construction,
+    // so attempting to parse it would only ever produce a confusing "Unterminated string"/
+    // "Unexpected end of JSON input" error. Detect it up front from finish_reason and skip
+    // straight to the same workflow:unspecified fallback the caller already applies to any
+    // classification error — there is nothing a retry or a parser tweak can recover here.
+    if (result.choices?.[0]?.finish_reason === "length") {
+      this.logger.error(
+        `Classifier output truncated by max_tokens (${requestBody.max_tokens}) before the model finished its JSON — falling back to workflow:unspecified.`,
+        {
+          code: "classifier.output_truncated",
+          input,
+          rawResponse: text,
+          rawResponseLength: text.length,
+          maxTokens: requestBody.max_tokens,
+          finishReason: result.choices[0]!.finish_reason,
+          signalId: input.signalId,
+          accountId: input.accountId,
+        },
+      );
+      return ok(UNSPECIFIED_FALLBACK);
+    }
 
     // Parse classifier JSON output — strip markdown fences if model wraps output
     let jsonText = text.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "").trim();

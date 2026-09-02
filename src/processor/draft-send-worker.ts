@@ -6,6 +6,7 @@ import type { Logger } from "../logger.js";
 import type { ReplySender, ReplySendError } from "./processor.js";
 import type { DraftSendPayload } from "./draft-send-dispatcher.js";
 import { buildSignalGsi3pk } from "./message-id.js";
+import { parseHopCount } from "../email/ses-tags.js";
 
 /**
  * Send failures that no amount of retrying will clear: SES refused the message outright, the
@@ -18,6 +19,7 @@ const PERMANENT_SEND_ERRORS = new Set<ReplySendError["kind"]>([
   "provider_send_rejected",
   "provider_send_scope_missing",
   "invalid_argument",
+  "loop_guard_tripped",
 ]);
 
 /** A short, user-facing reason to show against the parked draft. */
@@ -87,6 +89,7 @@ export class DraftSendWorker {
     const subject = signal.data.subject;
     const body = "textBody" in signal.data ? (signal.data.textBody ?? "") : "";
     const inReplyTo = await this.resolveInReplyTo(accountId, threadId, signal);
+    const hopCount = parseHopCount(signal.data.headers);
 
     const sendResult = await this.replySender.sendReply({
       to,
@@ -94,6 +97,7 @@ export class DraftSendWorker {
       subject,
       body,
       ...(inReplyTo ? { inReplyTo } : {}),
+      ...(hopCount !== undefined ? { hopCount } : {}),
       accountId,
       signalId: signal.id,
       threadId,
