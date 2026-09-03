@@ -38,7 +38,12 @@ export class SystemAccountDb {
       retentionDuration: "P7D" as const,
       filtering: { defaultUnknownSenderPolicy: "allow_all" as const },
       digest: null,
-      onboarding: { completed: true },
+      // Hardcoded, not read from DynamoDB — a write via updateAccount (e.g. markTestEmailReceived)
+      // would silently have no effect on the next read, since this stub never consults the DB.
+      // testEmailReceived is fixed at true because the SYSTEM account never runs onboarding and
+      // must never be treated as eligible for a first-test-email pong (see isSystemAccount guard
+      // in SignalProcessor.shouldPong, which is the actual, DB-independent exclusion).
+      onboarding: { completed: true, testEmailReceived: true },
       // The SYSTEM account holds only 7-day throwaway healthcheck mail — not a
       // paying customer. It must not carry a copy-to-saved tier (e.g. Internal),
       // which would preserve daily healthcheck emails in S3 indefinitely.

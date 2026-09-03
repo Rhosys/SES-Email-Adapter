@@ -41,6 +41,13 @@ function mockClassifyResponse(raw: object) {
   mockBedrockResponse(JSON.stringify(raw));
 }
 
+function mockTruncatedResponse(partialContent: string) {
+  const body = new TextEncoder().encode(
+    JSON.stringify({ choices: [{ message: { content: partialContent }, finish_reason: "length" }] }),
+  );
+  mockSend.mockResolvedValueOnce({ body });
+}
+
 const mockLogger: Logger = {
   startInvocation: vi.fn(),
   getInvocationId: vi.fn(() => "test-invocation"),
@@ -74,6 +81,23 @@ describe("SignalClassifier — output validation", () => {
     const result = await classifier.classify(baseInput);
 
     expect(result.isErr()).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Truncated by max_tokens → ok(unspecified fallback), not a parse attempt
+  // -------------------------------------------------------------------------
+
+  it("falls back to workflow:unspecified without attempting to parse when finish_reason is length", async () => {
+    mockTruncatedResponse('{"workflow": "content", "summary": "Some long summary that got cut off mid-str');
+
+    const result = await classifier.classify(baseInput);
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap()).toEqual({ workflow: "unspecified", workflowData: { workflow: "unspecified" }, tags: [], summary: "", labels: [], actions: [] });
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.stringContaining("truncated"),
+      expect.objectContaining({ code: "classifier.output_truncated" }),
+    );
   });
 
   // -------------------------------------------------------------------------

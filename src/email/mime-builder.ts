@@ -15,6 +15,9 @@ export interface MimeMessageOptions {
   to: string;
   subject: string;
   textBody: string;
+  /** Rendered HTML counterpart of textBody. When present, the message is built as
+   * multipart/alternative (text/plain + text/html) instead of a single text/plain part. */
+  htmlBody?: string;
   /** Extra headers (In-Reply-To, References, …). Values are sanitized like every other header. */
   headers?: Array<{ Name: string; Value: string }>;
   /** Defaults to now. Injectable so tests get a stable Date header. */
@@ -78,6 +81,10 @@ const RESERVED_HEADERS = new Set(["from", "to", "subject", "date", "mime-version
 /**
  * Builds a complete RFC 5322 message. Body is always UTF-8 base64 so that non-ASCII content
  * and long lines survive intact regardless of what the provider does with the bytes.
+ *
+ * With `htmlBody`, emits multipart/alternative (text/plain part first, text/html second — per
+ * RFC 2046 §5.1.4 the *last* alternative is a client's preferred rendering, so plain-text stays
+ * the fallback). Without it, a single text/plain part, unchanged from before multipart existed.
  */
 export function buildMimeMessage(options: MimeMessageOptions): Uint8Array {
   const date = options.date ?? new Date();
@@ -88,9 +95,15 @@ export function buildMimeMessage(options: MimeMessageOptions): Uint8Array {
     `Subject: ${encodeUnstructured(options.subject)}`,
     `Date: ${date.toUTCString().replace("GMT", "+0000")}`,
     "MIME-Version: 1.0",
-    "Content-Type: text/plain; charset=UTF-8",
-    "Content-Transfer-Encoding: base64",
   ];
+
+  const boundary = `alt_${crypto.randomUUID()}`;
+
+  if (options.htmlBody) {
+    lines.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+  } else {
+    lines.push("Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64");
+  }
 
   for (const header of options.headers ?? []) {
     if (RESERVED_HEADERS.has(header.Name.toLowerCase())) continue;
@@ -99,5 +112,19 @@ export function buildMimeMessage(options: MimeMessageOptions): Uint8Array {
     lines.push(`${sanitizeHeaderValue(header.Name)}: ${ASCII_PRINTABLE.test(value) ? value : encodeWord(value)}`);
   }
 
-  return new Uint8Array(Buffer.from(`${lines.join("\r\n")}\r\n\r\n${encodeBody(options.textBody)}\r\n`, "utf8"));
+  const headerBlock = lines.join("\r\n");
+
+  const body = options.htmlBody
+    ? `--${boundary}\r\n`
+      + "Content-Type: text/plain; charset=UTF-8\r\n"
+      + "Content-Transfer-Encoding: base64\r\n\r\n"
+      + `${encodeBody(options.textBody)}\r\n\r\n`
+      + `--${boundary}\r\n`
+      + "Content-Type: text/html; charset=UTF-8\r\n"
+      + "Content-Transfer-Encoding: base64\r\n\r\n"
+      + `${encodeBody(options.htmlBody)}\r\n\r\n`
+      + `--${boundary}--\r\n`
+    : `${encodeBody(options.textBody)}\r\n`;
+
+  return new Uint8Array(Buffer.from(`${headerBlock}\r\n\r\n${body}`, "utf8"));
 }

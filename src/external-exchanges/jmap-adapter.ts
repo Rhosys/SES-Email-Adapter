@@ -13,6 +13,8 @@ import {
   type ProviderRenewalError,
   type ProviderDeactivationError,
   type ProviderFetchError,
+  type ProviderSendError,
+  type SendResult,
 } from "./provider-adapter.js";
 import type { EncryptionManager } from "../secrets/encryption-manager.js";
 import type { ExchangesDatabase } from "../database/exchanges-database.js";
@@ -26,6 +28,7 @@ import type { Logger } from "../logger.js";
 interface JmapSession {
   apiUrl: string;
   downloadUrl: string;
+  uploadUrl: string;
   primaryAccounts: Record<string, string>;
   capabilities: Record<string, unknown>;
 }
@@ -36,6 +39,7 @@ interface JmapSession {
 
 export const JMAP_USING = ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"] as const;
 const MAIL_CAPABILITY = "urn:ietf:params:jmap:mail";
+const SUBMISSION_CAPABILITY = "urn:ietf:params:jmap:submission";
 const JMAP_PUSH_WEBHOOK_BASE = "https://api.email.rhosys.cloud/api/external-exchanges/jmap/target";
 
 function delay(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
@@ -125,9 +129,14 @@ export async function fetchSession(sessionUrl: string, auth: string, timeout: nu
 
   const capabilities = (session["capabilities"] as Record<string, unknown> | undefined) ?? {};
 
+  // uploadUrl is only required for sending (Blob/upload target) — activate/renew never touch it,
+  // so an absent or malformed value here doesn't block sync, only surfaces later as a send failure.
+  const uploadUrl = typeof session["uploadUrl"] === "string" ? session["uploadUrl"] : "";
+
   return ok({
     apiUrl: session["apiUrl"] as string,
     downloadUrl: session["downloadUrl"] as string,
+    uploadUrl,
     primaryAccounts,
     capabilities,
   });
@@ -515,6 +524,139 @@ export class JmapAdapter implements ProviderAdapter {
 
     const rawMime = new Uint8Array(await mimeResponse.arrayBuffer());
     return ok({ rawMime, receivedAt: email.receivedAt });
+  }
+
+  /**
+   * Sends via JMAP EmailSubmission (RFC 8621 §7) — the same Basic Auth credentials already
+   * stored for sync are reused, since JMAP has no separate submission-only credential concept.
+   * Requires the server to advertise `urn:ietf:params:jmap:submission`; a server that only
+   * exposes Mail is treated the same as an OAuth connection missing its send scope, since
+   * there's nothing the user can do about it short of switching servers.
+   *
+   * Flow: upload the raw MIME as a blob, import it as an Email into the account's Drafts
+   * mailbox (falling back to Inbox if no Drafts mailbox exists), then submit that Email and,
+   * on success, move it into Sent and clear the draft flag in the same request.
+   */
+  async sendMessage(rawMime: Uint8Array, emx: ExternalMailExchange): Promise<Result<SendResult, ProviderSendError>> {
+    const jmapConfig = emx.jmapConfig;
+    if (!jmapConfig) {
+      return err({ kind: "provider_send_failed", cause: "Missing jmapConfig" });
+    }
+
+    const decryptResult = await this.encryptionManager.decrypt(jmapConfig.encryptedPassword);
+    if (decryptResult.isErr()) return err({ kind: "provider_send_failed", cause: "decryption failed" });
+    const password = decryptResult.value;
+    const auth = buildBasicAuth(jmapConfig.username, password);
+
+    const sessionResult = await fetchSession(jmapConfig.sessionUrl, auth, 30_000);
+    if (sessionResult.isErr()) {
+      if (sessionResult.error.cause === "invalid credentials") {
+        return err({ kind: "provider_send_failed", cause: "invalid credentials" });
+      }
+      return err({ kind: "provider_send_failed", cause: sessionResult.error.cause });
+    }
+    const session = sessionResult.value;
+    const mailAccountId = session.primaryAccounts[MAIL_CAPABILITY];
+    if (!mailAccountId) return err({ kind: "provider_send_failed", cause: "server does not support JMAP Mail" });
+
+    const submissionAccountId = session.primaryAccounts[SUBMISSION_CAPABILITY];
+    if (!submissionAccountId || !session.uploadUrl) {
+      this.logger.error("JMAP send rejected — server does not advertise the EmailSubmission capability.", { code: "emx.jmap.send_scope_missing", emxId: emx.id });
+      return err({ kind: "provider_send_scope_missing", cause: "server does not support JMAP EmailSubmission" });
+    }
+
+    // Upload the raw MIME as a blob.
+    const uploadUrl = session.uploadUrl.replace("{accountId}", mailAccountId);
+    let uploadResp: Response;
+    try {
+      uploadResp = await fetchWithRetry(uploadUrl, {
+        method: "POST",
+        headers: { Authorization: auth, "Content-Type": "message/rfc822" },
+        body: rawMime,
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch {
+      return err({ kind: "provider_send_failed", cause: "blob upload unreachable" });
+    }
+    if (uploadResp.status === 401 || uploadResp.status === 403) {
+      return err({ kind: "provider_send_failed", cause: "invalid credentials" });
+    }
+    if (!uploadResp.ok) {
+      return err({ kind: "provider_send_failed", cause: `blob upload failed: HTTP ${uploadResp.status}` });
+    }
+    let uploadBody: { blobId?: string };
+    try {
+      uploadBody = await uploadResp.json() as { blobId?: string };
+    } catch {
+      return err({ kind: "provider_send_failed", cause: "invalid blob upload response" });
+    }
+    if (!uploadBody.blobId) return err({ kind: "provider_send_failed", cause: "blob upload response missing blobId" });
+    const blobId = uploadBody.blobId;
+
+    const using = [...JMAP_USING, SUBMISSION_CAPABILITY];
+
+    // Resolve the sending identity and the Drafts/Sent mailboxes.
+    const lookupResult = await jmapCall(session.apiUrl, auth, using, [
+      ["Identity/get", { accountId: submissionAccountId }, "id0"],
+      ["Mailbox/query", { accountId: mailAccountId, filter: { role: "drafts" } }, "mq0"],
+      ["Mailbox/query", { accountId: mailAccountId, filter: { role: "sent" } }, "mq1"],
+    ], 30_000);
+    if (lookupResult.isErr()) return err({ kind: "provider_send_failed", cause: lookupResult.error.cause });
+
+    const [idResp, draftsResp, sentResp] = lookupResult.value as Array<[string, Record<string, unknown>, string] | undefined>;
+    if (!idResp || idResp[0] === "error") return err({ kind: "provider_send_failed", cause: "Identity/get failed" });
+    const identities = (idResp[1] as { list?: Array<{ id: string; email: string }> }).list ?? [];
+    const identity = identities.find(i => i.email.toLowerCase() === jmapConfig.username.toLowerCase()) ?? identities[0];
+    if (!identity) {
+      this.logger.error("JMAP send rejected — no submission identity available for this mailbox.", { code: "emx.jmap.send_scope_missing", emxId: emx.id });
+      return err({ kind: "provider_send_scope_missing", cause: "no submission identity available for this mailbox" });
+    }
+
+    const draftsId = draftsResp && draftsResp[0] !== "error" ? (draftsResp[1] as { ids?: string[] }).ids?.[0] : undefined;
+    const sentId = sentResp && sentResp[0] !== "error" ? (sentResp[1] as { ids?: string[] }).ids?.[0] : undefined;
+    const importMailboxId = draftsId ?? jmapConfig.inboxId;
+
+    // Import the blob as an Email, then submit it — moving it into Sent and clearing the
+    // draft flag on success, referencing the Email/import result by its in-request creation id.
+    const onSuccessUpdateEmail: Record<string, unknown> = sentId
+      ? { "#S0": { [`mailboxIds/${importMailboxId}`]: null, [`mailboxIds/${sentId}`]: true, "keywords/$draft": null } }
+      : { "#S0": { "keywords/$draft": null } };
+
+    const submitResult = await jmapCall(session.apiUrl, auth, using, [
+      ["Email/import", {
+        accountId: mailAccountId,
+        emails: { E0: { blobId, mailboxIds: { [importMailboxId]: true }, keywords: { "$draft": true, "$seen": true } } },
+      }, "ei0"],
+      ["EmailSubmission/set", {
+        accountId: submissionAccountId,
+        create: { S0: { emailId: "#E0", identityId: identity.id } },
+        onSuccessUpdateEmail,
+      }, "es0"],
+    ], 30_000);
+    if (submitResult.isErr()) return err({ kind: "provider_send_failed", cause: submitResult.error.cause });
+
+    const [importResp, subResp] = submitResult.value as Array<[string, Record<string, unknown>, string] | undefined>;
+    if (!importResp || importResp[0] === "error") {
+      const errorType = importResp ? (importResp[1] as { type?: string }).type : "unknown";
+      return err({ kind: "provider_send_failed", cause: `Email/import failed: ${errorType}` });
+    }
+    const importedId = (importResp[1] as { created?: Record<string, { id: string }> }).created?.["E0"]?.id;
+    if (!importedId) return err({ kind: "provider_send_failed", cause: "Email/import did not return an id" });
+
+    if (!subResp || subResp[0] === "error") {
+      const errorType = subResp ? (subResp[1] as { type?: string }).type : "unknown";
+      return err({ kind: "provider_send_rejected", cause: `EmailSubmission/set failed: ${errorType}` });
+    }
+    const subData = subResp[1] as { created?: Record<string, { id: string }>; notCreated?: Record<string, { type?: string; description?: string }> };
+    const notCreated = subData.notCreated?.["S0"];
+    if (notCreated) {
+      return err({ kind: "provider_send_rejected", cause: `EmailSubmission rejected: ${notCreated.type ?? "unknown"} ${notCreated.description ?? ""}` });
+    }
+    const providerMessageId = subData.created?.["S0"]?.id;
+    if (!providerMessageId) return err({ kind: "provider_send_failed", cause: "EmailSubmission/set did not return an id" });
+
+    this.logger.info("JMAP send succeeded", { code: "emx.jmap.send_success", emxId: emx.id, providerMessageId });
+    return ok({ providerMessageId });
   }
 
   // ---------------------------------------------------------------------------

@@ -22,8 +22,9 @@ import { exchangeCredentials } from "../external-exchanges/provider-adapter.js";
 import type { ExternalMailExchange } from "../types/index.js";
 import type { Result } from "../errors.js";
 import { ok, err } from "../errors.js";
-import { buildOutboundTags } from "../email/ses-tags.js";
+import { buildOutboundTags, TAG_HOP_COUNT, MAX_HOP_COUNT } from "../email/ses-tags.js";
 import { buildMimeMessage } from "../email/mime-builder.js";
+import { renderMarkdownToHtml } from "../email/markdown.js";
 import { buildOutboundMsgId } from "../processor/message-id.js";
 import type { Logger } from "../logger.js";
 
@@ -33,6 +34,12 @@ interface ReplySenderDeps {
   exchangesDb: ExchangesDatabase;
   adapters: Record<string, ProviderAdapter>;
   logger: Logger;
+}
+
+/** Normalizes a subject to a single "Re: " prefix — strips an existing "Re:"/"Fwd:"/"Fw:" prefix (any casing) before adding one, instead of stacking. */
+function buildReplySubject(subject: string): string {
+  const stripped = subject.replace(/^\s*(?:(?:re|fwd?|fw)\s*:\s*)+/i, "");
+  return `Re: ${stripped}`;
 }
 
 export class ReplySenderService implements ReplySender {
@@ -62,6 +69,10 @@ export class ReplySenderService implements ReplySender {
     accountId?: string;
     signalId?: string;
     threadId?: string;
+    /** Hop count read off the message being replied to (its `X-Numaeel-Hop-Count` header, if any). Omit for a compose-from-scratch with no prior hop. */
+    hopCount?: number;
+    /** RFC 3834 — set for messages a human did not compose (pongs, vacation-style auto-replies). Never set for a user's own draft send. */
+    autoSubmitted?: boolean;
     /**
      * Whether this send may degrade to a platform-domain send (`noreply@MAIL_DOMAIN` under the
      * platform tenant) when the from-address cannot send as itself — i.e. it is not backed by an
@@ -73,13 +84,35 @@ export class ReplySenderService implements ReplySender {
      */
     allowFallbackToPlatformSending: boolean;
   }): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
-    const subject = `Re: ${opts.subject}`;
-    const headers = opts.inReplyTo
-      ? [
-          { Name: "In-Reply-To", Value: opts.inReplyTo },
-          { Name: "References", Value: opts.inReplyTo },
-        ]
-      : [];
+    // Mail-loop guard: every send through this funnel (draft sends, auto-replies, pongs)
+    // increments the hop count carried on the message it answers. Two systems that keep
+    // auto-replying to each other run this number up fast — refuse rather than perpetuate it.
+    const hopCount = (opts.hopCount ?? 0) + 1;
+    if (hopCount > MAX_HOP_COUNT) {
+      this.logger.error(`Refusing to send — hop count ${hopCount} exceeds the mail-loop guard limit of ${MAX_HOP_COUNT}. This message is almost certainly part of a reply loop.`, {
+        code: "reply_sender.loop_guard_tripped",
+        hopCount,
+        to: opts.to,
+        from: opts.from,
+        subject: opts.subject,
+        accountId: opts.accountId,
+        signalId: opts.signalId,
+        threadId: opts.threadId,
+      });
+      return err({ kind: "loop_guard_tripped", hopCount });
+    }
+
+    const subject = buildReplySubject(opts.subject);
+    const headers = [
+      ...(opts.inReplyTo
+        ? [
+            { Name: "In-Reply-To", Value: opts.inReplyTo },
+            { Name: "References", Value: opts.inReplyTo },
+          ]
+        : []),
+      { Name: TAG_HOP_COUNT, Value: String(hopCount) },
+      ...(opts.autoSubmitted ? [{ Name: "Auto-Submitted", Value: "auto-replied" }] : []),
+    ];
 
     // Platform-originated mail (a pong from the platform domain) carries no account. It sends
     // under the platform tenant, and having no alias it never routes through a provider —
@@ -90,14 +123,18 @@ export class ReplySenderService implements ReplySender {
     if (routeResult.isErr()) return err(routeResult.error);
     const route = routeResult.value;
 
+    // Every composer that writes `body` (reply/compose box, auto-reply templates) is Markdown
+    // — see src/email/markdown.ts — so it's rendered to HTML once here, for all send routes.
+    const htmlBody = renderMarkdownToHtml(opts.body);
+
     if (route.kind === "provider") {
-      return this.sendViaProvider(route.exchange, { ...opts, accountId: resolvedAccountId, subject, headers });
+      return this.sendViaProvider(route.exchange, { ...opts, htmlBody, accountId: resolvedAccountId, subject, headers });
     }
     if (route.kind === "platform") {
       // Degrade to the platform domain: rewrite the from and send under the platform tenant.
-      return this.sendViaSes({ ...opts, from: `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`, accountId: this.emailService.platformTenant, subject, headers });
+      return this.sendViaSes({ ...opts, htmlBody, from: `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`, accountId: this.emailService.platformTenant, subject, headers });
     }
-    return this.sendViaSes({ ...opts, accountId: resolvedAccountId, subject, headers });
+    return this.sendViaSes({ ...opts, htmlBody, accountId: resolvedAccountId, subject, headers });
   }
 
   // ---------------------------------------------------------------------------
@@ -180,10 +217,10 @@ export class ReplySenderService implements ReplySender {
 
   private async sendViaProvider(
     emx: ExternalMailExchange,
-    opts: { to: string; from: string; subject: string; body: string; accountId: string; signalId?: string; headers: Array<{ Name: string; Value: string }> },
+    opts: { to: string; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; headers: Array<{ Name: string; Value: string }> },
   ): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
     const adapter = this.adapters[emx.platform];
-    // resolveExchangeRoute already established this; narrowing for the type checker.
+    // resolveRoute already established this; narrowing for the type checker.
     if (!adapter?.sendMessage) return err({ kind: "provider_send_rejected", cause: `${emx.platform} exchanges cannot send` });
 
     const rawMime = buildMimeMessage({
@@ -191,6 +228,7 @@ export class ReplySenderService implements ReplySender {
       to: opts.to,
       subject: opts.subject,
       textBody: opts.body,
+      htmlBody: opts.htmlBody,
       headers: opts.headers,
     });
 
@@ -213,7 +251,7 @@ export class ReplySenderService implements ReplySender {
   }
 
   private async sendViaSes(
-    opts: { to: string; from: string; subject: string; body: string; accountId: string; signalId?: string; threadId?: string; headers: Array<{ Name: string; Value: string }> },
+    opts: { to: string; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; threadId?: string; headers: Array<{ Name: string; Value: string }> },
   ): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
     const tags = buildOutboundTags("reply", {
       accountId: opts.accountId,
@@ -226,6 +264,7 @@ export class ReplySenderService implements ReplySender {
       fromOverride: opts.from,
       subject: opts.subject,
       textBody: opts.body,
+      htmlBody: opts.htmlBody,
       accountId: opts.accountId,
       headers: opts.headers,
       tags,

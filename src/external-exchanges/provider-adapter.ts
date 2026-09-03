@@ -109,11 +109,12 @@ export interface ProviderAdapter {
   /**
    * Sends a fully-formed RFC 5322 message through the provider on the mailbox owner's behalf.
    *
-   * Optional: only providers with a send API implement it (Gmail, Outlook). IMAP and JMAP
-   * exchanges are receive-only here — IMAP has no send channel at all (that's SMTP) and JMAP
-   * submission is a separate protocol surface. The send router treats an absent method as
-   * "this exchange cannot send" and fails the send rather than silently falling back to SES,
-   * which would emit unaligned mail from a domain we are not authorized for.
+   * Optional, but every current adapter implements it: Gmail/Outlook via their OAuth send
+   * APIs, IMAP via SMTP submission on the same host/credentials, JMAP via EmailSubmission
+   * (RFC 8621) on the same session. The send router treats an absent method — or a JMAP/IMAP
+   * server that turns out not to support sending — as "this exchange cannot send" and fails
+   * the send rather than silently falling back to SES, which would emit unaligned mail from a
+   * domain we are not authorized for.
    */
   sendMessage?(rawMime: Uint8Array, emx: ExternalMailExchange): Promise<Result<SendResult, ProviderSendError>>
 }
