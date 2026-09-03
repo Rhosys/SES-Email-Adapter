@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { GetObjectCommand, type S3Client } from "@aws-sdk/client-s3";
-import { S3ContentStore } from "../../src/content-store.js";
+import { S3ObjectStorage } from "../../src/s3-object-storage.js";
 
 vi.mock("@aws-sdk/s3-request-presigner", () => ({
   getSignedUrl: vi.fn(async (_client, command, options) => {
@@ -24,10 +24,10 @@ import { createPresignedPost } from "@aws-sdk/s3-presigned-post";
 
 const fakeS3 = {} as S3Client;
 
-describe("S3ContentStore.getSignedUrl", () => {
+describe("S3ObjectStorage.createReadUrl", () => {
   it("calls getSignedUrl with GetObjectCommand and 30s expiry", async () => {
-    const store = new S3ContentStore(fakeS3, "my-bucket");
-    const url = await store.getSignedUrl("emails/abc.eml");
+    const storage = new S3ObjectStorage(fakeS3, "my-bucket");
+    const url = await storage.createReadUrl("emails/abc.eml");
 
     expect(getSignedUrl).toHaveBeenCalledWith(
       fakeS3,
@@ -43,19 +43,21 @@ describe("S3ContentStore.getSignedUrl", () => {
   });
 });
 
-describe("S3ContentStore.getPresignedPost", () => {
-  it("sets starts-with condition, 10MB limit, and 30s expiry without tagging when retentionTag is null", async () => {
-    const store = new S3ContentStore(fakeS3, "content-bucket");
-    const result = await store.getPresignedPost(
-      "accounts/123/senders/example.com/extracted/sig1/",
-      null,
-    );
+describe("S3ObjectStorage.generatePresignedPost", () => {
+  it("signs key, Content-Type, and size conditions without tagging when retentionTag is null", async () => {
+    const storage = new S3ObjectStorage(fakeS3, "content-bucket");
+    const result = await storage.generatePresignedPost({
+      keyPrefix: "accounts/123/senders/example.com/extracted/sig1/",
+      maxBytes: 10 * 1024 * 1024,
+      retentionTag: null,
+    });
 
     expect(createPresignedPost).toHaveBeenCalledWith(fakeS3, {
       Bucket: "content-bucket",
       Key: "accounts/123/senders/example.com/extracted/sig1/${filename}",
       Conditions: [
         ["starts-with", "$key", "accounts/123/senders/example.com/extracted/sig1/"],
+        ["starts-with", "$Content-Type", ""],
         ["content-length-range", 0, 10 * 1024 * 1024],
       ],
       Fields: {},
@@ -67,17 +69,19 @@ describe("S3ContentStore.getPresignedPost", () => {
   });
 
   it("includes tagging condition and field when retentionTag is '365'", async () => {
-    const store = new S3ContentStore(fakeS3, "content-bucket");
-    await store.getPresignedPost(
-      "accounts/456/senders/test.org/extracted/sig2/",
-      "365",
-    );
+    const storage = new S3ObjectStorage(fakeS3, "content-bucket");
+    await storage.generatePresignedPost({
+      keyPrefix: "accounts/456/senders/test.org/extracted/sig2/",
+      maxBytes: 10 * 1024 * 1024,
+      retentionTag: "365",
+    });
 
     expect(createPresignedPost).toHaveBeenCalledWith(fakeS3, {
       Bucket: "content-bucket",
       Key: "accounts/456/senders/test.org/extracted/sig2/${filename}",
       Conditions: [
         ["starts-with", "$key", "accounts/456/senders/test.org/extracted/sig2/"],
+        ["starts-with", "$Content-Type", ""],
         ["content-length-range", 0, 10 * 1024 * 1024],
         { "x-amz-tagging": "retention=365" },
       ],
@@ -89,17 +93,19 @@ describe("S3ContentStore.getPresignedPost", () => {
   });
 
   it("includes tagging condition and field when retentionTag is '3650'", async () => {
-    const store = new S3ContentStore(fakeS3, "content-bucket");
-    const result = await store.getPresignedPost(
-      "accounts/789/senders/long.com/extracted/sig3/",
-      "3650",
-    );
+    const storage = new S3ObjectStorage(fakeS3, "content-bucket");
+    const result = await storage.generatePresignedPost({
+      keyPrefix: "accounts/789/senders/long.com/extracted/sig3/",
+      maxBytes: 10 * 1024 * 1024,
+      retentionTag: "3650",
+    });
 
     expect(createPresignedPost).toHaveBeenCalledWith(fakeS3, {
       Bucket: "content-bucket",
       Key: "accounts/789/senders/long.com/extracted/sig3/${filename}",
       Conditions: [
         ["starts-with", "$key", "accounts/789/senders/long.com/extracted/sig3/"],
+        ["starts-with", "$Content-Type", ""],
         ["content-length-range", 0, 10 * 1024 * 1024],
         { "x-amz-tagging": "retention=3650" },
       ],

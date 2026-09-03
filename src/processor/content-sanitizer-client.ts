@@ -3,6 +3,7 @@ import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { S3RetentionTag } from "./retention.js";
 import type { Logger } from "../logger.js";
+import type { PresignedPost, UploadField } from "../s3-object-storage.js";
 
 // ---------------------------------------------------------------------------
 // Types (mirror the Content Sanitizer Lambda's request/response)
@@ -38,10 +39,7 @@ export interface InlineImageRef {
 
 export interface ContentSanitizeRequest {
   presignedGetUrl: string;
-  presignedPost: {
-    url: string;
-    fields: Record<string, string>;
-  };
+  presignedPost: PresignedPost<UploadField>;
   accountId: string;
   senderEtld1: string;
   keyPrefix: string;

@@ -1045,8 +1045,8 @@ export class SignalProcessor {
     const keyPrefix = `content/accounts/${accountId}/extracted/${msg.compositeMailMessageId}/`;
 
     const [presignedGet, presignedPost] = await Promise.all([
-      this.emailContentStore.getSignedUrl(s3Key),
-      this.contentStore.getPresignedPost(keyPrefix, s3Tag),
+      this.emailContentStore.createReadUrl(s3Key),
+      this.contentStore.createContentUploadTicket(keyPrefix, s3Tag),
     ]);
 
     const sanitizeResult = await this.contentSanitizer.invoke({
@@ -1774,7 +1774,7 @@ export class SignalProcessor {
     this.logger.trackPoint("calendar_attachment_found", { filename: calendarAttachment.filename, mimeType: calendarAttachment.mimeType });
 
     // Fetch .ics bytes from content store
-    const icsBytes = await this.contentStore.getObject(calendarAttachment.s3Key);
+    const icsBytes = await this.contentStore.getContent(calendarAttachment.s3Key);
 
     // Parse .ics
     const parseResult = parseIcs(new Uint8Array(icsBytes));

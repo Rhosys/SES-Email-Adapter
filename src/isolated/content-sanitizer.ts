@@ -4,6 +4,7 @@ import { sanitizeHtml } from "./html-sanitizer.js";
 import { extractAssets, type ExtractedAsset } from "./asset-extractor.js";
 import { buildDisplayRawEmail } from "./raw-email-display.js";
 import type { Logger } from "../logger.js";
+import { S3ObjectStorage, type PresignedPost, type UploadField } from "../s3-object-storage.js";
 
 // Lambda timeout is 60s (see deploy/compute.tf). Emitting a TRACK log past this
 // threshold surfaces invocations that are close to timing out, before they start
@@ -70,10 +71,7 @@ interface InlineImageRef {
 
 interface ContentSanitizeRequest {
   presignedGetUrl: string;
-  presignedPost: {
-    url: string;
-    fields: Record<string, string>;
-  };
+  presignedPost: PresignedPost<UploadField>;
   accountId: string;
   senderEtld1: string;
   keyPrefix: string;
@@ -172,48 +170,19 @@ function parseAddressList(addr: unknown): EmailAddress[] {
     .map(v => ({ address: v.address, ...(v.name ? { name: v.name } : {}) }));
 }
 
+// Thin adapter over the shared S3ObjectStorage.upload primitive. The isolate holds no AWS
+// credentials, so it only ever POSTs to a ticket it was handed — S3ObjectStorage.upload is
+// static and touches no S3 client. Keeps the local { ok, detail } shape the callsites below
+// branch on; all S3 field-name/policy handling lives in S3ObjectStorage.
 async function uploadViaPresignedPost(
-  presignedPost: { url: string; fields: Record<string, string> },
+  presignedPost: PresignedPost<UploadField>,
   s3Key: string,
   content: Buffer | Uint8Array,
   contentType: string,
 ): Promise<{ ok: true } | { ok: false; detail: string }> {
-  const formData = new FormData();
-
-  // Use set() (overwrite), not append(), for every field: S3's exact-match
-  // policy conditions (e.g. ["eq", "$x-amz-tagging", ...]) reject the upload
-  // if a field appears twice in the multipart body, so a later field with the
-  // same name must replace an earlier one rather than duplicate it. Only use
-  // append() where a field is deliberately meant to carry multiple values.
-  for (const [field, value] of Object.entries(presignedPost.fields)) {
-    formData.set(field, value);
-  }
-
-  formData.set("key", s3Key);
-  formData.set("Content-Type", contentType);
-
-  // The file must be the last field
-  formData.set("file", new Blob([Buffer.from(content)], { type: contentType }));
-
-  try {
-    const response = await fetch(presignedPost.url, {
-      method: "POST",
-      body: formData,
-    });
-    if (response.ok || response.status === 204) return { ok: true };
-    // S3 presigned POST failures are almost always an expired/mismatched policy
-    // (clock skew, a key/condition that no longer matches what the URL was signed
-    // for) — the body carries the actual S3 error code, worth surfacing.
-    let body = "";
-    try {
-      body = await response.text();
-    } catch {
-      // best-effort — fall back to the status alone below
-    }
-    return { ok: false, detail: `HTTP ${response.status}${body ? `: ${body.slice(0, 300)}` : ""}` };
-  } catch (e) {
-    return { ok: false, detail: e instanceof Error ? e.message : "unknown fetch error" };
-  }
+  const result = await S3ObjectStorage.upload(presignedPost, s3Key, content, contentType);
+  if (result.isErr()) return { ok: false, detail: result.error.reason };
+  return { ok: true };
 }
 
 

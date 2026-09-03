@@ -78,7 +78,7 @@ describe("content-sanitizer — display-safe raw email upload", () => {
   });
 
   // Regression: the presigned post's `fields` already carries x-amz-tagging when
-  // it was signed with a retention tag (see S3ContentStore.getPresignedPost). The
+  // it was signed with a retention tag (see S3ObjectStorage.generatePresignedPost). The
   // upload path must not append it again — S3's ["eq", "$x-amz-tagging", ...]
   // policy condition rejects the request if the field appears twice in the
   // multipart body.

@@ -161,15 +161,15 @@ function buildProcessor(opts: {
 
   // When ICS content is provided, mock ContentStore.getObject to return the bytes
   const contentStoreMock = {
-    getSignedUrl: vi.fn().mockResolvedValue("https://signed-url"),
-    getObject: vi.fn().mockImplementation(() => {
+    createReadUrl: vi.fn().mockResolvedValue("https://signed-url"),
+    getContent: vi.fn().mockImplementation(() => {
       if (icsContent) {
         return Promise.resolve(new TextEncoder().encode(icsContent));
       }
       return Promise.resolve(new Uint8Array());
     }),
-    putObject: vi.fn().mockResolvedValue(undefined),
-    getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
+    saveRawEmail: vi.fn().mockResolvedValue(undefined),
+    createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
     saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined),
   };
 

@@ -49,10 +49,10 @@ export function makeRuleAnnotationStore() {
 
 /** Stub ContentStore — presign/S3 operations are mocked at module level so this is never called */
 export const stubContentStore = {
-  getSignedUrl: vi.fn().mockResolvedValue("https://signed-url"),
-  getObject: vi.fn().mockResolvedValue(new Uint8Array()),
-  putObject: vi.fn().mockResolvedValue(undefined),
-  getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
+  createReadUrl: vi.fn().mockResolvedValue("https://signed-url"),
+  getContent: vi.fn().mockResolvedValue(new Uint8Array()),
+  saveRawEmail: vi.fn().mockResolvedValue(undefined),
+  createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
   getRawEmailUrl: vi.fn().mockResolvedValue("https://signed-url"),
   saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined),
 } as never;

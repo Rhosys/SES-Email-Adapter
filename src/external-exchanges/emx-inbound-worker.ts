@@ -83,7 +83,7 @@ export class EmxInboundWorker {
       return err(error);
     }
 
-    await this.emailContentStore.putObject(s3Key, fetchResult.value.rawMime, "message/rfc822");
+    await this.emailContentStore.saveRawEmail(s3Key, fetchResult.value.rawMime);
 
     const message: InboundSignalMessage = {
       expectedAccountId: accountId,

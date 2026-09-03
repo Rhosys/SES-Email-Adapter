@@ -90,10 +90,10 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 
 function makeContentStore(icsContent: string = VALID_ICS): ContentStore {
   return {
-    getSignedUrl: vi.fn().mockResolvedValue("https://signed-url"),
-    getObject: vi.fn().mockResolvedValue(new TextEncoder().encode(icsContent)),
-    putObject: vi.fn().mockResolvedValue(undefined),
-    getPresignedPost: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
+    createReadUrl: vi.fn().mockResolvedValue("https://signed-url"),
+    getContent: vi.fn().mockResolvedValue(new TextEncoder().encode(icsContent)),
+    saveRawEmail: vi.fn().mockResolvedValue(undefined),
+    createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }),
     saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined),
   } as unknown as ContentStore;
 }

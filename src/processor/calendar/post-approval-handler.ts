@@ -56,7 +56,7 @@ export async function handlePostApprovalCalendar(
   // Fetch .ics bytes from content store
   let icsBytes: Uint8Array;
   try {
-    icsBytes = await contentStore.getObject(calendarAttachment.s3Key);
+    icsBytes = await contentStore.getContent(calendarAttachment.s3Key);
   } catch (e) {
     logger.warn("Post-approval calendar: failed to fetch .ics from content store.", {
       code: "processor.post_approval_calendar.s3_fetch_failed",
