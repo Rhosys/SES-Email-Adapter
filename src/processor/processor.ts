@@ -899,7 +899,7 @@ export class SignalProcessor {
     try {
       return await this._processInboundUnsafe(msg, receiveCount, opts);
     } catch (e) {
-      this.logger.error(`processInbound threw an unhandled exception — the message will be retried: ${e instanceof Error ? e.message : e}`, { code: "processor.unhandled_exception", error: e, compositeMailMessageId: msg.compositeMailMessageId });
+      this.logger.warn(`processInbound threw an unhandled exception — the message will be retried: ${e instanceof Error ? e.message : e}`, { code: "processor.unhandled_exception", error: e, compositeMailMessageId: msg.compositeMailMessageId });
       return err(dbError(e));
     }
   }
