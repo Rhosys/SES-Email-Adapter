@@ -487,12 +487,18 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   // time. That assumption fails for an orphaned cid — one the sanitizer stripped, or that
   // never appeared in the HTML (e.g. a Content-ID part with no matching <img>, or a
   // text-only message). Such an image would render nowhere AND not appear as an attachment:
-  // invisible and unreachable. Promote any inline image whose cid is not present in the
-  // final htmlBody into the attachment list so it stays viewable/downloadable.
+  // invisible and unreachable. Promote such an inline image into the attachment list so it
+  // stays viewable/downloadable — UNLESS its filename matches a referenced inline image, in
+  // which case it's a duplicate copy (e.g. Gmail ships the same logo twice, once with a cid
+  // the HTML uses and once with a cid it doesn't) and promoting it would surface a redundant
+  // phantom attachment. Those duplicates are dropped instead.
   const renderedBody = htmlBody ?? "";
   const orphanedInlineImages = inlineImageRefs.filter(ref => !renderedBody.includes(`cid:${ref.contentId}`));
   const referencedInlineImages = inlineImageRefs.filter(ref => renderedBody.includes(`cid:${ref.contentId}`));
-  for (const orphan of orphanedInlineImages) {
+  const referencedFilenames = new Set(referencedInlineImages.map(ref => ref.filename));
+  const promotedInlineImages = orphanedInlineImages.filter(orphan => !referencedFilenames.has(orphan.filename));
+  const droppedDuplicateInlineImages = orphanedInlineImages.filter(orphan => referencedFilenames.has(orphan.filename));
+  for (const orphan of promotedInlineImages) {
     attachmentRefs.push({
       filename: orphan.filename,
       mimeType: orphan.mimeType,
@@ -500,8 +506,11 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
       s3Key: orphan.s3Key,
     });
   }
-  if (orphanedInlineImages.length > 0) {
-    logger?.trackPoint("inline_images_promoted_to_attachments", { promotedCount: orphanedInlineImages.length });
+  if (promotedInlineImages.length > 0) {
+    logger?.trackPoint("inline_images_promoted_to_attachments", { promotedCount: promotedInlineImages.length });
+  }
+  if (droppedDuplicateInlineImages.length > 0) {
+    logger?.trackPoint("duplicate_inline_images_dropped", { droppedCount: droppedDuplicateInlineImages.length });
   }
 
   // 9. Build response

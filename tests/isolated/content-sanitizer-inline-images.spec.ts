@@ -173,3 +173,179 @@ describe("content-sanitizer — inline image size/count cap", () => {
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Orphaned-inline-image disposition: an over-budget inline image whose cid is
+// NOT referenced in the rendered body is either promoted to an attachment (so
+// it stays reachable) or dropped as a duplicate when its filename matches a
+// referenced inline image. The duplicate case is what Gmail produces: the same
+// logo shipped twice, once with a cid the HTML uses and once with a cid it does
+// not (see PCEHQ.eml). Only over-budget images (>100KB) reach this path — small
+// ones are embedded as data URIs and never become InlineImageRefs.
+// ---------------------------------------------------------------------------
+
+const OVER_BUDGET = 200 * 1024;
+
+// Builds a multipart/related message with full control over each image part's
+// cid, filename, and size, plus an explicit list of cids to reference from the
+// HTML. This is what buildEmailWithInlineImages can't express — it always
+// references every image and derives the filename from the cid.
+function buildEmailWithControlledInlineImages(
+  images: Array<{ contentId: string; filename: string; size: number }>,
+  referencedCids: string[],
+): string {
+  const parts = images.map(({ contentId, filename, size }) => [
+    `--${BOUNDARY}`,
+    "Content-Type: image/png",
+    "Content-Transfer-Encoding: base64",
+    `Content-ID: <${contentId}>`,
+    `Content-Disposition: inline; filename="${filename}"`,
+    "",
+    Buffer.alloc(size, "A").toString("base64"),
+    "",
+  ].join("\r\n"));
+
+  const imgTags = referencedCids.map((cid) => `<img src="cid:${cid}">`).join("");
+
+  return [
+    "From: sender@example.com",
+    "To: recipient@example.com",
+    "Subject: Controlled inline images",
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/related; boundary="${BOUNDARY}"`,
+    "",
+    `--${BOUNDARY}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    "",
+    `<html><body>${imgTags}</body></html>`,
+    "",
+    ...parts,
+    `--${BOUNDARY}--`,
+  ].join("\r\n");
+}
+
+describe("content-sanitizer — orphaned inline image disposition", () => {
+  it("drops an orphaned inline image when its filename matches a referenced inline image (Gmail duplicate logo)", async () => {
+    // Two over-budget copies of the same file "logo.png": one cid referenced by
+    // the HTML, one orphaned. The orphan must be dropped, not surfaced as a
+    // phantom attachment; the referenced copy stays as an inline ref.
+    mockFetch(buildEmailWithControlledInlineImages(
+      [
+        { contentId: "referenced", filename: "logo.png", size: OVER_BUDGET },
+        { contentId: "orphan-dup", filename: "logo.png", size: OVER_BUDGET },
+      ],
+      ["referenced"],
+    ));
+
+    const result = await handler({
+      presignedGetUrl: "https://example.com/get",
+      presignedPost: { url: "https://example.com/post", fields: {} },
+      accountId: "acct-test",
+      senderEtld1: "example.com",
+      keyPrefix: "emails/msg-dup-inline/",
+      retentionTag: null,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    // Orphaned duplicate is neither an attachment …
+    expect(result.parsed.attachments).toEqual([]);
+    // … nor an inline ref — only the referenced copy survives.
+    expect(result.parsed.inlineImages).toEqual([
+      { contentId: "referenced", mimeType: "image/png", sizeBytes: OVER_BUDGET, s3Key: "emails/msg-dup-inline/0", filename: "logo.png" },
+    ]);
+  });
+
+  it("promotes an orphaned inline image when its filename is unique (not a duplicate)", async () => {
+    // A referenced logo plus an orphan with a DIFFERENT filename. The orphan is
+    // genuinely unique content, so it must be promoted to an attachment rather
+    // than dropped.
+    mockFetch(buildEmailWithControlledInlineImages(
+      [
+        { contentId: "referenced", filename: "logo.png", size: OVER_BUDGET },
+        { contentId: "orphan-unique", filename: "diagram.png", size: OVER_BUDGET },
+      ],
+      ["referenced"],
+    ));
+
+    const result = await handler({
+      presignedGetUrl: "https://example.com/get",
+      presignedPost: { url: "https://example.com/post", fields: {} },
+      accountId: "acct-test",
+      senderEtld1: "example.com",
+      keyPrefix: "emails/msg-unique-orphan/",
+      retentionTag: null,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    // Unique orphan is promoted to an attachment …
+    expect(result.parsed.attachments).toEqual([
+      { filename: "diagram.png", mimeType: "image/png", sizeBytes: OVER_BUDGET, s3Key: "emails/msg-unique-orphan/1" },
+    ]);
+    // … while the referenced copy remains an inline ref.
+    expect(result.parsed.inlineImages).toEqual([
+      { contentId: "referenced", mimeType: "image/png", sizeBytes: OVER_BUDGET, s3Key: "emails/msg-unique-orphan/0", filename: "logo.png" },
+    ]);
+  });
+
+  it("drops every orphaned duplicate when several share a referenced filename", async () => {
+    // One referenced copy, two orphaned copies, all named "banner.png". Both
+    // orphans are dropped; nothing is promoted.
+    mockFetch(buildEmailWithControlledInlineImages(
+      [
+        { contentId: "referenced", filename: "banner.png", size: OVER_BUDGET },
+        { contentId: "orphan-a", filename: "banner.png", size: OVER_BUDGET },
+        { contentId: "orphan-b", filename: "banner.png", size: OVER_BUDGET },
+      ],
+      ["referenced"],
+    ));
+
+    const result = await handler({
+      presignedGetUrl: "https://example.com/get",
+      presignedPost: { url: "https://example.com/post", fields: {} },
+      accountId: "acct-test",
+      senderEtld1: "example.com",
+      keyPrefix: "emails/msg-multi-dup/",
+      retentionTag: null,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.parsed.attachments).toEqual([]);
+    expect(result.parsed.inlineImages).toEqual([
+      { contentId: "referenced", mimeType: "image/png", sizeBytes: OVER_BUDGET, s3Key: "emails/msg-multi-dup/0", filename: "banner.png" },
+    ]);
+  });
+
+  it("promotes an orphan whose filename matches only another ORPHAN, not a referenced image", async () => {
+    // Two orphans share "shared.png" but neither is referenced by the HTML. The
+    // dedup key is referenced-image filenames only, so with no referenced copy
+    // to dedup against, both orphans are promoted — the body-or-attachments
+    // invariant still holds (they'd otherwise render nowhere and be unreachable).
+    mockFetch(buildEmailWithControlledInlineImages(
+      [
+        { contentId: "orphan-1", filename: "shared.png", size: OVER_BUDGET },
+        { contentId: "orphan-2", filename: "shared.png", size: OVER_BUDGET },
+      ],
+      [],
+    ));
+
+    const result = await handler({
+      presignedGetUrl: "https://example.com/get",
+      presignedPost: { url: "https://example.com/post", fields: {} },
+      accountId: "acct-test",
+      senderEtld1: "example.com",
+      keyPrefix: "emails/msg-orphan-only/",
+      retentionTag: null,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.parsed.attachments).toEqual([
+      { filename: "shared.png", mimeType: "image/png", sizeBytes: OVER_BUDGET, s3Key: "emails/msg-orphan-only/0" },
+      { filename: "shared.png", mimeType: "image/png", sizeBytes: OVER_BUDGET, s3Key: "emails/msg-orphan-only/1" },
+    ]);
+    expect(result.parsed.inlineImages).toBeUndefined();
+  });
+});
