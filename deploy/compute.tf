@@ -38,6 +38,16 @@ resource "aws_iam_role_policy" "lambda_permissions" {
         ]
       },
       {
+        # Extracted content (attachments, sanitized images, raw-display.eml, calendar
+        # .ics) is written via presigned POST (no role needed) and read back by the
+        # Lambda directly — reprocessing (getObject) and presigned GET (createReadUrl).
+        # The CDN read path is covered separately by the bucket's CloudFront OAC policy.
+        Sid      = "S3ReadExtractedContent"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${aws_s3_bucket.extracted_content.arn}/content/*"
+      },
+      {
         # Plan-driven retention: free/beta tag the inbox object; premium/internal
         # CopyObject emails/{key} → saved/{key} (needs PutObject on the destination).
         Sid      = "S3RetentionEmails"
