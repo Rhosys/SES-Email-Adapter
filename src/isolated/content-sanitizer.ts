@@ -1,4 +1,5 @@
 import { simpleParser } from "mailparser";
+import { createHash } from "node:crypto";
 import { Window } from "happy-dom";
 import { sanitizeHtml } from "./html-sanitizer.js";
 import { extractAssets, type ExtractedAsset } from "./asset-extractor.js";
@@ -61,6 +62,43 @@ function summarizeDroppedReasons(dropped: { reason: string; detail?: string }[])
   }
   for (const [reason, count] of countsByReason) parts.push(`${count} ${reason}`);
   return parts.join("; ");
+}
+
+// Number of bytes sampled at each probe point in the tiered content comparison.
+const DEDUP_SAMPLE_WINDOW = 64;
+
+/**
+ * Decides whether two byte buffers are identical, cheaply. Used to detect that an orphaned
+ * inline image is a byte-for-byte duplicate of a referenced one (senders sometimes ship the
+ * same image twice under different filenames, so the filename check alone misses it).
+ *
+ * Tiered so the expensive step runs only when the cheap ones cannot decide:
+ *   1. Length differs  -> definitely different. O(1).
+ *   2. Lengths equal, sampled bytes at head/tail/midpoints differ -> definitely different.
+ *      Reads a few hundred bytes regardless of size. A sample MATCH is inconclusive (two
+ *      different files can share headers/trailers — common for PNG/PDF), so it never decides
+ *      "equal" on its own.
+ *   3. Length equal AND samples match -> hash both and compare digests. Only now do we pay
+ *      the O(n) pass, and only to CONFIRM before a destructive drop. A hash match on
+ *      differing bytes is astronomically unlikely (SHA-256), so this is a safe equality proxy.
+ */
+function bytesAreDuplicate(a: Buffer, b: Buffer): boolean {
+  // Tier 1: length.
+  if (a.length !== b.length) return false;
+  if (a.length === 0) return true;
+
+  // Tier 2: sample head, tail, and two interior points.
+  const len = a.length;
+  const offsets = [0, Math.floor(len / 3), Math.floor((2 * len) / 3), Math.max(0, len - DEDUP_SAMPLE_WINDOW)];
+  for (const start of offsets) {
+    const end = Math.min(len, start + DEDUP_SAMPLE_WINDOW);
+    if (!a.subarray(start, end).equals(b.subarray(start, end))) return false;
+  }
+
+  // Tier 3: confirm with a full hash before treating as a duplicate.
+  const digestA = createHash("sha256").update(a).digest();
+  const digestB = createHash("sha256").update(b).digest();
+  return digestA.equals(digestB);
 }
 
 interface InlineImageRef {
@@ -325,6 +363,10 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   const attachmentsWithBytes: Array<{ filename: string; mimeType: string; content: Buffer; s3Key?: string }> = [];
   const droppedAttachments: DroppedAttachment[] = [];
   const inlineImageRefs: InlineImageRef[] = [];
+  // Raw bytes of each over-budget inline image, keyed by contentId. Kept only for the
+  // orphan-dedup decision after HTML sanitization (tiered content comparison) — never
+  // persisted. InlineImageRef itself carries no bytes (it is a stored type).
+  const inlineImageBytes = new Map<string, Buffer>();
   let inlinedDataUriCount = 0;
 
   for (const attachment of attachments) {
@@ -379,6 +421,7 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
 
         if (uploadResult.ok) {
           inlineImageRefs.push({ contentId: cid, mimeType: contentType, sizeBytes: attachment.size, s3Key, filename });
+          inlineImageBytes.set(cid, attachment.content);
           // Still eligible for QR scanning via the attachment-image path in extractAssets
           if (contentType.startsWith("image/")) {
             attachmentsWithBytes.push({ filename, mimeType: contentType, content: attachment.content, s3Key });
@@ -488,16 +531,29 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   // never appeared in the HTML (e.g. a Content-ID part with no matching <img>, or a
   // text-only message). Such an image would render nowhere AND not appear as an attachment:
   // invisible and unreachable. Promote such an inline image into the attachment list so it
-  // stays viewable/downloadable — UNLESS its filename matches a referenced inline image, in
-  // which case it's a duplicate copy (e.g. Gmail ships the same logo twice, once with a cid
-  // the HTML uses and once with a cid it doesn't) and promoting it would surface a redundant
-  // phantom attachment. Those duplicates are dropped instead.
+  // stays viewable/downloadable — UNLESS it duplicates a referenced inline image, in which
+  // case promoting it would surface a redundant phantom attachment. An orphan is treated as
+  // a duplicate when it matches a referenced image by EITHER:
+  //   - filename (e.g. Gmail ships the same logo twice, once with a cid the HTML uses and
+  //     once with a cid it doesn't — both named image_0.png), or
+  //   - byte content (the same image shipped under two different filenames), compared via
+  //     the cheap tiered check in bytesAreDuplicate.
+  // Duplicates are dropped; genuinely unique orphans are still promoted.
   const renderedBody = htmlBody ?? "";
   const orphanedInlineImages = inlineImageRefs.filter(ref => !renderedBody.includes(`cid:${ref.contentId}`));
   const referencedInlineImages = inlineImageRefs.filter(ref => renderedBody.includes(`cid:${ref.contentId}`));
   const referencedFilenames = new Set(referencedInlineImages.map(ref => ref.filename));
-  const promotedInlineImages = orphanedInlineImages.filter(orphan => !referencedFilenames.has(orphan.filename));
-  const droppedDuplicateInlineImages = orphanedInlineImages.filter(orphan => referencedFilenames.has(orphan.filename));
+  const isDuplicateOfReferenced = (orphan: InlineImageRef): boolean => {
+    if (referencedFilenames.has(orphan.filename)) return true;
+    const orphanBytes = inlineImageBytes.get(orphan.contentId);
+    if (!orphanBytes) return false;
+    return referencedInlineImages.some(ref => {
+      const refBytes = inlineImageBytes.get(ref.contentId);
+      return refBytes !== undefined && bytesAreDuplicate(orphanBytes, refBytes);
+    });
+  };
+  const promotedInlineImages = orphanedInlineImages.filter(orphan => !isDuplicateOfReferenced(orphan));
+  const droppedDuplicateInlineImages = orphanedInlineImages.filter(orphan => isDuplicateOfReferenced(orphan));
   for (const orphan of promotedInlineImages) {
     attachmentRefs.push({
       filename: orphan.filename,

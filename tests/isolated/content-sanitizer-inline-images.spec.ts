@@ -177,31 +177,34 @@ describe("content-sanitizer — inline image size/count cap", () => {
 // ---------------------------------------------------------------------------
 // Orphaned-inline-image disposition: an over-budget inline image whose cid is
 // NOT referenced in the rendered body is either promoted to an attachment (so
-// it stays reachable) or dropped as a duplicate when its filename matches a
-// referenced inline image. The duplicate case is what Gmail produces: the same
-// logo shipped twice, once with a cid the HTML uses and once with a cid it does
-// not (see PCEHQ.eml). Only over-budget images (>100KB) reach this path — small
-// ones are embedded as data URIs and never become InlineImageRefs.
+// it stays reachable) or dropped as a duplicate of a referenced inline image.
+// An orphan is a duplicate when it matches a referenced image by filename OR by
+// byte content. The filename case is what Gmail produces: the same logo shipped
+// twice, once with a cid the HTML uses and once with a cid it doesn't (see
+// PCEHQ.eml). The byte case covers the same image shipped under two different
+// filenames. Only over-budget images (>100KB) reach this path — small ones are
+// embedded as data URIs and never become InlineImageRefs.
 // ---------------------------------------------------------------------------
 
 const OVER_BUDGET = 200 * 1024;
 
 // Builds a multipart/related message with full control over each image part's
-// cid, filename, and size, plus an explicit list of cids to reference from the
-// HTML. This is what buildEmailWithInlineImages can't express — it always
-// references every image and derives the filename from the cid.
+// cid, filename, size, and byte fill, plus an explicit list of cids to reference
+// from the HTML. This is what buildEmailWithInlineImages can't express — it always
+// references every image and derives the filename from the cid. `fill` defaults to
+// "A" so two parts of the same size are byte-identical unless given distinct fills.
 function buildEmailWithControlledInlineImages(
-  images: Array<{ contentId: string; filename: string; size: number }>,
+  images: Array<{ contentId: string; filename: string; size: number; fill?: string }>,
   referencedCids: string[],
 ): string {
-  const parts = images.map(({ contentId, filename, size }) => [
+  const parts = images.map(({ contentId, filename, size, fill }) => [
     `--${BOUNDARY}`,
     "Content-Type: image/png",
     "Content-Transfer-Encoding: base64",
     `Content-ID: <${contentId}>`,
     `Content-Disposition: inline; filename="${filename}"`,
     "",
-    Buffer.alloc(size, "A").toString("base64"),
+    Buffer.alloc(size, fill ?? "A").toString("base64"),
     "",
   ].join("\r\n"));
 
@@ -262,8 +265,8 @@ describe("content-sanitizer — orphaned inline image disposition", () => {
     // than dropped.
     mockFetch(buildEmailWithControlledInlineImages(
       [
-        { contentId: "referenced", filename: "logo.png", size: OVER_BUDGET },
-        { contentId: "orphan-unique", filename: "diagram.png", size: OVER_BUDGET },
+        { contentId: "referenced", filename: "logo.png", size: OVER_BUDGET, fill: "A" },
+        { contentId: "orphan-unique", filename: "diagram.png", size: OVER_BUDGET, fill: "B" },
       ],
       ["referenced"],
     ));
@@ -347,5 +350,64 @@ describe("content-sanitizer — orphaned inline image disposition", () => {
       { filename: "shared.png", mimeType: "image/png", sizeBytes: OVER_BUDGET, s3Key: "emails/msg-orphan-only/1" },
     ]);
     expect(result.parsed.inlineImages).toBeUndefined();
+  });
+
+  it("drops an orphaned inline image that is byte-identical to a referenced one under a different filename", async () => {
+    // Same bytes (both default "A" fill, same size), DIFFERENT filenames, so the filename
+    // check alone would miss it. The byte-content tier catches the duplicate and drops it.
+    mockFetch(buildEmailWithControlledInlineImages(
+      [
+        { contentId: "referenced", filename: "logo.png", size: OVER_BUDGET },
+        { contentId: "orphan-samebytes", filename: "picture.png", size: OVER_BUDGET },
+      ],
+      ["referenced"],
+    ));
+
+    const result = await handler({
+      presignedGetUrl: "https://example.com/get",
+      presignedPost: { url: "https://example.com/post", fields: {} },
+      accountId: "acct-test",
+      senderEtld1: "example.com",
+      keyPrefix: "emails/msg-bytedup/",
+      retentionTag: null,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.parsed.attachments).toEqual([]);
+    expect(result.parsed.inlineImages).toEqual([
+      { contentId: "referenced", mimeType: "image/png", sizeBytes: OVER_BUDGET, s3Key: "emails/msg-bytedup/0", filename: "logo.png" },
+    ]);
+  });
+
+  it("promotes an orphan of the same size but different bytes as unique content", async () => {
+    // Same size as the referenced image (so tier-1 length check cannot separate them) but a
+    // different byte fill — the sampled-bytes tier detects the difference and the orphan is
+    // promoted, never dropped. Guards against the tiered check falsely matching on length.
+    mockFetch(buildEmailWithControlledInlineImages(
+      [
+        { contentId: "referenced", filename: "logo.png", size: OVER_BUDGET, fill: "A" },
+        { contentId: "orphan-diffbytes", filename: "other.png", size: OVER_BUDGET, fill: "B" },
+      ],
+      ["referenced"],
+    ));
+
+    const result = await handler({
+      presignedGetUrl: "https://example.com/get",
+      presignedPost: { url: "https://example.com/post", fields: {} },
+      accountId: "acct-test",
+      senderEtld1: "example.com",
+      keyPrefix: "emails/msg-diffbytes/",
+      retentionTag: null,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.parsed.attachments).toEqual([
+      { filename: "other.png", mimeType: "image/png", sizeBytes: OVER_BUDGET, s3Key: "emails/msg-diffbytes/1" },
+    ]);
+    expect(result.parsed.inlineImages).toEqual([
+      { contentId: "referenced", mimeType: "image/png", sizeBytes: OVER_BUDGET, s3Key: "emails/msg-diffbytes/0", filename: "logo.png" },
+    ]);
   });
 });
