@@ -784,12 +784,18 @@ export class ThreadsApi {
       method: "get",
       path: "/accounts/{accountId}/threads/{threadId}/signals/{id}/raw",
       tags: ["Threads"],
-      request: { params: z.object({ accountId: z.string(), threadId: z.string(), id: z.string() }) },
+      request: {
+        params: z.object({ accountId: z.string(), threadId: z.string(), id: z.string() }),
+        // `display` (default): the sanitized, size-bounded copy for on-screen viewing.
+        // `original`: the true, unmodified raw email for download.
+        query: z.object({ type: z.enum(["display", "original"]).optional() }),
+      },
       middleware: [authz("signals:read", c => `accounts/${c.req.param("accountId")!}/threads/${c.req.param("threadId")!}/signals/${c.req.param("id")!}`)] as const,
-      responses: { 307: { description: "Redirect to presigned S3 URL for the raw email" } },
+      responses: { 307: { description: "Redirect to the raw email (CDN for display, presigned S3 for original)" } },
     }), async (c) => {
       const accountId = c.req.param("accountId")!;
       const threadId = c.req.param("threadId")!;
+      const type = c.req.query("type") === "original" ? "original" : "display";
       const signalResult = await threadDb.getSignalById(accountId, c.req.param("id")!, threadId);
       if (signalResult.isErr()) {
         logger.error(`Failed to get signal for raw email: ${signalResult.error.message}`, { code: "api.signal.get_failed", error: signalResult.error });
@@ -800,17 +806,25 @@ export class ThreadsApi {
       if (!isEmailSignal(signal)) return err(c, 400, "Signal is not an email", "SIGNAL_NOT_FOUND");
       if (!signal.data.s3Key) return err(c, 404, "Raw email not available", "SIGNAL_NOT_FOUND");
 
-      // The display-safe copy (attachments stripped, small inline images kept — built by
-      // the content sanitizer, see raw-email-display.ts) is what this endpoint serves.
-      // The true raw original at signal.data.s3Key is never exposed through this path —
-      // it stays available server-side only, e.g. for reprocessing.
-      const displayRawS3Key = (signal.data as InboundEmailSignalData).displayRawS3Key;
-      if (displayRawS3Key) {
-        return c.redirect(`${contentCdnBaseUrl}/${displayRawS3Key}`, 307);
+      // Download: the true, unmodified original at signal.data.s3Key (email bucket, which has
+      // no CDN route) via a short-lived presigned S3 URL. This is the ONLY path that exposes
+      // the original — viewing never does.
+      if (type === "original") {
+        const url = await emailContentStore.getRawEmailUrl(signal);
+        return c.redirect(url, 307);
       }
 
-      const url = await emailContentStore.getRawEmailUrl(signal);
-      return c.redirect(url, 307);
+      // Display: the sanitized copy (attachments stripped, small inline images kept — built by
+      // the content sanitizer, see raw-email-display.ts), served through the content CDN. If it
+      // is missing we do NOT fall back to the original — that would leak unsanitized bytes and
+      // the full-size original through a viewing path. The client renders an "unavailable"
+      // notice instead.
+      const displayRawS3Key = (signal.data as InboundEmailSignalData).displayRawS3Key;
+      if (!displayRawS3Key) {
+        logger.error("Display-safe raw email copy is missing — cannot render original email view.", { code: "api.signal.raw_display_missing", accountId, threadId, signalId: signal.id });
+        return err(c, 404, "Display copy unavailable", "RAW_DISPLAY_UNAVAILABLE");
+      }
+      return c.redirect(`${contentCdnBaseUrl}/${displayRawS3Key}`, 307);
     });
 
     // -------------------------------------------------------------------------

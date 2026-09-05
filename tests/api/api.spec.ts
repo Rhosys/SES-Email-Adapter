@@ -620,6 +620,44 @@ describe("API", () => {
     });
   });
 
+  describe("GET /accounts/:accountId/threads/:threadId/signals/:id/raw", () => {
+    it("type=display redirects (307) to the content CDN display copy", async () => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ data: { displayRawS3Key: "content/accounts/acct-test-001/extracted/msg-001/raw-display.eml" } })));
+      const res = await req(app, "GET", `${A}/threads/arc-001/signals/SES%23msg-001/raw?type=display`);
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe("https://cdn.test/content/accounts/acct-test-001/extracted/msg-001/raw-display.eml");
+    });
+
+    it("defaults to display when no type is given", async () => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ data: { displayRawS3Key: "content/accounts/acct-test-001/extracted/msg-001/raw-display.eml" } })));
+      const res = await req(app, "GET", `${A}/threads/arc-001/signals/SES%23msg-001/raw`);
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toContain("https://cdn.test/content/");
+    });
+
+    it("type=display returns 404 (no fallback to original) when the display copy is missing", async () => {
+      // makeSignal has s3Key set but no displayRawS3Key — must NOT redirect to the original.
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal()));
+      const res = await req(app, "GET", `${A}/threads/arc-001/signals/SES%23msg-001/raw?type=display`);
+      expect(res.status).toBe(404);
+      const body = await res.json() as { errorCode?: string };
+      expect(body.errorCode).toBe("RAW_DISPLAY_UNAVAILABLE");
+    });
+
+    it("type=original redirects (307) to the presigned S3 URL of the true original", async () => {
+      // Even with a display copy present, type=original must serve the original, not the display copy.
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ data: { displayRawS3Key: "content/accounts/acct-test-001/extracted/msg-001/raw-display.eml" } })));
+      const res = await req(app, "GET", `${A}/threads/arc-001/signals/SES%23msg-001/raw?type=original`);
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe("https://signed.test/key");
+    });
+
+    it("returns 404 for an unknown signal", async () => {
+      const res = await req(app, "GET", `${A}/threads/arc-001/signals/nope/raw`);
+      expect(res.status).toBe(404);
+    });
+  });
+
   describe("PATCH /accounts/:accountId/threads/:threadId/signals/:id — draft update", () => {
     it("updates a draft signal and returns 200 + full resource", async () => {
       const draft = makeSignal({ status: "draft" });

@@ -287,7 +287,11 @@ resource "aws_lambda_function" "main" {
       USER_CODE_EXECUTOR_ARN   = aws_lambda_function.user_code_executor.arn
       CONTENT_SANITIZER_ARN    = aws_lambda_function.content_sanitizer.arn
       CONTENT_BUCKET           = aws_s3_bucket.extracted_content.bucket
-      CONTENT_CDN_BASE_URL     = "https://${aws_cloudfront_distribution.api.domain_name}"
+      # Service domain (aliased to the CloudFront distribution), NOT the raw *.cloudfront.net
+      # domain — client-facing content URLs (attachments, inline images, /raw display) are built
+      # from this, and must always be our own domain. The distribution's /content/* behavior
+      # serves the extracted-content S3 bucket, and s3Keys already carry the `content/` prefix.
+      CONTENT_CDN_BASE_URL     = "https://${data.aws_route53_zone.main.name}"
       APP_BASE_URL             = "https://${data.aws_route53_zone.main.name}"
       SCHEDULER_GROUP_NAME     = aws_scheduler_schedule_group.followups.name
       SCHEDULER_ROLE_ARN       = aws_iam_role.scheduler_sqs.arn
