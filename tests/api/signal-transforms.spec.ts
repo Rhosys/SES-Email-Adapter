@@ -162,7 +162,8 @@ describe("withResolvedContentUrls → toApiSignal — full attachment pipeline",
 
     expect(apiSignal.type).toBe("email");
     const data = apiSignal.data as ApiInboundEmailSignalData;
-    expect(data.attachments).toHaveLength(3);
+    // The .ics is filtered out (surfaced as a calendar_event signal instead), leaving pdf + pkpass.
+    expect(data.attachments).toHaveLength(2);
     for (const attachment of data.attachments) {
       expect(attachment.url).toBeDefined();
       expect(attachment.url).toMatch(/^https:\/\/cdn\.example\.com\/content\/accounts\//);
@@ -172,7 +173,6 @@ describe("withResolvedContentUrls → toApiSignal — full attachment pipeline",
     const expected: ApiAttachment[] = [
       { filename: "ticket-ABC123.pdf", mimeType: "application/pdf", sizeBytes: 48_000, url: `${CDN_BASE}/content/accounts/acct-test-001/extracted/msg-001/0` },
       { filename: "pass-ABC123.pkpass", mimeType: "application/vnd.apple.pkpass", sizeBytes: 12_000, url: `${CDN_BASE}/content/accounts/acct-test-001/extracted/msg-001/1` },
-      { filename: "invite.ics", mimeType: "application/ics", sizeBytes: 3_200, url: `${CDN_BASE}/content/accounts/acct-test-001/extracted/msg-001/2` },
     ];
     expect(data.attachments).toEqual(expected);
   });
@@ -188,9 +188,10 @@ describe("withResolvedContentUrls → toApiSignal — full attachment pipeline",
     const apiSignal: ApiSignal = toApiSignal(enriched);
     const data = apiSignal.data as ApiInboundEmailSignalData;
 
-    expect(data.attachments).toHaveLength(3);
+    // .ics filtered — pdf + pkpass remain.
+    expect(data.attachments).toHaveLength(2);
     expect(data.attachments[0]?.url).toBe(`${CDN_BASE}/content/accounts/acct-test-001/extracted/msg-001/0`);
-    expect(data.attachments[2]?.url).toBe(`${CDN_BASE}/content/accounts/acct-test-001/extracted/msg-001/2`);
+    expect(data.attachments[1]?.url).toBe(`${CDN_BASE}/content/accounts/acct-test-001/extracted/msg-001/1`);
   });
 
   it("signal with no attachments: empty array preserved through the pipeline", () => {
@@ -251,10 +252,33 @@ describe("withResolvedContentUrls → toApiSignal — full attachment pipeline",
     const apiSignal: ApiSignal = toApiSignal(signal);
     const data = apiSignal.data as ApiInboundEmailSignalData;
 
+    // toApiSignal alone does not resolve urls (that's withResolvedContentUrls' job) — and
+    // because it does not run the read-side enrichment, it also does not filter the .ics.
+    // Production always runs withResolvedContentUrls first, so this path is not consumer-facing.
     expect(data.attachments).toHaveLength(3);
-    // Without URL resolution, no url field
     for (const attachment of data.attachments) {
       expect(attachment.url).toBeUndefined();
     }
+  });
+
+  it("filters .ics attachments (both text/calendar and .ics filename) from the resolved response", () => {
+    const signal = makeInboundSignal({
+      status: "active",
+      threadId: "thr-002",
+      data: {
+        attachments: [
+          { filename: "ticket.pdf", mimeType: "application/pdf", sizeBytes: 1000, s3Key: "content/accounts/acct-test-001/extracted/msg-001/0" },
+          { filename: "invite.ics", mimeType: "application/ics", sizeBytes: 3200, s3Key: "content/accounts/acct-test-001/extracted/msg-001/1" },
+          { filename: "meeting", mimeType: "text/calendar; method=REQUEST", sizeBytes: 2800, s3Key: "content/accounts/acct-test-001/extracted/msg-001/2" },
+        ],
+      },
+    });
+
+    const enriched = withResolvedContentUrls(signal, CDN_BASE);
+    const apiSignal: ApiSignal = toApiSignal(enriched);
+    const data = apiSignal.data as ApiInboundEmailSignalData;
+
+    expect(data.attachments).toHaveLength(1);
+    expect(data.attachments[0]?.filename).toBe("ticket.pdf");
   });
 });

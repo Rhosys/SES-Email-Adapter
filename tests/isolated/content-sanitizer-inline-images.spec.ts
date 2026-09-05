@@ -94,7 +94,54 @@ describe("content-sanitizer — inline image size/count cap", () => {
     expect(result.parsed.htmlBody).toContain("cid:logo");
     expect(result.parsed.htmlBody).not.toContain("data:image/png;base64,");
     expect(result.parsed.inlineImages).toEqual([
-      { contentId: "logo", mimeType: "image/png", sizeBytes: 200 * 1024, s3Key: "emails/msg-big-inline/0" },
+      { contentId: "logo", mimeType: "image/png", sizeBytes: 200 * 1024, s3Key: "emails/msg-big-inline/0", filename: "logo.png" },
+    ]);
+  });
+
+  it("promotes an over-budget inline image to an attachment when its cid is not referenced in the body", async () => {
+    // Build a message where the large inline image's cid has NO matching <img> in the HTML.
+    // It would otherwise be an invisible InlineImageRef (rendered nowhere, not downloadable);
+    // the body-or-attachments invariant promotes it into the attachment list instead.
+    const raw = [
+      "From: sender@example.com",
+      "To: recipient@example.com",
+      "Subject: Orphaned inline image",
+      "MIME-Version: 1.0",
+      `Content-Type: multipart/related; boundary="${BOUNDARY}"`,
+      "",
+      `--${BOUNDARY}`,
+      'Content-Type: text/html; charset="UTF-8"',
+      "",
+      "<html><body><p>No image tag here.</p></body></html>",
+      "",
+      `--${BOUNDARY}`,
+      "Content-Type: image/png",
+      "Content-Transfer-Encoding: base64",
+      "Content-ID: <orphan>",
+      'Content-Disposition: inline; filename="orphan.png"',
+      "",
+      Buffer.alloc(200 * 1024, "A").toString("base64"),
+      "",
+      `--${BOUNDARY}--`,
+    ].join("\r\n");
+    mockFetch(raw);
+
+    const result = await handler({
+      presignedGetUrl: "https://example.com/get",
+      presignedPost: { url: "https://example.com/post", fields: {} },
+      accountId: "acct-test",
+      senderEtld1: "example.com",
+      keyPrefix: "emails/msg-orphan-inline/",
+      retentionTag: null,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    // Not left as an inline ref …
+    expect(result.parsed.inlineImages).toBeUndefined();
+    // … promoted to an attachment, keeping its extension-bearing name.
+    expect(result.parsed.attachments).toEqual([
+      { filename: "orphan.png", mimeType: "image/png", sizeBytes: 200 * 1024, s3Key: "emails/msg-orphan-inline/0" },
     ]);
   });
 
@@ -122,7 +169,7 @@ describe("content-sanitizer — inline image size/count cap", () => {
     expect(result.parsed.htmlBody).not.toContain("cid:img3");
     expect(result.parsed.htmlBody).toContain("cid:img4");
     expect(result.parsed.inlineImages).toEqual([
-      { contentId: "img4", mimeType: "image/png", sizeBytes: 1024, s3Key: "emails/msg-many-inline/0" },
+      { contentId: "img4", mimeType: "image/png", sizeBytes: 1024, s3Key: "emails/msg-many-inline/0", filename: "img4.png" },
     ]);
   });
 });

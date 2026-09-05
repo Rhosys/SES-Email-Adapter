@@ -58,6 +58,7 @@ describe("S3ObjectStorage.generatePresignedPost", () => {
       Conditions: [
         ["starts-with", "$key", "accounts/123/senders/example.com/extracted/sig1/"],
         ["starts-with", "$Content-Type", ""],
+        ["starts-with", "$Content-Disposition", ""],
         ["content-length-range", 0, 10 * 1024 * 1024],
       ],
       Fields: {},
@@ -82,6 +83,7 @@ describe("S3ObjectStorage.generatePresignedPost", () => {
       Conditions: [
         ["starts-with", "$key", "accounts/456/senders/test.org/extracted/sig2/"],
         ["starts-with", "$Content-Type", ""],
+        ["starts-with", "$Content-Disposition", ""],
         ["content-length-range", 0, 10 * 1024 * 1024],
         { "x-amz-tagging": "retention=365" },
       ],
@@ -106,6 +108,7 @@ describe("S3ObjectStorage.generatePresignedPost", () => {
       Conditions: [
         ["starts-with", "$key", "accounts/789/senders/long.com/extracted/sig3/"],
         ["starts-with", "$Content-Type", ""],
+        ["starts-with", "$Content-Disposition", ""],
         ["content-length-range", 0, 10 * 1024 * 1024],
         { "x-amz-tagging": "retention=3650" },
       ],

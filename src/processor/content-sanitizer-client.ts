@@ -35,6 +35,7 @@ export interface InlineImageRef {
   mimeType: string;
   sizeBytes: number;
   s3Key: string;
+  filename?: string;
 }
 
 export interface ContentSanitizeRequest {

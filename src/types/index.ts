@@ -384,6 +384,13 @@ export interface InlineImageRef {
   mimeType: string;
   sizeBytes: number;
   s3Key: string;
+  /**
+   * Display name for the image, carried so an inline image that turns out not to be
+   * referenced by the rendered body can be surfaced as a downloadable attachment with a
+   * meaningful, extension-bearing name (see the content sanitizer's body-or-attachments
+   * reclassification). Optional for backward compatibility with already-stored signals.
+   */
+  filename?: string;
 }
 
 // ---------------------------------------------------------------------------

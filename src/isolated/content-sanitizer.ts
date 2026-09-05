@@ -5,6 +5,7 @@ import { extractAssets, type ExtractedAsset } from "./asset-extractor.js";
 import { buildDisplayRawEmail } from "./raw-email-display.js";
 import type { Logger } from "../logger.js";
 import { S3ObjectStorage, type PresignedPost, type UploadField } from "../s3-object-storage.js";
+import { resolveContentType, ensureFilenameExtension, buildContentDisposition } from "./mime.js";
 
 // Lambda timeout is 60s (see deploy/compute.tf). Emitting a TRACK log past this
 // threshold surfaces invocations that are close to timing out, before they start
@@ -67,6 +68,10 @@ interface InlineImageRef {
   mimeType: string;
   sizeBytes: number;
   s3Key: string;
+  // A display name carried so that, if this image turns out NOT to be referenced by the
+  // rendered body, it can be promoted into the attachment list (see the body-or-attachments
+  // reclassification after HTML sanitization) with a meaningful, extension-bearing name.
+  filename: string;
 }
 
 interface ContentSanitizeRequest {
@@ -179,8 +184,9 @@ async function uploadViaPresignedPost(
   s3Key: string,
   content: Buffer | Uint8Array,
   contentType: string,
+  contentDisposition?: string,
 ): Promise<{ ok: true } | { ok: false; detail: string }> {
-  const result = await S3ObjectStorage.upload(presignedPost, s3Key, content, contentType);
+  const result = await S3ObjectStorage.upload(presignedPost, s3Key, content, contentType, contentDisposition);
   if (result.isErr()) return { ok: false, detail: result.error.reason };
   return { ok: true };
 }
@@ -322,11 +328,19 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   let inlinedDataUriCount = 0;
 
   for (const attachment of attachments) {
-    const contentType = attachment.contentType || "application/octet-stream";
+    // Recover the true content type: a mislabeled or absent header (senders routinely ship
+    // PDFs/images as octet-stream) breaks the dashboard's inline preview and the served S3
+    // Content-Type. resolveContentType trusts magic bytes first, then a specific declared
+    // type, then the filename extension.
+    const contentType = resolveContentType({
+      content: attachment.content,
+      declaredType: attachment.contentType,
+      filename: attachment.filename,
+    });
 
     if (attachment.size > MAX_SINGLE_ATTACHMENT_SIZE) {
       droppedAttachments.push({
-        filename: attachment.filename ?? `attachment-${uploadIndex}`,
+        filename: ensureFilenameExtension(attachment.filename ?? `attachment-${uploadIndex}`, contentType),
         mimeType: contentType,
         sizeBytes: attachment.size,
         reason: "too_large",
@@ -354,11 +368,17 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
         // attachment instead of embedding. Its `cid:` reference is deliberately left
         // unresolved below; the API layer resolves it to a CDN url at read time.
         const s3Key = `${event.keyPrefix}${uploadIndex}`;
-        const uploadResult = await uploadViaPresignedPost(event.presignedPost, s3Key, attachment.content, contentType);
-        const filename = attachment.filename ?? `inline-${uploadIndex}`;
+        const filename = ensureFilenameExtension(attachment.filename ?? `inline-${uploadIndex}`, contentType);
+        const uploadResult = await uploadViaPresignedPost(
+          event.presignedPost,
+          s3Key,
+          attachment.content,
+          contentType,
+          buildContentDisposition(contentType, filename),
+        );
 
         if (uploadResult.ok) {
-          inlineImageRefs.push({ contentId: cid, mimeType: contentType, sizeBytes: attachment.size, s3Key });
+          inlineImageRefs.push({ contentId: cid, mimeType: contentType, sizeBytes: attachment.size, s3Key, filename });
           // Still eligible for QR scanning via the attachment-image path in extractAssets
           if (contentType.startsWith("image/")) {
             attachmentsWithBytes.push({ filename, mimeType: contentType, content: attachment.content, s3Key });
@@ -372,9 +392,15 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
     }
 
     const s3Key = `${event.keyPrefix}${uploadIndex}`;
-    const uploadResult = await uploadViaPresignedPost(event.presignedPost, s3Key, attachment.content, contentType);
+    const filename = ensureFilenameExtension(attachment.filename ?? `attachment-${uploadIndex}`, contentType);
+    const uploadResult = await uploadViaPresignedPost(
+      event.presignedPost,
+      s3Key,
+      attachment.content,
+      contentType,
+      buildContentDisposition(contentType, filename),
+    );
 
-    const filename = attachment.filename ?? `attachment-${uploadIndex}`;
     if (uploadResult.ok) {
       attachmentRefs.push({ filename, mimeType: contentType, sizeBytes: attachment.size, s3Key });
       attachmentsWithBytes.push({ filename, mimeType: contentType, content: attachment.content, s3Key });
@@ -454,6 +480,30 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
     logger?.trackPoint("links_extracted_from_text_fallback", { linkCount: extractedLinks.length });
   }
 
+  // 8. Body-or-attachments invariant for inline images.
+  //
+  // An over-budget inline image was recorded as an InlineImageRef on the assumption its
+  // `cid:` token survives in the rendered body and gets swapped for a CDN url at API read
+  // time. That assumption fails for an orphaned cid — one the sanitizer stripped, or that
+  // never appeared in the HTML (e.g. a Content-ID part with no matching <img>, or a
+  // text-only message). Such an image would render nowhere AND not appear as an attachment:
+  // invisible and unreachable. Promote any inline image whose cid is not present in the
+  // final htmlBody into the attachment list so it stays viewable/downloadable.
+  const renderedBody = htmlBody ?? "";
+  const orphanedInlineImages = inlineImageRefs.filter(ref => !renderedBody.includes(`cid:${ref.contentId}`));
+  const referencedInlineImages = inlineImageRefs.filter(ref => renderedBody.includes(`cid:${ref.contentId}`));
+  for (const orphan of orphanedInlineImages) {
+    attachmentRefs.push({
+      filename: orphan.filename,
+      mimeType: orphan.mimeType,
+      sizeBytes: orphan.sizeBytes,
+      s3Key: orphan.s3Key,
+    });
+  }
+  if (orphanedInlineImages.length > 0) {
+    logger?.trackPoint("inline_images_promoted_to_attachments", { promotedCount: orphanedInlineImages.length });
+  }
+
   // 9. Build response
   const to = parseAddressList(parsed.to);
   const cc = parseAddressList(parsed.cc);
@@ -517,8 +567,11 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   if (droppedAttachments.length > 0) {
     result.parsed.droppedAttachments = droppedAttachments;
   }
-  if (inlineImageRefs.length > 0) {
-    result.parsed.inlineImages = inlineImageRefs;
+  // Only body-referenced inline images stay as inlineImages (resolved to CDN urls at read
+  // time). Orphaned ones were promoted into attachmentRefs above and must not also appear
+  // here, or they'd be both an attachment and an unresolved inline ref.
+  if (referencedInlineImages.length > 0) {
+    result.parsed.inlineImages = referencedInlineImages;
   }
   if (displayRawS3Key) {
     result.parsed.displayRawS3Key = displayRawS3Key;

@@ -28,6 +28,15 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Mirrors the detection in processor/calendar/ics-parser.ts (text/calendar media type OR
+// .ics extension). Kept local so the API transform layer takes no dependency on processor
+// code — the rule is a stable IETF media type, not business logic that can drift.
+function isCalendarAttachment(attachment: Attachment): boolean {
+  if (attachment.mimeType.toLowerCase().startsWith("text/calendar")) return true;
+  if (attachment.filename.toLowerCase().endsWith(".ics")) return true;
+  return false;
+}
+
 // Resolves what the content sanitizer left as s3Key-only references (never a baked-in URL,
 // so CDN config can change without a data migration) into CDN urls, at API read time:
 //  - Attachment.s3Key -> Attachment.url, as before.
@@ -39,7 +48,13 @@ function escapeRegExp(value: string): string {
 export function withResolvedContentUrls<T extends AnySignal>(signal: T, cdnBase: string): T {
   if (!isEmailSignal(signal)) return signal;
 
-  const attachments = signal.data.attachments.map((a: Attachment) => ({ ...a, url: `${cdnBase}/${a.s3Key}` }));
+  // Calendar (.ics) attachments are surfaced as first-class calendar_event / calendar_response
+  // signals — the raw invite file is redundant noise in the attachment list, so it is not
+  // returned to the client. The stored attachment ref is left untouched (the calendar
+  // processor and post-approval handler still read it); this filter is API-read-side only.
+  const attachments = signal.data.attachments
+    .filter((a: Attachment) => !isCalendarAttachment(a))
+    .map((a: Attachment) => ({ ...a, url: `${cdnBase}/${a.s3Key}` }));
 
   const inlineImages = (signal.data as InboundEmailSignalData).inlineImages;
   let htmlBody = (signal.data as InboundEmailSignalData).htmlBody;

@@ -46,8 +46,13 @@ export interface UploadTicketSpec {
   retentionTag: string | null;
 }
 
-/** The form fields the uploader always injects itself at upload time. */
-type UploaderInjectedField = "key" | "Content-Type" | "file";
+/**
+ * The form fields the uploader injects itself at upload time. Content-Disposition is
+ * optional per upload but always sanctioned by the policy (a permissive `starts-with ""`
+ * condition), so callers that set it get the browser's inline/attachment behavior while
+ * callers that omit it are still valid.
+ */
+type UploaderInjectedField = "key" | "Content-Type" | "Content-Disposition" | "file";
 
 /** The optional, policy-dependent fields a ticket may additionally carry. */
 type TaggingField = "x-amz-tagging";
@@ -98,6 +103,12 @@ export class S3ObjectStorage {
         // this condition S3 rejects the form with "Extra input fields: content-type", since a
         // POST policy sanctions only the fields it explicitly lists.
         ["starts-with", "$Content-Type", ""],
+        // The uploader optionally sets Content-Disposition per object (e.g.
+        // `inline; filename="invoice.pdf"`) so the browser renders PDFs/images in the
+        // dashboard's preview iframe and downloads land with a real filename. A permissive
+        // starts-with sanctions the field without requiring it — uploads that omit it are
+        // still valid.
+        ["starts-with", "$Content-Disposition", ""],
         ["content-length-range", 0, spec.maxBytes],
         ...(spec.retentionTag ? [{ "x-amz-tagging": `retention=${spec.retentionTag}` } as const] : []),
       ],
@@ -121,12 +132,18 @@ export class S3ObjectStorage {
    * no AWS credentials) calls it with only the ticket it was handed. The ticket's field
    * union must cover every field this method injects (key, Content-Type, file), so a
    * ticket that never signed those is a compile error.
+   *
+   * `contentDisposition`, when provided, is stored on the object and returned by the CDN
+   * as the `Content-Disposition` header — this is what makes the browser render a PDF/image
+   * inline (in the dashboard preview iframe) rather than force a download, and gives
+   * downloads a real filename.
    */
   static async upload(
     ticket: PresignedPost<UploadField>,
     key: string,
     content: Uint8Array | Buffer,
     contentType: string,
+    contentDisposition?: string,
   ): Promise<Result<void, S3UploadError>> {
     const form = new FormData();
 
@@ -138,6 +155,7 @@ export class S3ObjectStorage {
     }
     setField(form, "key", key);
     setField(form, "Content-Type", contentType);
+    if (contentDisposition) setField(form, "Content-Disposition", contentDisposition);
     // The file must be the last field.
     setField(form, "file", new Blob([Buffer.from(content)], { type: contentType }));
 
