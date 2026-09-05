@@ -71,8 +71,11 @@ describe("content-sanitizer — Gmail CID on non-inline attachments", () => {
     const pkpass = result.parsed.attachments.find(a => a.filename === "pass-ABC123.pkpass");
     expect(pkpass?.mimeType).toBe("application/vnd.apple.pkpass");
 
+    // The fixture declares the non-standard `application/ics`; resolveContentType
+    // canonicalizes it to the IETF-registered `text/calendar` so downstream calendar
+    // detection and the served Content-Type see the correct type.
     const ics = result.parsed.attachments.find(a => a.filename === "invite.ics");
-    expect(ics?.mimeType).toBe("application/ics");
+    expect(ics?.mimeType).toBe("text/calendar");
 
     // Each attachment must have an s3Key (was uploaded)
     for (const attachment of result.parsed.attachments) {

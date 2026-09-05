@@ -19,6 +19,18 @@
 
 const OCTET_STREAM = "application/octet-stream";
 
+// Non-standard declared types that map to a single canonical type. Senders (and some
+// calendar servers) ship iCalendar parts as `application/ics` or `application/calendar`
+// rather than the IETF-registered `text/calendar`. Left unnormalized, these bypass every
+// downstream `text/calendar` check (calendar detection, the API's attachment filter) AND
+// get served from S3 with the wrong Content-Type. Canonicalize them at the type-recovery
+// boundary so a single fix covers all consumers.
+const DECLARED_TYPE_ALIASES: Record<string, string> = {
+  "application/ics": "text/calendar",
+  "application/calendar": "text/calendar",
+  "text/x-vcalendar": "text/calendar",
+};
+
 // Extension -> canonical MIME type. Intentionally small and IANA-aligned: it covers
 // the types a mail attachment realistically carries and that we either render inline
 // or want a correct download name for. Not a general-purpose registry — anything not
@@ -175,7 +187,15 @@ export function resolveContentType(input: {
   if (sniffed) return sniffed;
 
   const declared = input.declaredType?.split(";")[0]?.trim().toLowerCase();
-  if (declared && declared !== OCTET_STREAM) return input.declaredType!.trim();
+  if (declared && declared !== OCTET_STREAM) {
+    // Canonicalize known non-standard aliases (e.g. application/ics -> text/calendar) so
+    // downstream type checks and the served Content-Type see the registered type. Any
+    // parameters on the declared type (e.g. `; method=REQUEST`) are dropped for aliased
+    // types — they carry no meaning once the base type is corrected.
+    const alias = DECLARED_TYPE_ALIASES[declared];
+    if (alias) return alias;
+    return input.declaredType!.trim();
+  }
 
   const fromExtension = mimeFromExtension(input.filename);
   if (fromExtension) return fromExtension;

@@ -144,6 +144,29 @@ describe("resolveContentType", () => {
       resolveContentType({ content: unknown, declaredType: "application/octet-stream", filename: "blob.xyz" }),
     ).toBe("application/octet-stream");
   });
+
+  // Non-standard iCalendar declared types must canonicalize to text/calendar so downstream
+  // calendar detection and the served Content-Type see the registered type. Bytes here are
+  // plain text (no magic signature), so the declared type is the deciding signal.
+  it.each([
+    { declared: "application/ics" },
+    { declared: "application/calendar" },
+    { declared: "text/x-vcalendar" },
+    { declared: "APPLICATION/ICS" },
+    { declared: "application/ics; method=REQUEST" },
+  ])("canonicalizes $declared to text/calendar", ({ declared }) => {
+    const icsBytes = new TextEncoder().encode("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR");
+    expect(
+      resolveContentType({ content: icsBytes, declaredType: declared, filename: "invite" }),
+    ).toBe("text/calendar");
+  });
+
+  it("leaves the standard text/calendar type unchanged", () => {
+    const icsBytes = new TextEncoder().encode("BEGIN:VCALENDAR");
+    expect(
+      resolveContentType({ content: icsBytes, declaredType: "text/calendar", filename: "invite.ics" }),
+    ).toBe("text/calendar");
+  });
 });
 
 describe("ensureFilenameExtension", () => {
