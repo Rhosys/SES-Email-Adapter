@@ -196,10 +196,21 @@ export class SignalClassifier {
       raw.workflow = "unspecified";
     }
 
-    // Validate workflow ∈ WORKFLOWS
+    // Validate workflow ∈ WORKFLOWS, tolerating a singular/plural mismatch (e.g. "event" vs "events")
     if (!WORKFLOWS.includes(raw.workflow as Workflow)) {
-      this.logger.error(`Classifier returned unknown workflow [${raw.workflow}].`, { code: "classifier.invalid_workflow", input, rawResponse: jsonText, workflow: raw.workflow });
-      return err(classificationError(`Unknown workflow: ${raw.workflow}`, jsonText));
+      const matched = matchWorkflowLoosely(raw.workflow);
+      if (matched) {
+        this.logger.info(`Classifier returned workflow [${raw.workflow}] — normalizing to [${matched}].`, {
+          code: "classifier.workflow_pluralization_mismatch",
+          originalWorkflow: raw.workflow,
+          signalId: input.signalId,
+          accountId: input.accountId,
+        });
+        raw.workflow = matched;
+      } else {
+        this.logger.error(`Classifier returned unknown workflow [${raw.workflow}].`, { code: "classifier.invalid_workflow", input, rawResponse: jsonText, workflow: raw.workflow });
+        return err(classificationError(`Unknown workflow: ${raw.workflow}`, jsonText));
+      }
     }
 
     // Validate and filter tags to recognized vocabulary
@@ -442,6 +453,15 @@ function isUnspecifiedSentinel(value: string | null | undefined): boolean {
   if (value == null) return true;
   const lower = value.trim().toLowerCase();
   return UNSPECIFIED_PATTERNS.includes(lower);
+}
+
+// Tolerates near-miss workflow names against WORKFLOWS via substring match in either
+// direction (e.g. "event" -> "events", "events_ticket" -> "events").
+function matchWorkflowLoosely(value: string | null | undefined): Workflow | undefined {
+  if (value == null) return undefined;
+  const lower = value.trim().toLowerCase();
+  if (!lower) return undefined;
+  return WORKFLOWS.find(w => w.includes(lower) || lower.includes(w));
 }
 
 const ISO_4217_PATTERN = /^[A-Z]{3}$/;

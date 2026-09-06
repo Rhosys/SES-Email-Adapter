@@ -119,6 +119,29 @@ describe("SignalClassifier — output validation", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Singular/plural workflow mismatch → normalized, not err()
+  // -------------------------------------------------------------------------
+
+  it("normalizes a singular workflow name to its plural registry form", async () => {
+    mockClassifyResponse({
+      workflow: "event",
+      workflowData: { workflow: "events", eventType: "ticket_confirmation", eventName: "Concert" },
+      tags: [],
+      summary: "A concert ticket.",
+      labels: [],
+    });
+
+    const result = await classifier.classify(baseInput);
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().workflow).toBe("events");
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.stringContaining("normalizing"),
+      expect.objectContaining({ code: "classifier.workflow_pluralization_mismatch" }),
+    );
+  });
+
+  // -------------------------------------------------------------------------
   // Tag validation — unknown tags filtered out
   // -------------------------------------------------------------------------
 
