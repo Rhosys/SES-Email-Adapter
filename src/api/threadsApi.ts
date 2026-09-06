@@ -11,7 +11,7 @@ import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../retention.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { EmailContentStore } from "./content-store.js";
-import type { Signal, AnySignal, InboundEmailSignalData, PageParams, Thread, ThreadStatus, Workflow } from "../types/index.js";
+import type { Signal, AnySignal, InboundEmailSignalData, PageParams, ThreadStatus, Workflow } from "../types/index.js";
 import type { CalendarResponseData, DomainMisconfigurationData, Pagination } from "../types/index.js";
 import type { UpdateThreadFields, ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
