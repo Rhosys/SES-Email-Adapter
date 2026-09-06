@@ -45,8 +45,8 @@ describe("ThreadDatabase.batchGetThreads", () => {
     ddbMock.on(BatchGetCommand).resolves({
       Responses: {
         "ses-signals": [
-          { arcId: "thr-001", accountId: "acct-1", subject: "Hello" },
-          { threadId: "thr-002", accountId: "acct-1", subject: "World" },
+          { arcId: "thr-001", accountId: "acct-1", subject: "Hello", lastSignalAt: "2024-01-01T00:00:00.000Z" },
+          { threadId: "thr-002", accountId: "acct-1", subject: "World", lastSignalAt: "2024-01-01T00:00:00.000Z" },
         ],
       },
     });
@@ -66,8 +66,8 @@ describe("ThreadDatabase.batchGetThreads", () => {
     ddbMock.on(BatchGetCommand).resolves({
       Responses: {
         "ses-signals": [
-          { threadId: "thr-aaa", accountId: "acct-1", subject: "First" },
-          { threadId: "thr-ccc", accountId: "acct-1", subject: "Third" },
+          { threadId: "thr-aaa", accountId: "acct-1", subject: "First", lastSignalAt: "2024-01-01T00:00:00.000Z" },
+          { threadId: "thr-ccc", accountId: "acct-1", subject: "Third", lastSignalAt: "2024-01-01T00:00:00.000Z" },
         ],
       },
     });
@@ -78,6 +78,23 @@ describe("ThreadDatabase.batchGetThreads", () => {
     const threads = result._unsafeUnwrap();
     expect(threads).toHaveLength(2);
     expect(threads.map(t => (t as any).threadId)).toEqual(["thr-aaa", "thr-ccc"]);
+  });
+
+  it("excludes threads whose last signal predates the Jan 1 2000 cutoff", async () => {
+    ddbMock.on(BatchGetCommand).resolves({
+      Responses: {
+        "ses-signals": [
+          { threadId: "thr-stale", accountId: "acct-1", subject: "Stale", lastSignalAt: "1999-12-31T23:59:59.000Z" },
+          { threadId: "thr-fresh", accountId: "acct-1", subject: "Fresh", lastSignalAt: "2024-01-01T00:00:00.000Z" },
+        ],
+      },
+    });
+
+    const result = await db.batchGetThreads("acct-1", ["thr-stale", "thr-fresh"]);
+
+    expect(result.isOk()).toBe(true);
+    const threads = result._unsafeUnwrap();
+    expect(threads.map(t => (t as any).threadId)).toEqual(["thr-fresh"]);
   });
 
   it("handles undefined Responses gracefully (returns empty array)", async () => {
