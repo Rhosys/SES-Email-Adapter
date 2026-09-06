@@ -162,7 +162,7 @@ export class ForwardingService implements IForwardingService {
       textBody: `Click the link below to verify that you want to receive forwarded emails at ${target}:\n\n${verifyUrl}`,
       htmlBody,
       tags,
-      fromOverride: `"Numaeel" <noreply@${this.mailDomain}>`,
+      fromSender: `"Numaeel" <noreply@${this.mailDomain}>`,
       accountId: this.emailService.platformTenant,
     })
 

@@ -92,7 +92,7 @@ describe("Team invite email", () => {
     expect(sendCall).toBeDefined();
     expect(sendCall.to).toBe("newuser@example.com");
     expect(sendCall.subject).toBe("You've been invited to join Acme Corp on Numaeel");
-    expect(sendCall.fromOverride).toMatch(/^"Numaeel" <noreply@/);
+    expect(sendCall.fromSender).toMatch(/^"Numaeel" <noreply@/);
     expect(sendCall.htmlBody).toBe("<html>team-invite-rendered</html>");
     expect(sendCall.textBody).toContain("invited to join Acme Corp");
     expect(sendCall.textBody).toContain("inv-abc123");

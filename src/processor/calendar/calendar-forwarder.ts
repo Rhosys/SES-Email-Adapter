@@ -86,7 +86,10 @@ export async function forwardCalendarInvite(
       to: calendarForwardingAddress,
       subject: calendarData.title,
       textBody: icsContent,
-      accountId,
+      // Sent under the platform tenant from the platform domain — NOT the customer
+      // tenant. Forwarded invites originate from the service, not the customer's
+      // own domain (see the platform-tenant unit test for the full reasoning).
+      accountId: emailService.platformTenant,
       headers: [
         { Name: "X-Numaeel-Calendar-Signal-Id", Value: calendarSignal.id },
         { Name: "Content-Type", Value: "text/calendar; method=" + calendarData.method },

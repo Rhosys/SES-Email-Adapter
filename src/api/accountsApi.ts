@@ -325,7 +325,7 @@ export class AccountsApi {
       const htmlBody = await renderTemplate("team-invite", { accountName, inviteUrl, domain: emailService.appDomain, emailType: "team-invite" });
       const tags = buildEmailTags({ accountId, fullDate, invocationId: logger.getInvocationId(), triggerId });
       const textBody = `You've been invited to join ${accountName} on Numaeel.\n\nAccept your invite: ${inviteUrl}\n\nView your account: ${emailService.appBaseUrl}/a/`;
-      const sendResult = await emailService.send({ to: body.email, subject: `You've been invited to join ${accountName} on Numaeel`, textBody, htmlBody, tags, fromOverride: `"Numaeel" <noreply@${MAIL_DOMAIN}>`, accountId: emailService.platformTenant });
+      const sendResult = await emailService.send({ to: body.email, subject: `You've been invited to join ${accountName} on Numaeel`, textBody, htmlBody, tags, fromSender: `"Numaeel" <noreply@${MAIL_DOMAIN}>`, accountId: emailService.platformTenant });
       if (sendResult.isErr()) {
         if (sendResult.error.kind === "permanent_ses_error") {
           logger.warn("Team invite email permanently rejected by SES — will not retry.", { code: "invite.email_send_permanent", accountId, email: body.email, inviteId, error: sendResult.error });

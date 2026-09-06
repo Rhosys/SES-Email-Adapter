@@ -161,14 +161,14 @@ describe("EmailService.send()", () => {
     expect(result._unsafeUnwrapErr()).toEqual(expect.objectContaining({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400 }));
   });
 
-  it("fromOverride used when provided", async () => {
+  it("fromSender used when provided", async () => {
     mockSend.mockResolvedValueOnce({ MessageId: "ses-msg-003" });
 
     await service.send({
       to: "user@example.com",
       subject: "Reply",
       textBody: "Body",
-      fromOverride: "custom-sender@example.com",
+      fromSender: "custom-sender@example.com",
       accountId: "test-platform",
     });
 

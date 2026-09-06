@@ -261,7 +261,7 @@ export class ReplySenderService implements ReplySender {
 
     const result = await this.emailService.send({
       to: opts.to,
-      fromOverride: opts.from,
+      fromSender: opts.from,
       subject: opts.subject,
       textBody: opts.body,
       htmlBody: opts.htmlBody,

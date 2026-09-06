@@ -122,7 +122,7 @@ describe("ReplySenderService.sendReply()", () => {
 
     expect(emailService.send).toHaveBeenCalledWith({
       to: "recipient@example.com",
-      fromOverride: "sender@example.com",
+      fromSender: "sender@example.com",
       subject: "Re: Original Subject",
       textBody: "Reply body text",
       htmlBody: "<p>Reply body text</p>\n",
@@ -515,7 +515,7 @@ describe("ReplySenderService — allowFallbackToPlatformSending", () => {
 
     expect(result.isOk()).toBe(true);
     const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-    expect(call.fromOverride).toBe(`noreply@${MAIL_DOMAIN}`);
+    expect(call.fromSender).toBe(`noreply@${MAIL_DOMAIN}`);
     expect(call.accountId).toBe("platform-tenant");
   });
 
@@ -539,7 +539,7 @@ describe("ReplySenderService — allowFallbackToPlatformSending", () => {
 
     expect(result.isOk()).toBe(true);
     const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-    expect(call.fromOverride).toBe("user@gmail.com");
+    expect(call.fromSender).toBe("user@gmail.com");
     expect(call.accountId).toBe("acct-test");
   });
 
@@ -576,7 +576,7 @@ describe("ReplySenderService — allowFallbackToPlatformSending", () => {
 
     expect(result.isOk()).toBe(true);
     const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-    expect(call.fromOverride).toBe(`noreply@${MAIL_DOMAIN}`);
+    expect(call.fromSender).toBe(`noreply@${MAIL_DOMAIN}`);
     expect(call.accountId).toBe("platform-tenant");
   });
 });

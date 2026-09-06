@@ -52,7 +52,7 @@ export async function sendRsvp(
     to: organizerAddress,
     subject: `Re: ${originalCalendarData.title}`,
     textBody: icsContent,
-    fromOverride: fromAddress,
+    fromSender: fromAddress,
     accountId: opts.accountId,
     headers: [
       { Name: "Content-Type", Value: "text/calendar; method=REPLY; charset=UTF-8" },

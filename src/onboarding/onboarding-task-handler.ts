@@ -251,7 +251,7 @@ export class OnboardingTaskHandler {
       textBody,
       htmlBody,
       tags,
-      fromOverride: `"Numaeel" <noreply@${MAIL_DOMAIN}>`,
+      fromSender: `"Numaeel" <noreply@${MAIL_DOMAIN}>`,
       accountId: this.emailService.platformTenant,
     });
 

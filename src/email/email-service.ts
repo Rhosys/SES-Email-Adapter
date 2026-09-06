@@ -18,7 +18,13 @@ export interface EmailSendOptions {
   htmlBody?: string;
   headers?: Array<{ Name: string; Value: string }>;
   tags?: Array<{ Name: string; Value: string }>;
-  fromOverride?: string;
+  /**
+   * The From address for this send. Should be set on almost every send so the
+   * From matches the sending tenant. If omitted, falls back to the platform
+   * `from` address — a last resort that only aligns with platform-tenant sends;
+   * never rely on it for customer-tenant sends.
+   */
+  fromSender?: string;
   /** SES TenantName — must match the sending identity. Platform tenant for platform sends, customer accountId for customer sends. */
   accountId: string;
 }
@@ -107,7 +113,7 @@ export class EmailService {
     const validation = this.validateAccountId(opts.accountId);
     if (validation.isErr()) return err(validation.error);
 
-    const fromAddress = opts.fromOverride ?? this.from;
+    const fromAddress = opts.fromSender ?? this.from;
     const tenantMismatch = this.validateTenantDomainAlignment(opts.accountId, fromAddress);
     if (tenantMismatch.isErr()) {
       this.logger.error(`Tenant/domain alignment mismatch — from address does not match tenant type [${opts.subject}].`, {
@@ -116,11 +122,6 @@ export class EmailService {
         fromAddress,
         error: tenantMismatch.error,
       });
-      // Treat as permanent (non-retriable) until 2026-08-12 to stop poisoning the retry queue,
-      // then revert to returning the validation error so it surfaces as transient for investigation.
-      if (Date.now() < Date.UTC(2026, 7, 12)) {
-        return err(permanentSesError("TenantDomainMismatch", 400, tenantMismatch.error.message, tenantMismatch.error));
-      }
       return err(tenantMismatch.error);
     }
 

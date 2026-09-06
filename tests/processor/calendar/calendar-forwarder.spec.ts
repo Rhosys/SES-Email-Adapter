@@ -32,10 +32,13 @@ function makeLogger(): Logger {
   } as unknown as Logger;
 }
 
+const PLATFORM_TENANT = "platform-tenant";
+
 function makeEmailService(overrides: Partial<EmailService> = {}): EmailService {
   return {
     send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-001" })),
     sendRaw: vi.fn(),
+    platformTenant: PLATFORM_TENANT,
     ...overrides,
   } as unknown as EmailService;
 }
@@ -158,6 +161,30 @@ describe("forwardCalendarInvite — no-op when calendarForwardingAddress missing
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// Sender identity: forwarded invites are sent under the PLATFORM tenant
+// ---------------------------------------------------------------------------
+
+describe("forwardCalendarInvite — sends under the platform tenant", () => {
+  it("sends under the platform tenant, not the customer account, so every forwarded invite visibly originates from the service — recipients know who is sending (the service, on the customer's behalf) rather than having to filter by sender on the receiving side, and concentrating all sends on the platform domain builds our sending-domain reputation instead of fragmenting it across unverified customer domains", async () => {
+    const emailService = makeEmailService();
+    const deps = makeDeps(emailService);
+    // Customer account on the opts — the send must NOT use this as the SES tenant.
+    const opts = makeOpts({ accountId: "acc-abc123" });
+    const logger = makeLogger();
+
+    const result = await forwardCalendarInvite(opts, deps, logger);
+
+    expect(result.isOk()).toBe(true);
+    const sendCall = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(sendCall.accountId).toBe(PLATFORM_TENANT);
+    expect(sendCall.accountId).not.toBe("acc-abc123");
+    // No fromSender override — the platform default `from` is used, keeping the
+    // From aligned with the platform tenant.
+    expect(sendCall.fromSender).toBeUndefined();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Permanent SES error handling

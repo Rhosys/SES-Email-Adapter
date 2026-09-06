@@ -105,7 +105,7 @@ describe("Onboarding email send", () => {
       to: "user@example.com",
       subject: "The Next Step",
       htmlBody: "<html>rendered</html>",
-      fromOverride: expect.stringContaining("Numaeel"),
+      fromSender: expect.stringContaining("Numaeel"),
     }));
 
     // Verify template rendered with correct progress flags

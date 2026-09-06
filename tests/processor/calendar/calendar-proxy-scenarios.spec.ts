@@ -315,7 +315,7 @@ describe("Scenario: UI RSVP sends masked reply to organizer preserving user priv
     expect(sendCall.to).toBe(ORGANIZER_EMAIL);
 
     // Sent FROM the alias (privacy preserved)
-    expect(sendCall.fromOverride).toBe(ALIAS_ADDRESS);
+    expect(sendCall.fromSender).toBe(ALIAS_ADDRESS);
 
     // Parse the .ics to verify structure
     const icsBody: string = sendCall.textBody;

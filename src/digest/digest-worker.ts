@@ -171,7 +171,7 @@ export class DigestWorker {
       htmlBody,
       headers,
       tags,
-      fromOverride: `"Numaeel Digest" <digest@${fromDomain}>`,
+      fromSender: `"Numaeel Digest" <digest@${fromDomain}>`,
       accountId: sendAccountId,
     })
 

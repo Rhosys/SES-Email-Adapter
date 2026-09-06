@@ -245,8 +245,8 @@ describe("DigestWorker — REQ-1.1, REQ-1.4, REQ-0.7", () => {
       const sendArgs = deps.mockSend.mock.calls[0]![0]
       // Correct recipient from forwarding target
       expect(sendArgs.to).toBe("user@example.com")
-      // From override uses digest@ prefix
-      expect(sendArgs.fromOverride).toMatch(/^"Numaeel Digest" <digest@/)
+      // fromSender uses digest@ prefix
+      expect(sendArgs.fromSender).toMatch(/^"Numaeel Digest" <digest@/)
       // HTML body from template renderer mock
       expect(sendArgs.htmlBody).toBe("<html>digest</html>")
       // Tags include account ID (sanitized — underscore preserved by [a-z0-9_-])
