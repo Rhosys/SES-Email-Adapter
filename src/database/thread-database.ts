@@ -69,6 +69,13 @@ function hydrateThreadObject<T>(record: T): T {
   return { ...record, threadId, ...(r.sender ? { sender: r.sender } : {}) };
 }
 
+// Threads with a stale/placeholder lastSignalAt (e.g. never-updated legacy records) don't
+// represent real activity — excluded from every read path that returns threads to a caller.
+const MIN_LAST_SIGNAL_AT = "2000-01-01T00:00:00.000Z";
+function hasRecentSignal(thread: Thread): boolean {
+  return thread.lastSignalAt >= MIN_LAST_SIGNAL_AT;
+}
+
 // ---------------------------------------------------------------------------
 // hydrateSignal — defaults fields that may be absent on legacy DDB items
 // ---------------------------------------------------------------------------
@@ -515,6 +522,7 @@ export class ThreadDatabase {
 
       if (params.workflow) items = items.filter((a) => a.workflow === params.workflow);
       if (params.label) items = items.filter((a) => a.labels.includes(params.label!));
+      items = items.filter(hasRecentSignal);
 
       const page = items.slice(0, limit).map(hydrateThreadObject);
       const nextKey = items.length > limit && lastKey ? encodeCursor(lastKey) : null;
@@ -669,7 +677,7 @@ export class ThreadDatabase {
         ScanIndexForward: false,
         Limit: limit,
       }));
-      return ok((res.Items ?? []).map(i => hydrateThreadObject(i as Thread)));
+      return ok((res.Items ?? []).map(i => hydrateThreadObject(i as Thread)).filter(hasRecentSignal));
     } catch (e) {
       return err(dbError(e));
     }
@@ -683,7 +691,7 @@ export class ThreadDatabase {
         RequestItems: { [SIGNALS_TABLE]: { Keys: keys } },
       }));
       const items = (res.Responses?.[SIGNALS_TABLE] ?? []) as Thread[];
-      return ok(items.map(hydrateThreadObject));
+      return ok(items.map(hydrateThreadObject).filter(hasRecentSignal));
     } catch (e) {
       return err(dbError(e));
     }

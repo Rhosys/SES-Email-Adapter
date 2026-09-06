@@ -11,7 +11,7 @@ import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../retention.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { EmailContentStore } from "./content-store.js";
-import type { Signal, AnySignal, InboundEmailSignalData, PageParams, Thread, ThreadStatus, Workflow } from "../types/index.js";
+import type { Signal, AnySignal, InboundEmailSignalData, PageParams, ThreadStatus, Workflow } from "../types/index.js";
 import type { CalendarResponseData, DomainMisconfigurationData, Pagination } from "../types/index.js";
 import type { UpdateThreadFields, ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
@@ -49,13 +49,6 @@ export interface ListThreadsParams extends PageParams {
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
-}
-
-// Threads with a stale/placeholder lastSignalAt (e.g. never-updated legacy records) are
-// excluded from list responses — they don't represent real activity.
-const MIN_LAST_SIGNAL_AT = "2000-01-01T00:00:00.000Z";
-function hasRecentSignal(thread: Thread): boolean {
-  return thread.lastSignalAt >= MIN_LAST_SIGNAL_AT;
 }
 
 export class ThreadsApi {
@@ -136,7 +129,7 @@ export class ThreadsApi {
           return err(c, 500, "Internal Server Error");
         }
 
-        return c.json(page("threads", threadsResult.value.filter(hasRecentSignal).map(toApiThread), undefined), 200);
+        return c.json(page("threads", threadsResult.value.map(toApiThread), undefined), 200);
       }
       const params: ListThreadsParams = {
         ...(query["workflow"] ? { workflow: query["workflow"] as Workflow } : {}),
@@ -150,7 +143,7 @@ export class ThreadsApi {
         logger.error(`Failed to list threads: ${result.error.message}`, { code: "api.threads.list_failed", error: result.error });
         return err(c, 500, "Internal Server Error");
       }
-      return c.json(page("threads", result.value.items.filter(hasRecentSignal).map(toApiThread), result.value.nextCursor), 200);
+      return c.json(page("threads", result.value.items.map(toApiThread), result.value.nextCursor), 200);
     });
 
     // -------------------------------------------------------------------------

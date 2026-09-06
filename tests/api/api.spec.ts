@@ -416,17 +416,6 @@ describe("API", () => {
       expect(body.pagination.cursor).toBe("cursor-abc");
     });
 
-    it("excludes threads whose last signal predates Jan 1 2000", async () => {
-      vi.mocked(threadDb.listThreads).mockResolvedValueOnce(ok({
-        items: [
-          makeThread({ id: "arc-stale", lastSignalAt: "1999-12-31T23:59:59.000Z" }),
-          makeThread({ id: "arc-fresh", lastSignalAt: "2024-01-01T00:00:00.000Z" }),
-        ],
-      }));
-      const res = await req(app, "GET", `${A}/threads`);
-      const body = await res.json() as { threads: { threadId: string }[] };
-      expect(body.threads.map(t => t.threadId)).toEqual(["arc-fresh"]);
-    });
   });
 
   describe("GET /accounts/:accountId/threads/:threadId", () => {
