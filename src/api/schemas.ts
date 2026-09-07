@@ -7,7 +7,7 @@ import { z } from "@hono/zod-openapi";
 export const Workflow = z.enum([
   "auth", "conversation", "crm", "package", "travel", "payments", "alert",
   "content", "onboarding", "notice", "healthcare", "job", "support", "test",
-  "events",
+  "events", "healthcheck", "unspecified",
 ]);
 
 export const ThreadStatus = z.enum(["active", "archived", "deleted", "report_violation"]);
@@ -229,6 +229,11 @@ export const ContentData = z.object({
   discountCode: z.string().optional(),
   discountAmount: z.string().optional(),
   expiryDate: z.string().optional(),
+  eventStartDatetime: z.string().optional(),
+  eventEndDatetime: z.string().optional(),
+  location: z.string().optional(),
+  organizer: z.string().optional(),
+  eventUrl: z.string().optional(),
 }).openapi("ContentData");
 
 export const NoticeData = z.object({
@@ -271,14 +276,47 @@ export const SupportData = z.object({
   responseUrl: z.string().optional(),
 }).openapi("SupportData");
 
+export const OnboardingData = z.object({
+  workflow: z.literal("onboarding"),
+  onboardingType: z.enum(["welcome", "verification", "getting_started", "trial_started", "other"]),
+  service: z.string(),
+}).openapi("OnboardingData");
+
+export const EventsData = z.object({
+  workflow: z.literal("events"),
+  eventType: z.enum(["ticket_confirmation", "reminder", "update", "cancellation", "venue_change"]),
+  eventName: z.string(),
+  venueName: z.string().optional(),
+  venueAddress: z.string().optional(),
+  eventStartDatetime: z.string().optional(),
+  eventEndDatetime: z.string().optional(),
+  performer: z.string().optional(),
+  ticketReference: z.string().optional(),
+  seatDetails: z.string().optional(),
+  ticketCount: z.string().optional(),
+  ticketUrl: z.string().optional(),
+  eventUrl: z.string().optional(),
+  totalAmount: z.string().optional(),
+  currency: z.string().optional(),
+}).openapi("EventsData");
+
+export const HealthcheckData = z.object({
+  workflow: z.literal("healthcheck"),
+}).openapi("HealthcheckData");
+
 export const TestData = z.object({
   workflow: z.literal("test"),
 }).openapi("TestData");
 
+export const UnspecifiedData = z.object({
+  workflow: z.literal("unspecified"),
+}).openapi("UnspecifiedData");
+
 export const WorkflowData = z.discriminatedUnion("workflow", [
   AuthData, ConversationData, CrmData, PackageData, TravelData,
   PaymentsData, AlertData, ContentData, NoticeData,
-  HealthcareData, JobData, SupportData, TestData,
+  HealthcareData, JobData, SupportData, EventsData,
+  OnboardingData, HealthcheckData, TestData, UnspecifiedData,
 ]).openapi("WorkflowData");
 
 // ---------------------------------------------------------------------------

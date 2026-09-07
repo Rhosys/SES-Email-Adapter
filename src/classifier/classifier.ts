@@ -248,17 +248,16 @@ export class SignalClassifier {
       ? raw.labels.filter((l) => input.allowedLabels.includes(l))
       : [];
 
-    // Sanitize URL fields in workflowData — nullify non-URL values (skip [link-N] references for later resolution)
-    const urlFields = ["trackingUrl", "downloadUrl", "managementUrl", "paymentUrl", "documentUrl", "portalUrl", "responseUrl", "ticketUrl", "actionUrl", "muteUrl"] as const;
+    // Sanitize URL fields in workflowData — nullify non-URL values (skip [link-N] references for later resolution).
+    // A field is a URL field iff its name ends in "Url" (e.g. actionUrl, ticketUrl, eventUrl). This is derived
+    // from the field name at runtime — no hardcoded allowlist to keep in sync with the workflow registry.
     const LINK_REF_PATTERN = /^\[link-\d+\]$/;
     const workflowData = { ...raw.workflowData } as Record<string, unknown>;
-    for (const field of urlFields) {
-      if (field in workflowData && typeof workflowData[field] === "string") {
-        const value = workflowData[field] as string;
-        if (!isValidUrl(value) && !LINK_REF_PATTERN.test(value)) {
-          this.logger.track("Classifier returned non-URL value for URL field — nullified.", { code: "classifier.invalid_url_field", field, value, input, rawResponse: jsonText });
-          workflowData[field] = null;
-        }
+    for (const [field, value] of Object.entries(workflowData)) {
+      if (!isUrlFieldName(field) || typeof value !== "string") continue;
+      if (!isValidUrl(value) && !LINK_REF_PATTERN.test(value)) {
+        this.logger.track("Classifier returned non-URL value for URL field — nullified.", { code: "classifier.invalid_url_field", field, value, input, rawResponse: jsonText });
+        workflowData[field] = null;
       }
     }
 
@@ -327,19 +326,11 @@ export class SignalClassifier {
     const { linkIndex } = redactUrls(input.body, input.extractedLinks ?? []);
     const linkMap = new Map(linkIndex.map((l) => [l.placeholder, l.url]));
 
-    // Resolve URL fields in workflowData
-    for (const field of urlFields) {
-      if (field in coercedWorkflowData && typeof coercedWorkflowData[field] === "string") {
-        const value = coercedWorkflowData[field] as string;
-        const resolved = linkMap.get(value);
-        if (resolved) {
-          coercedWorkflowData[field] = resolved;
-        } else if (LINK_REF_PATTERN.test(value)) {
-          // Unresolved link reference — nullify
-          coercedWorkflowData[field] = null;
-        }
-      }
-    }
+    // Resolve/strip every [link-N] token anywhere in workflowData — any field (URL-named or not),
+    // any nesting depth. The model may emit a [link-N] into any field it decides is a URL, so this
+    // single recursive pass is the sole resolver: it guarantees no raw [link-N] artifact reaches
+    // the UI regardless of field name or nesting.
+    resolveLinkTokensDeep(coercedWorkflowData, linkMap);
 
     // Resolve [link-N] references in actions
     for (const action of actions) {
@@ -432,6 +423,57 @@ export class SignalClassifier {
       }
     }
   }
+}
+
+// Matches every [link-N] token in a string (global, unanchored) — the model may embed a token
+// inside longer text, not only as a whole field value.
+const LINK_TOKEN_GLOBAL = /\[link-\d+\]/g;
+
+/**
+ * Recursively walk workflowData and resolve or strip every [link-N] token, in place.
+ *
+ * - A string equal to a single unresolved [link-N] becomes null (the field had no real URL).
+ * - Otherwise each [link-N] occurrence is replaced with its resolved URL, and any leftover
+ *   unresolved token is removed. This is a safety net independent of field names or nesting:
+ *   no raw [link-N] artifact can survive to reach the UI.
+ */
+function resolveLinkTokensDeep(node: unknown, linkMap: Map<string, string>): void {
+  if (Array.isArray(node)) {
+    for (let i = 0; i < node.length; i++) {
+      const child = node[i];
+      if (typeof child === "string") {
+        node[i] = resolveLinkTokensInString(child, linkMap);
+      } else {
+        resolveLinkTokensDeep(child, linkMap);
+      }
+    }
+    return;
+  }
+  if (node !== null && typeof node === "object") {
+    const record = node as Record<string, unknown>;
+    for (const key of Object.keys(record)) {
+      const child = record[key];
+      if (typeof child === "string") {
+        record[key] = resolveLinkTokensInString(child, linkMap);
+      } else {
+        resolveLinkTokensDeep(child, linkMap);
+      }
+    }
+  }
+}
+
+/** Resolve/strip [link-N] tokens within a single string value. Returns null when the whole value was an unresolved token. */
+function resolveLinkTokensInString(value: string, linkMap: Map<string, string>): string | null {
+  if (!value.includes("[link-")) return value;
+  // A value that is exactly one unresolved token means the field held no real URL.
+  const singleToken = value.trim();
+  if (/^\[link-\d+\]$/.test(singleToken) && !linkMap.has(singleToken)) return null;
+  return value.replace(LINK_TOKEN_GLOBAL, (token) => linkMap.get(token) ?? "");
+}
+
+/** A workflowData field holds a URL iff its name ends in "Url" (actionUrl, ticketUrl, eventUrl, …). */
+function isUrlFieldName(name: string): boolean {
+  return name.endsWith("Url");
 }
 
 function isValidUrl(value: string): boolean {

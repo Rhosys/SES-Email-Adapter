@@ -662,4 +662,89 @@ describe("SignalClassifier", () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // classify — [link-N] resolution safety net (deep sweep)
+  // -------------------------------------------------------------------------
+
+  describe("[link-N] deep resolution", () => {
+    const linkEmail: ClassificationInput = {
+      from: "events@service.com",
+      to: ["user@example.com"],
+      subject: "Webinar invite",
+      body: "Register at https://service.com/register and read https://service.com/agenda",
+      receivedAt: "2024-01-15T10:00:00Z",
+      headers: {},
+      allowedLabels: [],
+      labelInstructions: {},
+      extractedLinks: [
+        { url: "https://service.com/register", text: "Register" },
+        { url: "https://service.com/agenda", text: "Agenda" },
+      ],
+    };
+
+    it("resolves a [link-N] token in a field not on the URL allowlist", async () => {
+      mockClassifyResponse({
+        workflow: "content",
+        // `location` is NOT in urlFields — only the deep sweep can resolve it.
+        workflowData: { workflow: "content", contentType: "announcement", publisher: "Service", location: "[link-2]" },
+        tags: [],
+        summary: "Webinar announcement.",
+        labels: [],
+      });
+
+      const result = await classifier.classify(linkEmail);
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().workflowData).toMatchObject({ location: "https://service.com/agenda" });
+    });
+
+    it("resolves a [link-N] token nested inside an array element", async () => {
+      mockClassifyResponse({
+        workflow: "content",
+        workflowData: { workflow: "content", contentType: "announcement", publisher: "Service", topics: ["see [link-1] now"] },
+        tags: [],
+        summary: "Webinar announcement.",
+        labels: [],
+      });
+
+      const result = await classifier.classify(linkEmail);
+
+      expect(result.isOk()).toBe(true);
+      const data = result._unsafeUnwrap().workflowData as { topics: string[] };
+      expect(data.topics[0]).toBe("see https://service.com/register now");
+    });
+
+    it("nullifies a field whose whole value is an unresolved [link-N]", async () => {
+      mockClassifyResponse({
+        workflow: "content",
+        // [link-9] has no entry in the link index.
+        workflowData: { workflow: "content", contentType: "announcement", publisher: "Service", location: "[link-9]" },
+        tags: [],
+        summary: "Webinar announcement.",
+        labels: [],
+      });
+
+      const result = await classifier.classify(linkEmail);
+
+      expect(result.isOk()).toBe(true);
+      expect((result._unsafeUnwrap().workflowData as { location: string | null }).location).toBeNull();
+    });
+
+    it("strips an unresolved [link-N] embedded in free text, leaving the rest", async () => {
+      mockClassifyResponse({
+        workflow: "content",
+        workflowData: { workflow: "content", contentType: "announcement", publisher: "Service", topics: ["details [link-9] here"] },
+        tags: [],
+        summary: "Webinar announcement.",
+        labels: [],
+      });
+
+      const result = await classifier.classify(linkEmail);
+
+      expect(result.isOk()).toBe(true);
+      const data = result._unsafeUnwrap().workflowData as { topics: string[] };
+      expect(data.topics[0]).not.toContain("[link-");
+    });
+  });
+
 });
