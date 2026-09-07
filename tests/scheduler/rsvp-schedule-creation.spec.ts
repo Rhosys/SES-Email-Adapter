@@ -17,6 +17,7 @@ import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "../processor/_shared-new-deps.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "../processor/_helpers.js";
 import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
+import { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
 import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SchedulerClient } from "../../src/scheduler/scheduler-client.js";
@@ -186,7 +187,7 @@ function buildProcessor(opts: {
     replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "mock-reply-id" })) },
     sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-    calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
+    calendarForwarder: new CalendarForwarder({ emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })) } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() }),
     schedulerClient: schedulerClient as unknown as SchedulerClient,
   });
 }

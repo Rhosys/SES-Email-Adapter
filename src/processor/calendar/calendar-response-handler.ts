@@ -14,11 +14,10 @@ import type { InboundSignalMessage } from "../processor.js";
 import type { ThreadDatabase } from "../../database/thread-database.js";
 import type { Logger } from "../../logger.js";
 import type { Signal, CalendarEventData, CalendarResponseData } from "../../types/index.js";
-import type { EmailService } from "../../email/email-service.js";
 import { validateProxyUid } from "./proxy-uid.js";
 import type { HmacSecretGenerator } from "./hmac-secret-generator.js";
 import { parseIcs } from "./ics-parser.js";
-import type { sendRsvp } from "./rsvp-composer.js";
+import type { CalendarForwarder } from "./calendar-forwarder.js";
 import { validateId, validateAccountId } from "../../utils/id.js";
 
 // ---------------------------------------------------------------------------
@@ -28,9 +27,8 @@ import { validateId, validateAccountId } from "../../utils/id.js";
 export interface CalendarResponseHandlerDeps {
   serviceDomain: string;
   threadDatabase: ThreadDatabase;
-  rsvpComposer: typeof sendRsvp;
+  calendarForwarder: CalendarForwarder;
   signalStore: { saveSignal(signal: Signal<CalendarResponseData>): Promise<Result<void, DbError>> };
-  emailService: EmailService;
   hmac: HmacSecretGenerator;
 }
 
@@ -80,7 +78,7 @@ export async function handleCalendarResponse(
   logger: Logger,
   icsBytes: Uint8Array,
 ): Promise<Result<void, DbError | EmailServiceError>> {
-  const { serviceDomain, threadDatabase, rsvpComposer, signalStore, emailService, hmac } = deps;
+  const { serviceDomain, threadDatabase, calendarForwarder, signalStore, hmac } = deps;
 
   // --- Step 1: Extract threadId and accountId from recipient address ---
   // Pattern: {threadId}@{accountId}.{serviceDomain}
@@ -225,7 +223,7 @@ export async function handleCalendarResponse(
   const organizerAddress = calendarData.organizer;
 
   // --- Step 7: Trigger RSVP_Composer (send-first, record-second) ---
-  const rsvpResult = await rsvpComposer(
+  const rsvpResult = await calendarForwarder.sendReply(
     {
       decision,
       originalCalendarData: {
@@ -238,7 +236,7 @@ export async function handleCalendarResponse(
       fromAddress: aliasAddress,
       accountId,
     },
-    { emailService, logger },
+    logger,
   );
 
   if (rsvpResult.isErr()) return err(rsvpResult.error);

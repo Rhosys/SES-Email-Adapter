@@ -44,8 +44,7 @@ import { BillingHandler } from "../billing/billing-handler.js";
 import type { HandlerRegistry } from "../workflow/registry.js";
 import { findCalendarAttachment, parseIcs } from "./calendar/ics-parser.js";
 import { buildCalendarSignalLookupId } from "./calendar/signal-lookup.js";
-import { forwardCalendarInvite } from "./calendar/calendar-forwarder.js";
-import type { CalendarForwarderDeps } from "./calendar/calendar-forwarder.js";
+import { CalendarForwarder } from "./calendar/calendar-forwarder.js";
 import type { CalendarEventData, CalendarInviteInvalidData } from "../types/calendar.js";
 import type { SchedulerClient } from "../scheduler/scheduler-client.js";
 import { RSVP_REMINDER_HOURS_BEFORE } from "../scheduler/rsvp-reminder.js";
@@ -342,7 +341,7 @@ interface SignalProcessorOptions {
   draftSendDispatcher: DraftSendDispatch;
   billingHandler: BillingHandler;
   handlerRegistry: HandlerRegistry;
-  calendarForwarderDeps: CalendarForwarderDeps;
+  calendarForwarder: CalendarForwarder;
   schedulerClient: SchedulerClient;
   emailContentStore: EmailContentStore;
   contentStore: ContentStore;
@@ -371,7 +370,7 @@ export class SignalProcessor {
   private readonly draftSendDispatcher: DraftSendDispatch;
   private readonly billingHandler: BillingHandler;
   private readonly handlerRegistry: HandlerRegistry;
-  private readonly calendarForwarderDeps: CalendarForwarderDeps;
+  private readonly calendarForwarder: CalendarForwarder;
   private readonly schedulerClient: SchedulerClient;
   private readonly emailContentStore: EmailContentStore;
   private readonly contentStore: ContentStore;
@@ -399,7 +398,7 @@ export class SignalProcessor {
     this.draftSendDispatcher = opts.draftSendDispatcher;
     this.billingHandler = opts.billingHandler;
     this.handlerRegistry = opts.handlerRegistry;
-    this.calendarForwarderDeps = opts.calendarForwarderDeps;
+    this.calendarForwarder = opts.calendarForwarder;
     this.schedulerClient = opts.schedulerClient;
     this.emailContentStore = opts.emailContentStore;
     this.contentStore = opts.contentStore;
@@ -861,7 +860,7 @@ export class SignalProcessor {
           this.logger.track("Calendar forward skipped — no linked calendar signal found.", { code: "processor.side_effect.calendar_forward_no_signal", signal, thread, payload });
         } else {
           const calendarSignal = calendarSignalResult.value;
-          const forwardResult = await forwardCalendarInvite(
+          const forwardResult = await this.calendarForwarder.forwardInvite(
             {
               calendarSignal,
               calendarForwardingAddress,
@@ -869,7 +868,6 @@ export class SignalProcessor {
               threadId: thread.id,
               aliasAddress: signal.data.recipientAddress,
             },
-            this.calendarForwarderDeps,
             this.logger,
           );
           if (forwardResult.isErr()) {

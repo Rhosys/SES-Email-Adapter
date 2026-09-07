@@ -16,6 +16,7 @@ import type { SchedulerClient } from "../../src/scheduler/scheduler-client.js";
 import type { Alias, AliasSender, Thread } from "../../src/types/index.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
+import { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
 
 // ---------------------------------------------------------------------------
 // Mock the cluster registry with a single active cluster
@@ -201,7 +202,7 @@ function buildProcessor(opts: {
     replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "mock-reply-id" })) },
     sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-    calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
+    calendarForwarder: new CalendarForwarder({ emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })) } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() }),
     schedulerClient: schedulerClient as unknown as SchedulerClient,
   });
 }

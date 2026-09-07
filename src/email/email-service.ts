@@ -33,6 +33,12 @@ export interface EmailRawOptions {
   to: string;
   rawData: Uint8Array;
   tags?: Array<{ Name: string; Value: string }>;
+  /**
+   * The From address for this send. Must be present in the raw MIME's `From:` header too.
+   * Validated against the tenant the same way `send` does. If omitted, falls back to the
+   * platform `from` — only correct for platform-tenant sends.
+   */
+  fromSender?: string;
   /** Account sending on behalf of — maps to SES TenantName at the boundary. */
   accountId: string;
 }
@@ -62,6 +68,9 @@ export class EmailService {
 
   /** The SES tenant name for platform-originated sends (verification, onboarding, invites). */
   get platformTenant(): string { return this.platformTenantName; }
+
+  /** The platform From address (on our mail domain). Used when building raw MIME for platform-tenant sends. */
+  get platformFrom(): string { return this.from; }
 
   /** Full app URL including protocol — e.g. `https://email.rhosys.cloud`. Used for email CTAs. */
   get appBaseUrl(): string { return process.env["APP_BASE_URL"] ?? ""; }
@@ -171,10 +180,23 @@ export class EmailService {
   async sendRaw(opts: EmailRawOptions): Promise<Result<{ messageId: string }, EmailServiceError>> {
     const validation = this.validateAccountId(opts.accountId);
     if (validation.isErr()) return err(validation.error);
+
+    const fromAddress = opts.fromSender ?? this.from;
+    const tenantMismatch = this.validateTenantDomainAlignment(opts.accountId, fromAddress);
+    if (tenantMismatch.isErr()) {
+      this.logger.error("Tenant/domain alignment mismatch on raw send — from address does not match tenant type.", {
+        code: "email_service.tenant_domain_mismatch",
+        accountId: opts.accountId,
+        fromAddress,
+        error: tenantMismatch.error,
+      });
+      return err(tenantMismatch.error);
+    }
+
     const emailTags = this.sanitizeTags(opts.tags);
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
-        FromEmailAddress: this.from,
+        FromEmailAddress: fromAddress,
         Destination: { ToAddresses: [opts.to] },
         Content: { Raw: { Data: opts.rawData } },
         ConfigurationSetName: this.configSetName,
@@ -247,7 +269,16 @@ export class EmailService {
       return err(permanentSesError(errorName, httpStatus, "Tenant not found: " + opts.accountId, e));
     }
 
+    // A malformed request never succeeds on retry. BadRequestException/ValidationException are
+    // SES telling us the request itself is invalid (e.g. "Header <Content-Type> is not supported",
+    // an unparseable raw MIME, a bad parameter). Retrying the identical bytes just burns the
+    // redrive budget and dead-letters the message. Classify these as permanent so a bad send is
+    // dropped on the first attempt. (Distinct from MessageRejected and AccountSendingPaused, which
+    // can be transient — a sandbox limit or a pause that gets lifted.)
+    const isMalformedRequest = errorName === "BadRequestException" || errorName === "ValidationException";
+
     const isPermanent =
+      isMalformedRequest ||
       (errorName === "MessageRejected" && errorMessage.includes("Email address is not verified")) ||
       errorName === "ConfigurationSetSendingPausedException" ||
       errorName === "ConfigurationSetDoesNotExistException" ||

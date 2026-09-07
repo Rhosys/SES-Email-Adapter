@@ -18,7 +18,7 @@ import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import type { DraftSendDispatcher } from "../processor/draft-send-dispatcher.js";
 import type { EmailService } from "../email/email-service.js";
-import type { sendRsvp as SendRsvpFn } from "../processor/calendar/rsvp-composer.js";
+import type { CalendarForwarder } from "../processor/calendar/calendar-forwarder.js";
 import type { PostApprovalCalendarHandlerDeps } from "../processor/calendar/post-approval-handler.js";
 import type { SchedulerClient } from "../scheduler/scheduler-client.js";
 import { getPrimaryThreadMatcherRegistry } from "../embedding/cluster-registry.js";
@@ -59,7 +59,7 @@ export class ThreadsApi {
     private readonly draftSendDispatcher: DraftSendDispatcher,
     private readonly schedulerClient: SchedulerClient,
     private readonly emailService: EmailService,
-    private readonly rsvpComposer: typeof SendRsvpFn,
+    private readonly calendarForwarder: CalendarForwarder,
     private readonly postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps,
     private readonly signalReprocessor: SignalReprocessor,
     private readonly emailContentStore: EmailContentStore,
@@ -70,7 +70,7 @@ export class ThreadsApi {
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, signalReprocessor, emailContentStore, contentCdnBaseUrl, embeddingGenerator, threadMatcher, signalQueue } = this;
+    const { threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, calendarForwarder, signalReprocessor, emailContentStore, contentCdnBaseUrl, embeddingGenerator, threadMatcher, signalQueue } = this;
 
     // -------------------------------------------------------------------------
     // 1. GET /accounts/{accountId}/threads — list threads
@@ -623,7 +623,7 @@ export class ThreadsApi {
       const threadId = c.req.param("threadId")!;
       const signalId = c.req.param("id")!;
       logger.info("Processing RSVP", { code: "api.threads.rsvp", accountId, threadId, signalId });
-      if (!emailService || !rsvpComposer) {
+      if (!emailService || !calendarForwarder) {
         logger.error("Service dependency not configured at runtime — this indicates a missing environment variable or initialization failure.", { code: "api.rsvp.not_configured" });
         return err(c, 501, "RSVP not configured");
       }
@@ -688,7 +688,7 @@ export class ThreadsApi {
         return err(c, 422, "Domain misconfiguration", "DOMAIN_MISCONFIGURATION", { domain: aliasDomain, reason: "DKIM + SPF not configured for alias domain" });
       }
 
-      const rsvpResult = await rsvpComposer(
+      const rsvpResult = await calendarForwarder.sendReply(
         {
           decision: body.decision,
           originalCalendarData: calendarData,
@@ -697,7 +697,7 @@ export class ThreadsApi {
           fromAddress: recipientAddress,
           accountId,
         },
-        { emailService, logger },
+        logger,
       );
 
       if (rsvpResult.isErr()) return err(c, 422, "Failed to send RSVP", "RSVP_SEND_FAILED");

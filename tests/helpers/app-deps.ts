@@ -23,7 +23,7 @@ export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
     billingHandler: new BillingHandler(),
     emailService: { send: async () => ok({ messageId: "stub" }), sendRaw: async () => {} } as never,
     domainIdentityService: { register: async () => ok(undefined), deregister: async () => ok(undefined) },
-    rsvpComposer: (async () => ok(undefined)) as never,
+    calendarForwarder: { forwardInvite: async () => ok(undefined), sendReply: async () => ok({ messageId: "stub" }) } as never,
     postApprovalCalendarDeps: { threadDb: {} as never, accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as never,
     schedulerClient: { scheduleMessage: async () => ok(undefined), deleteSchedule: async () => ok(undefined) } as never,
     emailContentStore: { createReadUrl: async () => "https://signed.test/key", getRawEmailUrl: async () => "https://signed.test/key" } as never,

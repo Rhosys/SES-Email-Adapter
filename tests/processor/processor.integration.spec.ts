@@ -1,5 +1,6 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
+import { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok, err } from "neverthrow";
 import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
@@ -301,7 +302,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       forwardingService,
       replySender,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
+      calendarForwarder: new CalendarForwarder({ emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })) } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() }),
     });
   });
 

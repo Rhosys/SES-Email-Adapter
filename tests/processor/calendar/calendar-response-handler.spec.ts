@@ -69,14 +69,13 @@ function makeDeps(overrides: Partial<CalendarResponseHandlerDeps> = {}): Calenda
         createdAt: "2025-03-15T09:00:00Z",
       })),
     } as unknown as CalendarResponseHandlerDeps["threadDatabase"],
-    rsvpComposer: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })),
+    calendarForwarder: {
+      forwardInvite: vi.fn().mockResolvedValue(ok(undefined)),
+      sendReply: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })),
+    } as unknown as CalendarResponseHandlerDeps["calendarForwarder"],
     signalStore: {
       saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
     },
-    emailService: {
-      send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-002" })),
-      sendRaw: vi.fn(),
-    } as unknown as CalendarResponseHandlerDeps["emailService"],
     hmac,
     ...overrides,
   };
@@ -229,9 +228,9 @@ describe("handleCalendarResponse — stateless validation gate", () => {
     }
 
     if (responseSent) {
-      expect(deps.rsvpComposer).toHaveBeenCalled();
+      expect(deps.calendarForwarder.sendReply).toHaveBeenCalled();
     } else {
-      expect(deps.rsvpComposer).not.toHaveBeenCalled();
+      expect(deps.calendarForwarder.sendReply).not.toHaveBeenCalled();
     }
   });
 });
@@ -262,15 +261,15 @@ describe("handleCalendarResponse — happy path", () => {
     // Should succeed
     expect(result.isOk()).toBe(true);
 
-    // RSVP_Composer was called with correct decision and original UID
-    expect(deps.rsvpComposer).toHaveBeenCalledWith(
+    // sendReply was called with correct decision and original UID, plus the logger
+    expect(deps.calendarForwarder.sendReply).toHaveBeenCalledWith(
       expect.objectContaining({
         decision: "accepted",
         aliasAddress: recipient,
         organizerAddress: "alice@example.com",
         fromAddress: recipient,
       }),
-      expect.objectContaining({ emailService: deps.emailService }),
+      logger,
     );
 
     // Signal was saved with calendar_response data

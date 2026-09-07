@@ -13,6 +13,7 @@ import type { Signal, Thread, Alias, AliasSender } from "../../src/types/index.j
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
+import { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
 
 vi.mock("../../src/embedding/cluster-registry.js", () => {
   const entry = Object.freeze({
@@ -123,7 +124,7 @@ describe("processSideEffect — correlation context", () => {
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       logger: mockLogger,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
-      calendarForwarderDeps: { emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() },
+      calendarForwarder: new CalendarForwarder({ emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })) } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() }),
     });
   }
 

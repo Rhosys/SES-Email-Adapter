@@ -18,6 +18,17 @@ export interface MimeMessageOptions {
   /** Rendered HTML counterpart of textBody. When present, the message is built as
    * multipart/alternative (text/plain + text/html) instead of a single text/plain part. */
   htmlBody?: string;
+  /**
+   * A calendar (iCalendar) payload. When present, the message is a single
+   * `text/calendar` part carrying the `.ics` — this is the only way to deliver an
+   * invite that a calendar client will act on. SESv2's `Simple` content cannot
+   * express it: it always sends the body as `text/plain` and rejects a caller
+   * `Content-Type` header outright (`Header <Content-Type> is not supported`), so
+   * calendar sends must go out as raw MIME. `method` is the iCalendar METHOD
+   * (REQUEST, CANCEL, REPLY, …) and is echoed into the Content-Type per RFC 6047.
+   * When set, `textBody` is the `.ics` content and `htmlBody` is ignored.
+   */
+  calendar?: { method: string };
   /** Extra headers (In-Reply-To, References, …). Values are sanitized like every other header. */
   headers?: Array<{ Name: string; Value: string }>;
   /** Defaults to now. Injectable so tests get a stable Date header. */
@@ -99,7 +110,14 @@ export function buildMimeMessage(options: MimeMessageOptions): Uint8Array {
 
   const boundary = `alt_${crypto.randomUUID()}`;
 
-  if (options.htmlBody) {
+  if (options.calendar) {
+    // METHOD is a single token per RFC 5545 §3.7.2 (REQUEST, CANCEL, REPLY, …). It reaches
+    // us from parsed email content, so take only the leading run of letters — anything after
+    // the first non-letter (a stray CRLF, `;`, or injected text) is dropped so it can never
+    // split the Content-Type header. Defaults to REQUEST if nothing usable remains.
+    const method = (/^[A-Za-z]+/.exec(options.calendar.method.trim())?.[0] ?? "REQUEST").toUpperCase();
+    lines.push(`Content-Type: text/calendar; method=${method}; charset=UTF-8`, "Content-Transfer-Encoding: base64");
+  } else if (options.htmlBody) {
     lines.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
   } else {
     lines.push("Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64");
@@ -114,7 +132,7 @@ export function buildMimeMessage(options: MimeMessageOptions): Uint8Array {
 
   const headerBlock = lines.join("\r\n");
 
-  const body = options.htmlBody
+  const body = options.htmlBody && !options.calendar
     ? `--${boundary}\r\n`
       + "Content-Type: text/plain; charset=UTF-8\r\n"
       + "Content-Transfer-Encoding: base64\r\n\r\n"

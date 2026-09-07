@@ -8,7 +8,7 @@ import type { AuditDatabase } from "../../src/database/audit-database.js";
 import type { Account, Rule } from "../../src/types/index.js";
 import { ok } from "neverthrow";
 import type { EmailService } from "../../src/email/email-service.js";
-import type { sendRsvp } from "../../src/processor/calendar/rsvp-composer.js";
+import type { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
 import type { PostApprovalCalendarHandlerDeps } from "../../src/processor/calendar/post-approval-handler.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import { BillingHandler } from "../../src/billing/billing-handler.js";
@@ -199,7 +199,7 @@ describe("API — webhook action type rejected from rule creation", () => {
       astValidator,
       emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService,
       domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) },
-      rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp,
+      calendarForwarder: { forwardInvite: vi.fn().mockResolvedValue(ok(undefined)), sendReply: vi.fn().mockResolvedValue(ok({ messageId: "stub" })) } as unknown as CalendarForwarder,
       postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps,
       schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never,
     }));

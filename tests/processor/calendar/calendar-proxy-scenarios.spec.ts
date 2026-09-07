@@ -10,9 +10,8 @@ import type { IForwardingService } from "../../../src/forwarding/forwarding-serv
 // ---------------------------------------------------------------------------
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { forwardCalendarInvite } from "../../../src/processor/calendar/calendar-forwarder.js";
-import type { CalendarForwarderDeps, ForwardCalendarInviteOpts } from "../../../src/processor/calendar/calendar-forwarder.js";
-import { sendRsvp } from "../../../src/processor/calendar/rsvp-composer.js";
+import { CalendarForwarder } from "../../../src/processor/calendar/calendar-forwarder.js";
+import type { ForwardInviteOpts } from "../../../src/processor/calendar/calendar-forwarder.js";
 import { handleCalendarResponse } from "../../../src/processor/calendar/calendar-response-handler.js";
 import type { CalendarResponseHandlerDeps } from "../../../src/processor/calendar/calendar-response-handler.js";
 import { handlePostApprovalCalendar } from "../../../src/processor/calendar/post-approval-handler.js";
@@ -54,11 +53,24 @@ const ORGANIZER_EMAIL = "alice@company.com";
 const ORGANIZER_CN = "Alice Smith";
 const VEVENT_UID = "uid-meeting-2025-03-15";
 
+const PLATFORM_TENANT = "platform-tenant";
+const PLATFORM_FROM = "invites@platform.email.rhosys.cloud";
+
 function makeEmailService(): EmailService {
   return {
-    send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-001" })),
-    sendRaw: vi.fn(),
+    send: vi.fn(),
+    sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-001" })),
+    platformTenant: PLATFORM_TENANT,
+    platformFrom: PLATFORM_FROM,
   } as unknown as EmailService;
+}
+
+/** Decode the .ics body from a sendRaw call's raw MIME message. */
+function rawIcsOf(emailService: EmailService): string {
+  const rawData: Uint8Array = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0].rawData;
+  const message = Buffer.from(rawData).toString("utf8");
+  const body = message.split("\r\n\r\n").slice(1).join("\r\n\r\n").trim();
+  return Buffer.from(body, "base64").toString("utf8");
 }
 
 function makeCalendarSignal(overrides: Partial<CalendarEventData> = {}): Signal<CalendarEventData> {
@@ -91,15 +103,15 @@ function makeCalendarSignal(overrides: Partial<CalendarEventData> = {}): Signal<
   } as Signal<CalendarEventData>;
 }
 
-function makeForwarderDeps(emailService?: EmailService): CalendarForwarderDeps {
-  return {
+function makeForwarder(emailService?: EmailService): CalendarForwarder {
+  return new CalendarForwarder({
     emailService: emailService ?? makeEmailService(),
     serviceDomain: SERVICE_DOMAIN,
     hmac,
-  };
+  });
 }
 
-function makeForwarderOpts(overrides: Partial<ForwardCalendarInviteOpts> = {}): ForwardCalendarInviteOpts {
+function makeForwarderOpts(overrides: Partial<ForwardInviteOpts> = {}): ForwardInviteOpts {
   return {
     calendarSignal: makeCalendarSignal(),
     calendarForwardingAddress: FORWARDING_ADDRESS,
@@ -144,11 +156,13 @@ function makeResponseHandlerDeps(overrides: Partial<CalendarResponseHandlerDeps>
         createdAt: "2025-03-15T09:00:00Z",
       })),
     } as unknown as CalendarResponseHandlerDeps["threadDatabase"],
-    rsvpComposer: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })),
+    calendarForwarder: {
+      forwardInvite: vi.fn().mockResolvedValue(ok(undefined)),
+      sendReply: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })),
+    } as unknown as CalendarResponseHandlerDeps["calendarForwarder"],
     signalStore: {
       saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
     },
-    emailService: makeEmailService(),
     hmac,
     ...overrides,
   };
@@ -166,21 +180,21 @@ describe("Scenario: calendar invite from approved sender is forwarded to user's 
 
   it("constructs a proxy .ics with proxy UID and sends to calendarForwardingAddress", async () => {
     const emailService = makeEmailService();
-    const deps = makeForwarderDeps(emailService);
+    const forwarder = makeForwarder(emailService);
     const opts = makeForwarderOpts();
     const logger = createMockLogger();
 
-    const result = await forwardCalendarInvite(opts, deps, logger);
+    const result = await forwarder.forwardInvite(opts, logger);
 
     // Forwarding succeeds
     expect(result.isOk()).toBe(true);
 
     // Email was sent to the user's real calendar address
-    const sendCall = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const sendCall = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(sendCall.to).toBe(FORWARDING_ADDRESS);
 
     // The .ics body contains a proxy UID (not the original)
-    const icsBody: string = sendCall.textBody;
+    const icsBody: string = rawIcsOf(emailService);
     expect(icsBody).not.toContain(`UID:${VEVENT_UID}`);
     expect(icsBody).toContain(`@${SERVICE_DOMAIN}`);
 
@@ -207,17 +221,16 @@ describe("Scenario: cancellation is forwarded so user's calendar removes the eve
 
   it("forwards METHOD:CANCEL with same proxy UID structure as the original REQUEST", async () => {
     const emailService = makeEmailService();
-    const deps = makeForwarderDeps(emailService);
+    const forwarder = makeForwarder(emailService);
     const cancelSignal = makeCalendarSignal({ method: "CANCEL", status: "CANCELLED" });
     const opts = makeForwarderOpts({ calendarSignal: cancelSignal });
     const logger = createMockLogger();
 
-    const result = await forwardCalendarInvite(opts, deps, logger);
+    const result = await forwarder.forwardInvite(opts, logger);
 
     expect(result.isOk()).toBe(true);
 
-    const sendCall = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-    const icsBody: string = sendCall.textBody;
+    const icsBody: string = rawIcsOf(emailService);
 
     // Verify METHOD:CANCEL is preserved
     const parsed = ICAL.parse(icsBody);
@@ -249,7 +262,7 @@ describe("Scenario: reschedule with higher SEQUENCE is forwarded so calendar upd
 
   it("forwards REQUEST with SEQUENCE:3 preserving the updated time and sequence", async () => {
     const emailService = makeEmailService();
-    const deps = makeForwarderDeps(emailService);
+    const forwarder = makeForwarder(emailService);
     const rescheduleSignal = makeCalendarSignal({
       method: "REQUEST",
       sequence: 3,
@@ -259,12 +272,11 @@ describe("Scenario: reschedule with higher SEQUENCE is forwarded so calendar upd
     const opts = makeForwarderOpts({ calendarSignal: rescheduleSignal });
     const logger = createMockLogger();
 
-    const result = await forwardCalendarInvite(opts, deps, logger);
+    const result = await forwarder.forwardInvite(opts, logger);
 
     expect(result.isOk()).toBe(true);
 
-    const sendCall = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-    const icsBody: string = sendCall.textBody;
+    const icsBody: string = rawIcsOf(emailService);
 
     const parsed = ICAL.parse(icsBody);
     const comp = new ICAL.Component(parsed);
@@ -292,9 +304,10 @@ describe("Scenario: UI RSVP sends masked reply to organizer preserving user priv
 
   it("sends METHOD:REPLY with original UID and correct PARTSTAT to organizer", async () => {
     const emailService = makeEmailService();
+    const forwarder = makeForwarder(emailService);
     const calendarData = makeCalendarSignal().data;
 
-    const result = await sendRsvp(
+    const result = await forwarder.sendReply(
       {
         decision: "accepted",
         originalCalendarData: calendarData,
@@ -303,13 +316,13 @@ describe("Scenario: UI RSVP sends masked reply to organizer preserving user priv
         fromAddress: ALIAS_ADDRESS,
         accountId: "acct-test",
       },
-      { emailService, logger: createMockLogger() },
+      createMockLogger(),
     );
 
     expect(result.isOk()).toBe(true);
     expect(result._unsafeUnwrap().messageId).toBe("ses-msg-001");
 
-    const sendCall = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const sendCall = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 
     // Sent TO the organizer (RFC 6047)
     expect(sendCall.to).toBe(ORGANIZER_EMAIL);
@@ -318,7 +331,7 @@ describe("Scenario: UI RSVP sends masked reply to organizer preserving user priv
     expect(sendCall.fromSender).toBe(ALIAS_ADDRESS);
 
     // Parse the .ics to verify structure
-    const icsBody: string = sendCall.textBody;
+    const icsBody: string = rawIcsOf(emailService);
     const parsed = ICAL.parse(icsBody);
     const comp = new ICAL.Component(parsed);
 
@@ -378,8 +391,8 @@ describe("Scenario: native calendar REPLY is validated and forwarded to organize
 
     expect(result.isOk()).toBe(true);
 
-    // RSVP_Composer was called with the correct decision
-    expect(deps.rsvpComposer).toHaveBeenCalledWith(
+    // sendReply was called with the correct decision
+    expect(deps.calendarForwarder.sendReply).toHaveBeenCalledWith(
       expect.objectContaining({
         decision: "accepted",
         organizerAddress: ORGANIZER_EMAIL,
@@ -437,7 +450,7 @@ describe("Scenario: invalid HMAC REPLY is silently dropped to prevent spoofing",
     expect(deps.signalStore.saveSignal).not.toHaveBeenCalled();
 
     // No RSVP was sent
-    expect(deps.rsvpComposer).not.toHaveBeenCalled();
+    expect(deps.calendarForwarder.sendReply).not.toHaveBeenCalled();
 
     // WARN was logged with hmac_failed
     const warnCalls = logger.calls.filter(c => c.method === "warn");
@@ -492,7 +505,7 @@ describe("Scenario: invalid accountId checksum REPLY is dropped before HMAC chec
     expect(deps.signalStore.saveSignal).not.toHaveBeenCalled();
 
     // No RSVP sent
-    expect(deps.rsvpComposer).not.toHaveBeenCalled();
+    expect(deps.calendarForwarder.sendReply).not.toHaveBeenCalled();
 
     // WARN logged with checksum failure
     const warnCalls = logger.calls.filter(c => c.method === "warn");
@@ -541,11 +554,11 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
     } as unknown as PostApprovalCalendarHandlerDeps["accountDb"];
 
     const calendarIForwardingServiceEmailService = makeEmailService();
-    const calendarForwarderDeps: CalendarForwarderDeps = {
+    const calendarForwarder = new CalendarForwarder({
       emailService: calendarIForwardingServiceEmailService,
       serviceDomain: SERVICE_DOMAIN,
       hmac,
-    };
+    });
 
     const contentStore = {
       createReadUrl: vi.fn().mockResolvedValue("https://signed-url"),
@@ -559,7 +572,7 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
       threadDb,
       accountDb,
       contentStore,
-      calendarForwarderDeps,
+      calendarForwarder,
       logger: createMockLogger(),
     };
 
@@ -620,7 +633,7 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
     expect(savedSignal.data.linkedSignalId).toBe("sgn-email-quarantined-001");
 
     // Calendar invite was forwarded
-    const emailSend = calendarIForwardingServiceEmailService.send as ReturnType<typeof vi.fn>;
+    const emailSend = calendarIForwardingServiceEmailService.sendRaw as ReturnType<typeof vi.fn>;
     expect(emailSend).toHaveBeenCalledOnce();
     const sendArgs = emailSend.mock.calls[0]![0];
     expect(sendArgs.to).toBe(FORWARDING_ADDRESS);

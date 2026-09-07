@@ -18,7 +18,7 @@ import type { Logger } from "../../logger.js";
 import { generateId } from "../../utils/id.js";
 import { findCalendarAttachment, parseIcs } from "./ics-parser.js";
 import { buildCalendarSignalLookupId } from "./signal-lookup.js";
-import { forwardCalendarInvite, type CalendarForwarderDeps } from "./calendar-forwarder.js";
+import type { CalendarForwarder } from "./calendar-forwarder.js";
 
 // ---------------------------------------------------------------------------
 // Interface
@@ -28,7 +28,7 @@ export interface PostApprovalCalendarHandlerDeps {
   threadDb: ThreadDatabase;
   accountDb: AccountDatabase;
   contentStore: ContentStore;
-  calendarForwarderDeps: CalendarForwarderDeps;
+  calendarForwarder: CalendarForwarder;
   logger: Logger;
 }
 
@@ -43,7 +43,7 @@ export async function handlePostApprovalCalendar(
   thread: Thread,
   deps: PostApprovalCalendarHandlerDeps,
 ): Promise<void> {
-  const { threadDb, accountDb, contentStore, calendarForwarderDeps, logger } = deps;
+  const { threadDb, accountDb, contentStore, calendarForwarder, logger } = deps;
   const accountId = signal.accountId;
 
   // Check for calendar attachments
@@ -145,7 +145,7 @@ export async function handlePostApprovalCalendar(
     ? accountResult.value?.defaultCalendarInviteForwardingTargetId ?? ""
     : "";
 
-  const forwardResult = await forwardCalendarInvite(
+  const forwardResult = await calendarForwarder.forwardInvite(
     {
       calendarSignal,
       calendarForwardingAddress,
@@ -153,7 +153,6 @@ export async function handlePostApprovalCalendar(
       threadId: thread.id,
       aliasAddress: signal.data.recipientAddress,
     },
-    calendarForwarderDeps,
     logger,
   );
 

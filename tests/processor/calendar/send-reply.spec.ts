@@ -1,18 +1,37 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { sendRsvp } from "../../../src/processor/calendar/rsvp-composer.js";
+import { CalendarForwarder } from "../../../src/processor/calendar/calendar-forwarder.js";
 import type { EmailService } from "../../../src/email/email-service.js";
 import type { CalendarEventData } from "../../../src/types/calendar.js";
 import { ok, err } from "../../../src/errors.js";
 import { createMockLogger } from "../../helpers/mock-logger.js";
+import { makeHmacGeneratorFake } from "../../helpers/hmac-generator-fake.js";
 import ICAL from "ical.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function makeEmailService(): EmailService {
   return {
-    send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-001" })),
-    sendRaw: vi.fn(),
+    send: vi.fn(),
+    sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-001" })),
+    platformTenant: "platform-tenant",
+    platformFrom: "invites@platform.email.rhosys.cloud",
   } as unknown as EmailService;
+}
+
+function makeForwarder(emailService: EmailService): CalendarForwarder {
+  return new CalendarForwarder({
+    emailService,
+    serviceDomain: "platform.email.rhosys.cloud",
+    hmac: makeHmacGeneratorFake(),
+  });
+}
+
+/** Decode the raw MIME .ics body from a sendRaw call. */
+function rawIcsOf(emailService: EmailService): string {
+  const rawData: Uint8Array = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0].rawData;
+  const message = Buffer.from(rawData).toString("utf8");
+  const body = message.split("\r\n\r\n").slice(1).join("\r\n\r\n").trim();
+  return Buffer.from(body, "base64").toString("utf8");
 }
 
 function makeCalendarData(overrides: Partial<CalendarEventData> = {}): CalendarEventData {
@@ -37,7 +56,7 @@ function makeCalendarData(overrides: Partial<CalendarEventData> = {}): CalendarE
 // Validates: Requirements 7.1, 14.3
 // ---------------------------------------------------------------------------
 
-describe("sendRsvp — RSVP targets ORGANIZER mailto: address", () => {
+describe("CalendarForwarder.sendReply — RSVP targets ORGANIZER mailto: address", () => {
   let emailService: EmailService;
 
   beforeEach(() => {
@@ -70,7 +89,8 @@ describe("sendRsvp — RSVP targets ORGANIZER mailto: address", () => {
       reason: "Meetup info address — RSVP sent to iCal ORGANIZER",
     },
   ])("$reason", async ({ organizer, expectedTo }) => {
-    await sendRsvp(
+    const forwarder = makeForwarder(emailService);
+    await forwarder.sendReply(
       {
         decision: "accepted",
         originalCalendarData: makeCalendarData({ organizer, originalVeventUid: "uid-event-1" }),
@@ -79,10 +99,10 @@ describe("sendRsvp — RSVP targets ORGANIZER mailto: address", () => {
         fromAddress: "alias@proxy.com",
         accountId: "acct-test",
       },
-      { emailService, logger: createMockLogger() },
+      createMockLogger(),
     );
 
-    const sendCall = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const sendCall = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(sendCall.to).toBe(expectedTo);
   });
 });
@@ -92,7 +112,7 @@ describe("sendRsvp — RSVP targets ORGANIZER mailto: address", () => {
 // Validates: Requirements 11.3
 // ---------------------------------------------------------------------------
 
-describe("sendRsvp — REPLY uses original UID not proxy UID", () => {
+describe("CalendarForwarder.sendReply — REPLY uses original UID not proxy UID", () => {
   let emailService: EmailService;
 
   beforeEach(() => {
@@ -111,7 +131,8 @@ describe("sendRsvp — REPLY uses original UID not proxy UID", () => {
       reason: "short UID — REPLY contains original, not proxy",
     },
   ])("$reason", async ({ originalUid, proxyUid }) => {
-    await sendRsvp(
+    const forwarder = makeForwarder(emailService);
+    await forwarder.sendReply(
       {
         decision: "accepted",
         originalCalendarData: makeCalendarData({
@@ -123,12 +144,11 @@ describe("sendRsvp — REPLY uses original UID not proxy UID", () => {
         fromAddress: "alias@proxy.com",
         accountId: "acct-test",
       },
-      { emailService, logger: createMockLogger() },
+      createMockLogger(),
     );
 
-    // Extract the .ics content from the send call (textBody)
-    const sendCall = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-    const icsContent: string = sendCall.textBody;
+    // Extract the .ics content from the raw MIME body
+    const icsContent: string = rawIcsOf(emailService);
 
     // Parse back through ical.js and verify UID
     const parsed = ICAL.parse(icsContent);
@@ -139,18 +159,51 @@ describe("sendRsvp — REPLY uses original UID not proxy UID", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Reply is sent as a text/calendar part under the customer tenant from the alias
+// ---------------------------------------------------------------------------
+
+describe("CalendarForwarder.sendReply — identity and MIME shape", () => {
+  it("sends METHOD:REPLY as text/calendar, from the alias, under the customer tenant", async () => {
+    const emailService = makeEmailService();
+    const forwarder = makeForwarder(emailService);
+
+    await forwarder.sendReply(
+      {
+        decision: "declined",
+        originalCalendarData: makeCalendarData(),
+        aliasAddress: "alias@proxy.com",
+        organizerAddress: "organizer@example.com",
+        fromAddress: "alias@proxy.com",
+        accountId: "acct-test",
+      },
+      createMockLogger(),
+    );
+
+    const sendCall = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    // Customer tenant, alias From — never the platform identity.
+    expect(sendCall.accountId).toBe("acct-test");
+    expect(sendCall.fromSender).toBe("alias@proxy.com");
+
+    const rawData: Uint8Array = sendCall.rawData;
+    const headerBlock = Buffer.from(rawData).toString("utf8").split("\r\n\r\n")[0]!;
+    expect(headerBlock).toContain("Content-Type: text/calendar; method=REPLY; charset=UTF-8");
+    expect(headerBlock).toContain("From: alias@proxy.com");
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Permanent SES error handling
 // ---------------------------------------------------------------------------
 
-describe("sendRsvp — permanent SES error", () => {
+describe("CalendarForwarder.sendReply — permanent SES error", () => {
   it("returns ok and logs WARN on permanent SES error — no retry", async () => {
     const emailService = makeEmailService();
     const logger = createMockLogger();
-    vi.mocked(emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(err({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400, message: "Email address is not verified", cause: new Error("test") }));
+    vi.mocked(emailService.sendRaw as ReturnType<typeof vi.fn>).mockResolvedValueOnce(err({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400, message: "Email address is not verified", cause: new Error("test") }));
 
-    const result = await sendRsvp(
+    const forwarder = makeForwarder(emailService);
+    const result = await forwarder.sendReply(
       {
         decision: "accepted",
         originalCalendarData: makeCalendarData(),
@@ -159,7 +212,7 @@ describe("sendRsvp — permanent SES error", () => {
         fromAddress: "alias@proxy.com",
         accountId: "acct-test",
       },
-      { emailService, logger },
+      logger,
     );
 
     expect(result.isOk()).toBe(true);

@@ -33,7 +33,7 @@ import { createConsoleLogger } from './logger.js';
 import { ok } from '../../src/errors.js';
 import type { AccessService } from '../../src/api/app.js';
 import type { EmailService } from '../../src/email/email-service.js';
-import type { sendRsvp } from '../../src/processor/calendar/rsvp-composer.js';
+import { CalendarForwarder } from '../../src/processor/calendar/calendar-forwarder.js';
 import type { PostApprovalCalendarHandlerDeps } from '../../src/processor/calendar/post-approval-handler.js';
 import type { EmbeddingGenerator } from '../../src/embedding/embedding-generator.js';
 import type { MultiClusterAuroraWriter } from '../../src/database/thread-matcher.js';
@@ -141,11 +141,11 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     schedulerClient: { createFollowup: async () => ok(undefined), deleteFollowup: async () => ok(undefined) } as unknown as SchedulerClient,
     accessService: { listUsers: async () => ok([]), getUserProfile: async () => ok({}) },
     platformTenantName: "test-platform",
-    calendarForwarderDeps: {
-      emailService: { send: async () => ok({ messageId: 'stub-cal' }), sendRaw: async () => {} } as unknown as EmailService,
+    calendarForwarder: new CalendarForwarder({
+      emailService: { send: async () => ok({ messageId: 'stub-cal' }), sendRaw: async () => ok({ messageId: 'stub-cal' }) } as unknown as EmailService,
       serviceDomain: 'platform.email.rhosys.cloud',
       hmac: makeHmacGeneratorFake(),
-    },
+    }),
     logger,
     emailContentStore: new EmailContentStore(s3, EMAIL_BUCKET),
     contentStore: new ContentStore(s3, CONTENT_BUCKET),
@@ -179,7 +179,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
     billingHandler: new BillingHandler(),
     emailService: { send: async () => ok({ messageId: 'stub' }), sendRaw: async () => {} } as unknown as EmailService,
     domainIdentityService: { register: async () => ok(undefined), deregister: async () => ok(undefined) },
-    rsvpComposer: (async () => ok(undefined)) as unknown as typeof sendRsvp,
+    calendarForwarder: { forwardInvite: async () => ok(undefined), sendReply: async () => ok({ messageId: "stub" }) } as unknown as CalendarForwarder,
     postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: 'platform.email.rhosys.cloud' } as unknown as PostApprovalCalendarHandlerDeps,
     schedulerClient: { scheduleMessage: async () => ok(undefined), deleteSchedule: async () => ok(undefined) } as never,
   }));

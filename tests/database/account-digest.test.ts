@@ -66,7 +66,7 @@ import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { AccountDatabase as AccountDatabaseType } from "../../src/database/account-database.js";
 import type { AuditDatabase } from "../../src/database/audit-database.js";
 import type { EmailService } from "../../src/email/email-service.js";
-import type { sendRsvp } from "../../src/processor/calendar/rsvp-composer.js";
+import type { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
 import type { PostApprovalCalendarHandlerDeps } from "../../src/processor/calendar/post-approval-handler.js";
 import { BillingHandler } from "../../src/billing/billing-handler.js";
 
@@ -156,7 +156,7 @@ describe("PATCH /accounts/:id – digest forwardingTargetId validation", () => {
       billingHandler: new BillingHandler(),
       emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "m" })), sendRaw: vi.fn() } as unknown as EmailService,
       domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) },
-      rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp,
+      calendarForwarder: { forwardInvite: vi.fn().mockResolvedValue(ok(undefined)), sendReply: vi.fn().mockResolvedValue(ok({ messageId: "stub" })) } as unknown as CalendarForwarder,
       postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps,
       schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never,
     }));
@@ -201,7 +201,7 @@ describe("PATCH /accounts/:id – digest forwardingTargetId validation", () => {
       billingHandler: new BillingHandler(),
       emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "m" })), sendRaw: vi.fn() } as unknown as EmailService,
       domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) },
-      rsvpComposer: vi.fn().mockResolvedValue(ok(undefined)) as unknown as typeof sendRsvp,
+      calendarForwarder: { forwardInvite: vi.fn().mockResolvedValue(ok(undefined)), sendReply: vi.fn().mockResolvedValue(ok({ messageId: "stub" })) } as unknown as CalendarForwarder,
       postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps,
       schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never,
     }));

@@ -129,3 +129,36 @@ describe("buildMimeMessage — multipart/alternative (htmlBody)", () => {
     expect(message).toContain("Content-Type: text/plain; charset=UTF-8\r\n");
   });
 });
+
+describe("buildMimeMessage — text/calendar (calendar)", () => {
+  const ICS = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nEND:VCALENDAR";
+
+  it("emits a single text/calendar part carrying the METHOD, with the .ics as the base64 body", () => {
+    const message = build({ textBody: ICS, calendar: { method: "REQUEST" } });
+    expect(message).toContain("Content-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n");
+    expect(message).toContain("Content-Transfer-Encoding: base64\r\n");
+    expect(message).not.toContain("multipart/alternative");
+    expect(bodyOf(message)).toBe(ICS);
+  });
+
+  it.each(["REQUEST", "CANCEL", "REPLY", "COUNTER", "ADD"])(
+    "echoes METHOD=%s into the Content-Type",
+    (method) => {
+      const message = build({ textBody: ICS, calendar: { method } });
+      expect(message).toContain(`Content-Type: text/calendar; method=${method}; charset=UTF-8\r\n`);
+    },
+  );
+
+  it("normalizes an untrusted METHOD to a bare uppercase token so it cannot split the header", () => {
+    const message = build({ textBody: ICS, calendar: { method: "request\r\nBcc: attacker@evil.com" } });
+    expect(message).toContain("Content-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n");
+    expect(message).not.toMatch(/^Bcc:/m);
+  });
+
+  it("ignores htmlBody when a calendar payload is present — calendar wins", () => {
+    const message = build({ textBody: ICS, htmlBody: "<p>ignored</p>", calendar: { method: "REPLY" } });
+    expect(message).not.toContain("multipart/alternative");
+    expect(message).not.toContain("text/html");
+    expect(bodyOf(message)).toBe(ICS);
+  });
+});

@@ -5,7 +5,8 @@ import type { PostApprovalCalendarHandlerDeps } from "../../../src/processor/cal
 import type { Signal, Thread, Attachment } from "../../../src/types/index.js";
 import type { ThreadDatabase } from "../../../src/database/thread-database.js";
 import type { AccountDatabase } from "../../../src/database/account-database.js";
-import type { CalendarForwarderDeps } from "../../../src/processor/calendar/calendar-forwarder.js";
+import { CalendarForwarder } from "../../../src/processor/calendar/calendar-forwarder.js";
+import type { EmailService } from "../../../src/email/email-service.js";
 import type { ContentStore } from "../../../src/content-store.js";
 import { ok } from "../../../src/errors.js";
 import { createMockLogger } from "../../helpers/mock-logger.js";
@@ -111,12 +112,21 @@ function makeAccountDb(calendarForwardingAddress = "user@gmail.com") {
   } as unknown as AccountDatabase;
 }
 
-function makeCalendarForwarderDeps(): CalendarForwarderDeps {
+function makeEmailService(): EmailService {
   return {
-    emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-fwd-001" })) } as never,
+    send: vi.fn(),
+    sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-fwd-001" })),
+    platformTenant: "platform-tenant",
+    platformFrom: "invites@platform.email.rhosys.cloud",
+  } as unknown as EmailService;
+}
+
+function makeCalendarForwarder(emailService: EmailService): CalendarForwarder {
+  return new CalendarForwarder({
+    emailService,
     serviceDomain: "platform.email.rhosys.cloud",
     hmac: makeHmacGeneratorFake(),
-  };
+  });
 }
 
 function makeDeps(overrides: Partial<PostApprovalCalendarHandlerDeps> = {}): PostApprovalCalendarHandlerDeps {
@@ -124,7 +134,7 @@ function makeDeps(overrides: Partial<PostApprovalCalendarHandlerDeps> = {}): Pos
     threadDb: makeArcDb(),
     accountDb: makeAccountDb(),
     contentStore: makeContentStore(),
-    calendarForwarderDeps: makeCalendarForwarderDeps(),
+    calendarForwarder: makeCalendarForwarder(makeEmailService()),
     logger: createMockLogger(),
     ...overrides,
   };
@@ -140,8 +150,9 @@ describe("handlePostApprovalCalendar — triggers forwarding on approval", () =>
     const arc = makeThread();
     const threadDb = makeArcDb();
     const accountDb = makeAccountDb();
-    const calendarForwarderDeps = makeCalendarForwarderDeps();
-    const deps = makeDeps({ threadDb, accountDb, calendarForwarderDeps });
+    const emailService = makeEmailService();
+    const calendarForwarder = makeCalendarForwarder(emailService);
+    const deps = makeDeps({ threadDb, accountDb, calendarForwarder });
 
     await handlePostApprovalCalendar(signal, arc, deps);
 
@@ -155,7 +166,7 @@ describe("handlePostApprovalCalendar — triggers forwarding on approval", () =>
     expect(savedSignal.data.veventUid).toBe("uid-event-001");
 
     // Calendar invite was forwarded via email service
-    const emailSend = calendarForwarderDeps.emailService.send as ReturnType<typeof vi.fn>;
+    const emailSend = emailService.sendRaw as ReturnType<typeof vi.fn>;
     expect(emailSend).toHaveBeenCalledOnce();
   });
 
@@ -180,13 +191,14 @@ describe("handlePostApprovalCalendar — uses same construction rules as normal 
   it("forwards to calendarForwardingAddress from account config", async () => {
     const signal = makeSignal();
     const arc = makeThread();
-    const calendarForwarderDeps = makeCalendarForwarderDeps();
+    const emailService = makeEmailService();
+    const calendarForwarder = makeCalendarForwarder(emailService);
     const accountDb = makeAccountDb("real-calendar@gmail.com");
-    const deps = makeDeps({ accountDb, calendarForwarderDeps });
+    const deps = makeDeps({ accountDb, calendarForwarder });
 
     await handlePostApprovalCalendar(signal, arc, deps);
 
-    const emailSend = calendarForwarderDeps.emailService.send as ReturnType<typeof vi.fn>;
+    const emailSend = emailService.sendRaw as ReturnType<typeof vi.fn>;
     expect(emailSend).toHaveBeenCalledOnce();
     const sendArgs = emailSend.mock.calls[0]![0];
     expect(sendArgs.to).toBe("real-calendar@gmail.com");
@@ -224,8 +236,9 @@ describe("handlePostApprovalCalendar — uses same construction rules as normal 
     const signal = makeSignal();
     const arc = makeThread();
     const accountDb = makeAccountDb("");
-    const calendarForwarderDeps = makeCalendarForwarderDeps();
-    const deps = makeDeps({ accountDb, calendarForwarderDeps });
+    const emailService = makeEmailService();
+    const calendarForwarder = makeCalendarForwarder(emailService);
+    const deps = makeDeps({ accountDb, calendarForwarder });
 
     await handlePostApprovalCalendar(signal, arc, deps);
 
@@ -233,8 +246,8 @@ describe("handlePostApprovalCalendar — uses same construction rules as normal 
     const threadDb = deps.threadDb as unknown as { saveSignal: ReturnType<typeof vi.fn> };
     expect(threadDb.saveSignal).toHaveBeenCalledOnce();
 
-    // But email is NOT sent (forwardCalendarInvite no-ops on empty address)
-    const emailSend = calendarForwarderDeps.emailService.send as ReturnType<typeof vi.fn>;
+    // But email is NOT sent (forwardInvite no-ops on empty address)
+    const emailSend = emailService.sendRaw as ReturnType<typeof vi.fn>;
     expect(emailSend).not.toHaveBeenCalled();
   });
 });

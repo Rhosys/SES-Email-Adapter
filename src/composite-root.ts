@@ -56,7 +56,7 @@ import { BillingHandler } from "./billing/billing-handler.js";
 import { ReindexDispatcher } from "./jobs/reindex/reindex-dispatcher.js";
 import { DraftSendDispatcher } from "./processor/draft-send-dispatcher.js";
 import { DraftSendWorker } from "./processor/draft-send-worker.js";
-import { sendRsvp } from "./processor/calendar/rsvp-composer.js";
+import { CalendarForwarder } from "./processor/calendar/calendar-forwarder.js";
 import type { PostApprovalCalendarHandlerDeps } from "./processor/calendar/post-approval-handler.js";
 import { HmacSecretGenerator } from "./processor/calendar/hmac-secret-generator.js";
 import { SignalQueue } from "./messaging/signal-queue.js";
@@ -242,6 +242,7 @@ export class CompositeRoot {
     const unsubscribeTokenGenerator = new UnsubscribeTokenGenerator(kms, API_DOMAIN, AUTHRESS_KMS_KEY_ARN, AUTHRESS_KEY_ID);
 
     const hmacSecretGenerator = new HmacSecretGenerator(kms);
+    const calendarForwarder = new CalendarForwarder({ emailService, serviceDomain: MAIL_DOMAIN, hmac: hmacSecretGenerator });
 
     const emailSignalStore = new EmailSignalStore(s3, S3_BUCKET);
     const forwardingService = new ForwardingService(emailService, accountDb, emailSignalStore, MAIL_DOMAIN, logger);
@@ -291,7 +292,7 @@ export class CompositeRoot {
       draftSendDispatcher,
       billingHandler: new BillingHandler(),
       handlerRegistry,
-      calendarForwarderDeps: { emailService, serviceDomain: MAIL_DOMAIN, hmac: hmacSecretGenerator },
+      calendarForwarder,
       schedulerClient,
       logger,
       emailContentStore: new EmailContentStore(s3),
@@ -429,11 +430,7 @@ export class CompositeRoot {
       threadDb,
       accountDb,
       contentStore: new ContentStore(s3),
-      calendarForwarderDeps: {
-        emailService,
-        serviceDomain: MAIL_DOMAIN,
-        hmac: hmacSecretGenerator,
-      },
+      calendarForwarder,
       logger,
     };
 
@@ -457,7 +454,7 @@ export class CompositeRoot {
       billingHandler: new BillingHandler(),
       emailService,
       domainIdentityService,
-      rsvpComposer: sendRsvp,
+      calendarForwarder,
       postApprovalCalendarDeps,
       schedulerClient,
       emailContentStore: new EmailContentStore(s3),

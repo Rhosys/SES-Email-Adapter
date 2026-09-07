@@ -108,6 +108,25 @@ describe("EmailService.send()", () => {
     expect(logger.calls.filter(c => c.method === "warn")).toHaveLength(1);
   });
 
+  // A malformed request (bad header, unparseable MIME) is fixed by changing the send, never by
+  // retrying — so it must be permanent, or it retries to the redrive threshold and dead-letters.
+  it.each(["BadRequestException", "ValidationException"])(
+    "%s classified as permanent — no retry",
+    async (errorName) => {
+      const sesError = Object.assign(new Error("Header <Content-Type> is not supported"), {
+        name: errorName,
+        $metadata: { httpStatusCode: 400 },
+      });
+      mockSend.mockRejectedValueOnce(sesError);
+
+      const result = await service.send({ to: "u@e.com", subject: "S", textBody: "B", accountId: "test-platform" });
+
+      expect(result.isErr()).toBe(true);
+      expect(result._unsafeUnwrapErr().kind).toBe("permanent_ses_error");
+      expect(logger.calls.filter(c => c.method === "error")).toHaveLength(1);
+    },
+  );
+
   it("5xx HTTP status classified as transient — returns err and logs warn", async () => {
     const sesError = Object.assign(new Error("Internal error"), {
       name: "ServiceUnavailable",
@@ -243,7 +262,7 @@ describe("EmailService.sendRaw()", () => {
     mockSend.mockResolvedValueOnce({ MessageId: "ses-raw-001" });
     const rawData = new Uint8Array([77, 73, 77, 69]);
 
-    const result = await service.sendRaw({ to: "r@e.com", rawData, accountId: "acct-test" });
+    const result = await service.sendRaw({ to: "r@e.com", rawData, accountId: "test-platform" });
 
     expect(result.isOk()).toBe(true);
     expect(result._unsafeUnwrap()).toEqual({ messageId: "ses-raw-001" });
@@ -260,7 +279,7 @@ describe("EmailService.sendRaw()", () => {
     });
     mockSend.mockRejectedValueOnce(sesError);
 
-    const result = await service.sendRaw({ to: "r@e.com", rawData: new Uint8Array([1]), accountId: "acct-test" });
+    const result = await service.sendRaw({ to: "r@e.com", rawData: new Uint8Array([1]), accountId: "test-platform" });
 
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr().kind).toBe("transient_ses_error");
@@ -274,7 +293,7 @@ describe("EmailService.sendRaw()", () => {
     });
     mockSend.mockRejectedValueOnce(sesError);
 
-    const result = await service.sendRaw({ to: "r@e.com", rawData: new Uint8Array([1]), accountId: "acct-test" });
+    const result = await service.sendRaw({ to: "r@e.com", rawData: new Uint8Array([1]), accountId: "test-platform" });
 
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr()).toEqual(expect.objectContaining({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400 }));

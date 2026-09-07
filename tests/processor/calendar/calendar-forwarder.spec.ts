@@ -1,7 +1,6 @@
-import type { IForwardingService } from "../../../src/forwarding/forwarding-service.js";
 import { describe, it, expect, vi } from "vitest";
-import { forwardCalendarInvite } from "../../../src/processor/calendar/calendar-forwarder.js";
-import type { CalendarForwarderDeps, ForwardCalendarInviteOpts } from "../../../src/processor/calendar/calendar-forwarder.js";
+import { CalendarForwarder } from "../../../src/processor/calendar/calendar-forwarder.js";
+import type { ForwardInviteOpts } from "../../../src/processor/calendar/calendar-forwarder.js";
 import type { EmailService } from "../../../src/email/email-service.js";
 import type { CalendarEventData } from "../../../src/types/calendar.js";
 import type { Signal } from "../../../src/types/index.js";
@@ -34,13 +33,25 @@ function makeLogger(): Logger {
 
 const PLATFORM_TENANT = "platform-tenant";
 
+const PLATFORM_FROM = "invites@platform.email.rhosys.cloud";
+
 function makeEmailService(overrides: Partial<EmailService> = {}): EmailService {
   return {
-    send: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-001" })),
-    sendRaw: vi.fn(),
+    send: vi.fn(),
+    sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-msg-001" })),
     platformTenant: PLATFORM_TENANT,
+    platformFrom: PLATFORM_FROM,
     ...overrides,
   } as unknown as EmailService;
+}
+
+/** Decode a raw MIME message's body and headers for assertions. */
+function parseRawSend(emailService: EmailService): { headerBlock: string; icsContent: string } {
+  const rawData: Uint8Array = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0].rawData;
+  const message = Buffer.from(rawData).toString("utf8");
+  const [headerBlock, ...rest] = message.split("\r\n\r\n");
+  const icsContent = Buffer.from(rest.join("\r\n\r\n").trim(), "base64").toString("utf8");
+  return { headerBlock: headerBlock!, icsContent };
 }
 
 function makeCalendarSignal(method: string): Signal<CalendarEventData> {
@@ -70,15 +81,15 @@ function makeCalendarSignal(method: string): Signal<CalendarEventData> {
   } as Signal<CalendarEventData>;
 }
 
-function makeDeps(emailService?: EmailService): CalendarForwarderDeps {
-  return {
+function makeForwarder(emailService?: EmailService): CalendarForwarder {
+  return new CalendarForwarder({
     emailService: emailService ?? makeEmailService(),
     serviceDomain: "platform.email.rhosys.cloud",
     hmac: makeHmacGeneratorFake(),
-  };
+  });
 }
 
-function makeOpts(overrides: Partial<ForwardCalendarInviteOpts> = {}): ForwardCalendarInviteOpts {
+function makeOpts(overrides: Partial<ForwardInviteOpts> = {}): ForwardInviteOpts {
   return {
     calendarSignal: makeCalendarSignal("REQUEST"),
     calendarForwardingAddress: "user@gmail.com",
@@ -94,7 +105,7 @@ function makeOpts(overrides: Partial<ForwardCalendarInviteOpts> = {}): ForwardCa
 // Validates: Requirements 10.7
 // ---------------------------------------------------------------------------
 
-describe("forwardCalendarInvite — all METHOD values forwarded", () => {
+describe("CalendarForwarder.forwardInvite — all METHOD values forwarded", () => {
   it.each([
     { method: "REQUEST", reason: "standard invite forwarded" },
     { method: "CANCEL", reason: "cancellation forwarded" },
@@ -103,14 +114,17 @@ describe("forwardCalendarInvite — all METHOD values forwarded", () => {
     { method: "ADD", reason: "add forwarded" },
   ])("$reason (METHOD=$method)", async ({ method }) => {
     const emailService = makeEmailService();
-    const deps = makeDeps(emailService);
+    const forwarder = makeForwarder(emailService);
     const opts = makeOpts({ calendarSignal: makeCalendarSignal(method) });
     const logger = makeLogger();
 
-    const result = await forwardCalendarInvite(opts, deps, logger);
+    const result = await forwarder.forwardInvite(opts, logger);
 
     expect(result.isOk()).toBe(true);
-    expect(emailService.send).toHaveBeenCalledTimes(1);
+    expect(emailService.sendRaw).toHaveBeenCalledTimes(1);
+    // The invite goes out as a text/calendar part carrying the METHOD — never text/plain.
+    const { headerBlock } = parseRawSend(emailService);
+    expect(headerBlock).toContain(`Content-Type: text/calendar; method=${method}; charset=UTF-8`);
   });
 });
 
@@ -119,22 +133,26 @@ describe("forwardCalendarInvite — all METHOD values forwarded", () => {
 // Validates: Requirements 10.9
 // ---------------------------------------------------------------------------
 
-describe("forwardCalendarInvite — X-Numaeel-Calendar-Signal-Id header", () => {
+describe("CalendarForwarder.forwardInvite — X-Numaeel-Calendar-Signal-Id header", () => {
   it("includes the calendar signal ID as a header on the forwarded email", async () => {
     const emailService = makeEmailService();
-    const deps = makeDeps(emailService);
+    const forwarder = makeForwarder(emailService);
     const signal = makeCalendarSignal("REQUEST");
     const opts = makeOpts({ calendarSignal: signal });
     const logger = makeLogger();
 
-    await forwardCalendarInvite(opts, deps, logger);
+    await forwarder.forwardInvite(opts, logger);
 
-    const sendCall = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-    const signalIdHeader = sendCall.headers.find(
-      (h: { Name: string; Value: string }) => h.Name === "X-Numaeel-Calendar-Signal-Id",
+    // The signal ID rides as a MIME header inside the raw message so it survives to the recipient,
+    // and is mirrored as an SES tag for feedback correlation.
+    const { headerBlock } = parseRawSend(emailService);
+    expect(headerBlock).toContain("X-Numaeel-Calendar-Signal-Id: sgn-cal-001");
+    const sendCall = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const signalIdTag = sendCall.tags.find(
+      (t: { Name: string; Value: string }) => t.Name === "X-Numaeel-Calendar-Signal-Id",
     );
-    expect(signalIdHeader).toBeDefined();
-    expect(signalIdHeader.Value).toBe("sgn-cal-001");
+    expect(signalIdTag).toBeDefined();
+    expect(signalIdTag.Value).toBe("sgn-cal-001");
   });
 });
 
@@ -143,17 +161,17 @@ describe("forwardCalendarInvite — X-Numaeel-Calendar-Signal-Id header", () => 
 // Validates: Requirements 10.7 (no-op path)
 // ---------------------------------------------------------------------------
 
-describe("forwardCalendarInvite — no-op when calendarForwardingAddress missing", () => {
+describe("CalendarForwarder.forwardInvite — no-op when calendarForwardingAddress missing", () => {
   it("does not send email and returns ok when calendarForwardingAddress is empty string", async () => {
     const emailService = makeEmailService();
-    const deps = makeDeps(emailService);
+    const forwarder = makeForwarder(emailService);
     const opts = makeOpts({ calendarForwardingAddress: "" });
     const logger = makeLogger();
 
-    const result = await forwardCalendarInvite(opts, deps, logger);
+    const result = await forwarder.forwardInvite(opts, logger);
 
     expect(result.isOk()).toBe(true);
-    expect(emailService.send).not.toHaveBeenCalled();
+    expect(emailService.sendRaw).not.toHaveBeenCalled();
     expect(logger.track).toHaveBeenCalledWith(
       expect.stringContaining("no calendarForwardingAddress"),
       expect.objectContaining({ code: "processor.calendar_forwarder.no_forwarding_address" }),
@@ -166,23 +184,24 @@ describe("forwardCalendarInvite — no-op when calendarForwardingAddress missing
 // Sender identity: forwarded invites are sent under the PLATFORM tenant
 // ---------------------------------------------------------------------------
 
-describe("forwardCalendarInvite — sends under the platform tenant", () => {
+describe("CalendarForwarder.forwardInvite — sends under the platform tenant", () => {
   it("sends under the platform tenant, not the customer account, so every forwarded invite visibly originates from the service — recipients know who is sending (the service, on the customer's behalf) rather than having to filter by sender on the receiving side, and concentrating all sends on the platform domain builds our sending-domain reputation instead of fragmenting it across unverified customer domains", async () => {
     const emailService = makeEmailService();
-    const deps = makeDeps(emailService);
+    const forwarder = makeForwarder(emailService);
     // Customer account on the opts — the send must NOT use this as the SES tenant.
     const opts = makeOpts({ accountId: "acc-abc123" });
     const logger = makeLogger();
 
-    const result = await forwardCalendarInvite(opts, deps, logger);
+    const result = await forwarder.forwardInvite(opts, logger);
 
     expect(result.isOk()).toBe(true);
-    const sendCall = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    const sendCall = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(sendCall.accountId).toBe(PLATFORM_TENANT);
     expect(sendCall.accountId).not.toBe("acc-abc123");
-    // No fromSender override — the platform default `from` is used, keeping the
-    // From aligned with the platform tenant.
-    expect(sendCall.fromSender).toBeUndefined();
+    // The From is the platform address — set as fromSender and baked into the MIME From header.
+    expect(sendCall.fromSender).toBe(PLATFORM_FROM);
+    const { headerBlock } = parseRawSend(emailService);
+    expect(headerBlock).toContain(`From: ${PLATFORM_FROM}`);
   });
 });
 
@@ -190,15 +209,15 @@ describe("forwardCalendarInvite — sends under the platform tenant", () => {
 // Permanent SES error handling
 // ---------------------------------------------------------------------------
 
-describe("forwardCalendarInvite — permanent SES error", () => {
+describe("CalendarForwarder.forwardInvite — permanent SES error", () => {
   it("returns ok and logs WARN on permanent SES error — no retry", async () => {
     const emailService = makeEmailService();
-    vi.mocked(emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(err({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400, message: "Email address is not verified", cause: new Error("test") }));
-    const deps = makeDeps(emailService);
+    vi.mocked(emailService.sendRaw as ReturnType<typeof vi.fn>).mockResolvedValueOnce(err({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400, message: "Email address is not verified", cause: new Error("test") }));
+    const forwarder = makeForwarder(emailService);
     const opts = makeOpts();
     const logger = createMockLogger();
 
-    const result = await forwardCalendarInvite(opts, deps, logger);
+    const result = await forwarder.forwardInvite(opts, logger);
 
     expect(result.isOk()).toBe(true);
     expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "calendar_forwarder.send_permanent")).toBe(true);

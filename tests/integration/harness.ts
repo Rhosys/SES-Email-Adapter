@@ -24,7 +24,7 @@ import { createConsoleLogger } from './logger.js';
 import { ok } from '../../src/errors.js';
 import type { AccessService } from '../../src/api/app.js';
 import type { EmailService } from '../../src/email/email-service.js';
-import type { sendRsvp } from '../../src/processor/calendar/rsvp-composer.js';
+import type { CalendarForwarder } from '../../src/processor/calendar/calendar-forwarder.js';
 import type { PostApprovalCalendarHandlerDeps } from '../../src/processor/calendar/post-approval-handler.js';
 import { startMockAuthressServer } from './mock-authress.js';
 import type { MockAuthressServer } from './mock-authress.js';
@@ -90,7 +90,7 @@ export async function createHarness(): Promise<IntegrationHarness> {
     billingHandler: new BillingHandler(),
     emailService: { send: async () => ok({ messageId: "ses-cal-001" }), sendRaw: async () => {} } as unknown as EmailService,
     domainIdentityService: { register: async () => ok(undefined), deregister: async () => ok(undefined) },
-    rsvpComposer: (async () => ok(undefined)) as unknown as typeof sendRsvp,
+    calendarForwarder: { forwardInvite: async () => ok(undefined), sendReply: async () => ok({ messageId: "stub" }) } as unknown as CalendarForwarder,
     postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps,
     schedulerClient: { scheduleMessage: async () => ok(undefined), deleteSchedule: async () => ok(undefined) } as never,
   }));

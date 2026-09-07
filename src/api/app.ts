@@ -11,7 +11,7 @@ import type { BillingHandler } from "../billing/billing-handler.js";
 import type { DraftSendDispatcher } from "../processor/draft-send-dispatcher.js";
 import type { EmailService } from "../email/email-service.js";
 import type { DomainIdentityService } from "../email/domain-identity-service.js";
-import type { sendRsvp as SendRsvpFn } from "../processor/calendar/rsvp-composer.js";
+import type { CalendarForwarder } from "../processor/calendar/calendar-forwarder.js";
 import type { PostApprovalCalendarHandlerDeps } from "../processor/calendar/post-approval-handler.js";
 import type { SchedulerClient } from "../scheduler/scheduler-client.js";
 import type { Result } from "neverthrow";
@@ -100,7 +100,7 @@ export interface AppDeps {
   billingHandler: BillingHandler;
   emailService: EmailService;
   domainIdentityService: DomainIdentityService;
-  rsvpComposer: typeof SendRsvpFn;
+  calendarForwarder: CalendarForwarder;
   postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps;
   schedulerClient: SchedulerClient;
   emailContentStore: EmailContentStore;
@@ -117,7 +117,7 @@ export interface AppDeps {
   jmapAdapter: JmapAdapter;
 }
 
-export function createApp({ threadDb, resourceDb, accountDb, exchangesDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, rsvpComposer, postApprovalCalendarDeps, schedulerClient, emailContentStore, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator, gmailProvider, outlookProvider, adapters, encryptionManager, signalQueue, jmapAdapter }: AppDeps) {
+export function createApp({ threadDb, resourceDb, accountDb, exchangesDb, auditDb, auth, access, logger, forwardingService, jobDispatcher, healthCheckValidator, signalReprocessor, draftSendDispatcher, accountCreationStarter, contentCdnBaseUrl, astValidator, billingHandler, emailService, domainIdentityService, calendarForwarder, postApprovalCalendarDeps, schedulerClient, emailContentStore, triggerDigest, embeddingGenerator, threadMatcher, unsubscribeTokenGenerator, gmailProvider, outlookProvider, adapters, encryptionManager, signalQueue, jmapAdapter }: AppDeps) {
   type AppEnv = { Variables: { auth: AuthContext; authorizationVerified?: boolean; [ROUTE_NOT_FOUND_KEY]?: boolean } };
   const app = new OpenAPIHono<AppEnv>({
     defaultHook: (result, c) => {
@@ -349,7 +349,7 @@ export function createApp({ threadDb, resourceDb, accountDb, exchangesDb, auditD
   // Route registrations
   // -------------------------------------------------------------------------
   new AccountsApi(accountDb, access, logger, accountCreationStarter, emailService, triggerDigest).register(app, helpers);
-  new ThreadsApi(threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, rsvpComposer, postApprovalCalendarDeps, signalReprocessor, emailContentStore, contentCdnBaseUrl, embeddingGenerator, threadMatcher, signalQueue).register(app, helpers);
+  new ThreadsApi(threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, calendarForwarder, postApprovalCalendarDeps, signalReprocessor, emailContentStore, contentCdnBaseUrl, embeddingGenerator, threadMatcher, signalQueue).register(app, helpers);
   new ResourcesApi(resourceDb, logger, contentCdnBaseUrl).register(app, helpers);
   new SignalsApi(threadDb, accountDb, logger, postApprovalCalendarDeps, contentCdnBaseUrl).register(app, helpers);
   new ViewsApi(accountDb, logger).register(app, helpers);
