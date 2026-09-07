@@ -357,6 +357,19 @@ export const CalendarAttendee = z.object({
   optional: z.boolean().optional(),
 }).openapi("CalendarAttendee");
 
+// A snapshot of the event fields as they were before the most recent update
+// (METHOD:REQUEST with an incremented SEQUENCE). Only the fields that actually
+// changed are present, so the client renders "previous -> current" arrows for
+// exactly those. `changedAt` is when the updating invite was received.
+export const CalendarPreviousValues = z.object({
+  changedAt: z.string(),
+  title: z.string().optional(),
+  description: z.string().optional(),
+  startTime: z.string().optional(),
+  endTime: z.string().optional(),
+  location: z.string().optional(),
+}).openapi("CalendarPreviousValues");
+
 export const CalendarEventData = z.object({
   title: z.string(),
   description: z.string().optional(),
@@ -368,6 +381,13 @@ export const CalendarEventData = z.object({
   organizerName: z.string().optional(),
   attendees: z.array(CalendarAttendee),
   linkedSignalId: z.string(),
+  // Set when a METHOD:CANCEL invite has been received for this event. Presence
+  // means cancelled; the current fields are retained so the client can render
+  // them struck-through rather than blank. ISO 8601 timestamp of the cancel.
+  cancelledAt: z.string().optional(),
+  // Present only when a later invite changed one or more fields; carries the
+  // pre-update values of just the changed fields. Absent for a first invite.
+  previousValues: CalendarPreviousValues.optional(),
 }).openapi("CalendarEventData");
 
 export const CalendarResponseData = z.object({
