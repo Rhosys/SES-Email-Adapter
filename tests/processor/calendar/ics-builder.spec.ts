@@ -53,6 +53,55 @@ describe("buildForwardIcs — field preservation", () => {
 });
 
 // ---------------------------------------------------------------------------
+// METHOD:CANCEL forward — force STATUS:CANCELLED and drop RSVP solicitation so the
+// target calendar removes the event rather than prompting a response.
+// ---------------------------------------------------------------------------
+
+function parseVevent(ics: string) {
+  const comp = new ICAL.Component(ICAL.parse(ics));
+  return comp.getFirstSubcomponent("vevent")!;
+}
+
+describe("buildForwardIcs — METHOD:CANCEL handling", () => {
+  const forward = (calendarData: CalendarEventData) => buildForwardIcs({
+    calendarData,
+    proxyUid: "acc.arc.uid-original-123.hmac@platform.email.rhosys.cloud",
+    proxyOrganizer: "mailto:arc@acc.platform.email.rhosys.cloud",
+    organizerCn: "Alice Smith",
+    attendeeAddress: "user@gmail.com",
+  });
+
+  it("forces STATUS:CANCELLED even when the source ICS omitted STATUS", () => {
+    const { status: _omitted, ...withoutStatus } = makeCalendarData({ method: "CANCEL" });
+    const ics = forward(withoutStatus);
+    expect(parseVevent(ics).getFirstPropertyValue("status")).toBe("CANCELLED");
+  });
+
+  it("forces STATUS:CANCELLED overriding a stale source STATUS:CONFIRMED", () => {
+    const ics = forward(makeCalendarData({ method: "CANCEL", status: "CONFIRMED" }));
+    expect(parseVevent(ics).getFirstPropertyValue("status")).toBe("CANCELLED");
+    expect(ics).not.toContain("STATUS:CONFIRMED");
+  });
+
+  it("does not solicit an RSVP on a cancel: attendee has no partstat/rsvp params", () => {
+    const attendee = parseVevent(forward(makeCalendarData({ method: "CANCEL" }))).getFirstProperty("attendee")!;
+    expect(attendee.getFirstValue()).toBe("mailto:user@gmail.com");
+    expect(attendee.getParameter("partstat")).toBeUndefined();
+    expect(attendee.getParameter("rsvp")).toBeUndefined();
+  });
+
+  it("keeps METHOD:CANCEL at the VCALENDAR level", () => {
+    expect(forward(makeCalendarData({ method: "CANCEL" }))).toContain("METHOD:CANCEL");
+  });
+
+  it("an invite (non-cancel) still solicits an RSVP: attendee has NEEDS-ACTION and RSVP=TRUE", () => {
+    const attendee = parseVevent(forward(makeCalendarData({ method: "REQUEST" }))).getFirstProperty("attendee")!;
+    expect(attendee.getParameter("partstat")).toBe("NEEDS-ACTION");
+    expect(attendee.getParameter("rsvp")).toBe("TRUE");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Property 14: PARTSTAT correctly maps decision to iCal value
 // Validates: Requirements 15.1
 // ---------------------------------------------------------------------------

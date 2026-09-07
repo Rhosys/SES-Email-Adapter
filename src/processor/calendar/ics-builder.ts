@@ -17,8 +17,10 @@ function isoToIcalTime(iso: string): InstanceType<typeof ICAL.Time> {
  * Construction rules:
  * - UID: proxyUid
  * - ORGANIZER: proxyOrganizer with CN from organizerCn
- * - ATTENDEE: mailto:{attendeeAddress} with PARTSTAT=NEEDS-ACTION;RSVP=TRUE
- * - Preserves: SEQUENCE, DTSTART, DTEND, SUMMARY, LOCATION, DESCRIPTION, STATUS, METHOD
+ * - ATTENDEE: mailto:{attendeeAddress}; for an invite/update PARTSTAT=NEEDS-ACTION;RSVP=TRUE,
+ *   for a METHOD:CANCEL listed without RSVP solicitation
+ * - STATUS: forced to CANCELLED for a METHOD:CANCEL; otherwise passed through from source
+ * - Preserves: SEQUENCE, DTSTART, DTEND, SUMMARY, LOCATION, DESCRIPTION, METHOD
  * - Strips: all VALARM components (none are added)
  */
 export function buildForwardIcs(opts: {
@@ -29,6 +31,13 @@ export function buildForwardIcs(opts: {
   attendeeAddress: string;
 }): string {
   const { calendarData, proxyUid, proxyOrganizer, organizerCn, attendeeAddress } = opts;
+
+  // A METHOD:CANCEL forward must unambiguously remove the event from the target calendar.
+  // Luma (and others) send CANCEL without a STATUS property and with the attendee still
+  // PARTSTAT=ACCEPTED — so we cannot rely on the source. Force STATUS:CANCELLED and drop
+  // the RSVP-solicitation framing, otherwise the forward reads as "please respond" for an
+  // event that no longer exists.
+  const isCancel = calendarData.method === "CANCEL";
 
   const cal = new ICAL.Component("vcalendar");
   cal.addPropertyWithValue("version", "2.0");
@@ -68,8 +77,10 @@ export function buildForwardIcs(opts: {
     vevent.addPropertyWithValue("description", calendarData.description);
   }
 
-  // STATUS (optional)
-  if (calendarData.status !== undefined) {
+  // STATUS — forced to CANCELLED for a cancel (source often omits it); otherwise passed through.
+  if (isCancel) {
+    vevent.addPropertyWithValue("status", "CANCELLED");
+  } else if (calendarData.status !== undefined) {
     vevent.addPropertyWithValue("status", calendarData.status);
   }
 
@@ -84,11 +95,14 @@ export function buildForwardIcs(opts: {
   organizer.setParameter("cn", organizerCn);
   vevent.addProperty(organizer);
 
-  // ATTENDEE
+  // ATTENDEE — a cancel lists the attendee but must not solicit an RSVP (no NEEDS-ACTION,
+  // no RSVP=TRUE); an invite/update asks the forwarding target to respond.
   const attendee = new ICAL.Property("attendee");
   attendee.setValue(`mailto:${attendeeAddress}`);
-  attendee.setParameter("partstat", "NEEDS-ACTION");
-  attendee.setParameter("rsvp", "TRUE");
+  if (!isCancel) {
+    attendee.setParameter("partstat", "NEEDS-ACTION");
+    attendee.setParameter("rsvp", "TRUE");
+  }
   vevent.addProperty(attendee);
 
   cal.addSubcomponent(vevent);
