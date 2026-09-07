@@ -71,6 +71,51 @@ describe("toApiSignal — matchedRules collapse", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Unsubscribe stripping by workflow — the DTO surfaces the unsubscribe link only
+// for workflows where it is meaningful (content, conversation, notice, onboarding,
+// unspecified). Transactional/operational workflows strip it (the stored signal
+// keeps it for the one-click unsubscribe action).
+// ---------------------------------------------------------------------------
+describe("toApiSignal — unsubscribe stripping by workflow", () => {
+  const unsubscribe = { type: "website" as const, url: "https://example.com/unsub" };
+
+  it.each([
+    { workflow: "content" as const, reason: "newsletters/promotions" },
+    { workflow: "conversation" as const, reason: "low-stakes relationship mail" },
+    { workflow: "notice" as const, reason: "service notices" },
+    { workflow: "onboarding" as const, reason: "welcome/getting-started" },
+    { workflow: "unspecified" as const, reason: "cannot rule out" },
+  ])("keeps unsubscribe for workflow=$workflow ($reason)", ({ workflow }) => {
+    const signal = makeInboundSignal({ data: { workflow, unsubscribe } });
+    const data = toApiSignal(signal).data as ApiInboundEmailSignalData;
+    expect(data.unsubscribe).toEqual(unsubscribe);
+  });
+
+  it.each([
+    { workflow: "auth" as const, reason: "OTP/security" },
+    { workflow: "payments" as const, reason: "invoices/receipts" },
+    { workflow: "events" as const, reason: "ticketed events — the reported bug" },
+    { workflow: "package" as const, reason: "shipping" },
+    { workflow: "travel" as const, reason: "itineraries" },
+    { workflow: "healthcare" as const, reason: "appointments" },
+    { workflow: "job" as const, reason: "applications" },
+    { workflow: "support" as const, reason: "helpdesk" },
+    { workflow: "alert" as const, reason: "account enforcement" },
+    { workflow: "crm" as const, reason: "sales outreach" },
+  ])("strips unsubscribe for workflow=$workflow ($reason)", ({ workflow }) => {
+    const signal = makeInboundSignal({ data: { workflow, unsubscribe } });
+    const data = toApiSignal(signal).data as ApiInboundEmailSignalData;
+    expect(data.unsubscribe).toBeUndefined();
+  });
+
+  it("no unsubscribe present stays absent regardless of workflow", () => {
+    const signal = makeInboundSignal({ data: { workflow: "content" } });
+    const data = toApiSignal(signal).data as ApiInboundEmailSignalData;
+    expect(data.unsubscribe).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // withResolvedContentUrls — s3Key -> CDN url resolution, computed lazily at read
 // time (never stored). Covers both Attachment.url and the inline-image cid:
 // substitution for images the sanitizer routed to S3 instead of embedding as a
