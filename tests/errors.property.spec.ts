@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dbError, notFoundError, invalidResponseError, isSchemaMismatchError } from "../src/errors.js";
+import { dbError, notFoundError, invalidResponseError, isSchemaMismatchError, errorMessage, processorError } from "../src/errors.js";
 
 describe("Error type constructors produce correct kind fields", () => {
   it("dbError wraps an Error with kind 'db_error'", () => {
@@ -49,5 +49,42 @@ describe("dbError schema-mismatch classification", () => {
     expect(isSchemaMismatchError('column "x" does not exist')).toBe(true);
     expect(isSchemaMismatchError('type "vector" does not exist')).toBe(true);
     expect(isSchemaMismatchError("Connection reset")).toBe(false);
+  });
+});
+
+describe("errorMessage walks the error tree without JSON.stringify", () => {
+  it("returns the message for a plain Error", () => {
+    expect(errorMessage(new Error("boom"))).toBe("boom");
+  });
+
+  it("returns the message field for our plain-object error kinds", () => {
+    expect(errorMessage(dbError(new Error("connection timeout")))).toBe("connection timeout");
+  });
+
+  it("uses errorName and nested cause for SES-style kinds that have no top-level message", () => {
+    const transient = { kind: "transient_ses_error", errorName: "BadRequestException", httpStatus: 400, cause: { message: "Header <Content-Type> is not supported" } };
+    expect(errorMessage(transient)).toBe("BadRequestException: Header <Content-Type> is not supported");
+  });
+
+  it("walks a ProcessorError over an AggregateError of SES errors into a full joined path", () => {
+    const transient = { kind: "transient_ses_error", errorName: "BadRequestException", httpStatus: 400, cause: { message: "Header <Content-Type> is not supported" } };
+    const aggregate = new AggregateError([transient], "1 critical side-effect failure");
+    const error = processorError(aggregate);
+
+    // Full path: outer summary, then the SES branch — no duplicated summary, no JSON dump.
+    expect(errorMessage(error)).toBe("1 critical side-effect failure: BadRequestException: Header <Content-Type> is not supported");
+    expect(errorMessage(error)).not.toContain("{");
+  });
+
+  it("joins multiple aggregate children with the —— separator", () => {
+    const a = { kind: "transient_ses_error", errorName: "Throttling", httpStatus: 429, cause: { message: "rate exceeded" } };
+    const b = { kind: "transient_ses_error", errorName: "BadRequestException", httpStatus: 400, cause: { message: "bad header" } };
+    const error = processorError(new AggregateError([a, b], "2 critical side-effect failures"));
+    expect(errorMessage(error)).toBe("2 critical side-effect failures: Throttling: rate exceeded —— BadRequestException: bad header");
+  });
+
+  it("falls back to kind, never a raw dump, when no readable message exists", () => {
+    expect(errorMessage({ kind: "invalid_response" })).toBe("invalid_response");
+    expect(errorMessage(12345)).toBe("unknown error");
   });
 });

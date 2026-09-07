@@ -53,12 +53,70 @@ export function isSchemaMismatchError(message: string): boolean {
  * objects, not Error instances, so `instanceof Error` always falls through to
  * JSON.stringify() for them, which loses the message behind a non-enumerable `cause`.
  */
-export function errorMessage(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (e && typeof e === "object" && "message" in e && typeof (e as { message: unknown }).message === "string") {
-    return (e as { message: string }).message;
+const SIBLING_SEPARATOR = " —— ";
+
+/** The human-readable token a single error node contributes, ignoring its children. */
+function ownToken(e: unknown): string | undefined {
+  if (e instanceof Error) return e.message || undefined;
+  if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    if (typeof o.message === "string" && o.message.length > 0) return o.message;
+    // SES error kinds carry `errorName` instead of a top-level `message`.
+    if (typeof o.errorName === "string" && o.errorName.length > 0) return o.errorName;
   }
-  return JSON.stringify(e);
+  return undefined;
+}
+
+/** Child error nodes to descend into: an AggregateError's / `.errors` list, then `.cause`. */
+function childErrors(e: unknown): unknown[] {
+  if (e instanceof AggregateError) return e.errors;
+  if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    if (Array.isArray(o.errors)) return o.errors;
+    if (o.cause !== undefined && o.cause !== null) return [o.cause];
+  }
+  return [];
+}
+
+/**
+ * Walk an error tree collecting every human-readable message, joined into a single
+ * path (outer → inner via ": ", sibling branches via " —— "). Never JSON.stringifies
+ * a whole error object — the full structured error always belongs in the log's context
+ * field, so the summary only needs the readable strings. Guards against cycles.
+ *
+ * `parentToken` is the own-token of the node above; a node whose own-token repeats it
+ * (e.g. a ProcessorError wrapping an AggregateError with the same message) contributes
+ * no duplicate text but still descends into its children.
+ */
+function walkErrorMessages(e: unknown, seen: WeakSet<object>, parentToken?: string): string {
+  if (e && typeof e === "object") {
+    if (seen.has(e)) return "";
+    seen.add(e);
+  }
+  const rawOwn = ownToken(e);
+  const own = rawOwn === parentToken ? undefined : rawOwn;
+  const childText = childErrors(e)
+    .map((child) => walkErrorMessages(child, seen, rawOwn ?? parentToken))
+    .filter((s) => s.length > 0)
+    .join(SIBLING_SEPARATOR);
+  if (own && childText) return `${own}: ${childText}`;
+  return own ?? childText;
+}
+
+/**
+ * Best-effort human-readable summary for any of our error kinds, a raw Error, an
+ * AggregateError, or an arbitrary thrown value. Walks the whole error tree (including
+ * nested `cause` chains and AggregateError children) and joins the readable messages.
+ * Prefer this over `instanceof Error` checks when logging a Result's `.error`.
+ */
+export function errorMessage(e: unknown): string {
+  const walked = walkErrorMessages(e, new WeakSet(), undefined);
+  if (walked.length > 0) return walked;
+  // Nothing readable anywhere in the tree — fall back to the kind, never a raw dump.
+  if (e && typeof e === "object" && "kind" in e && typeof (e as { kind: unknown }).kind === "string") {
+    return (e as { kind: string }).kind;
+  }
+  return "unknown error";
 }
 
 export const dbError = (cause: unknown, extra?: { lambdaRequestId?: string; operation?: string }): DbError => {
@@ -85,11 +143,10 @@ export const authError = (cause: unknown): AuthError => {
 };
 export const processorError = (cause: unknown): ProcessorError => {
   const error = toError(cause);
-  const result: ProcessorError = { kind: "processor_error", message: error.message, cause: error };
-  if (cause instanceof AggregateError) {
-    result.message = `${error.message} [${cause.errors.map((e: unknown) => e instanceof Error ? e.message : JSON.stringify(e)).join("; ")}]`;
-  }
-  return result;
+  // `message` stays the top-level summary only. The full sub-error detail lives in
+  // `cause` (walked by errorMessage() at log time) and in the log's structured
+  // context — never flattened into this string via JSON.stringify.
+  return { kind: "processor_error", message: error.message, cause: error };
 };
 export const noAccountError = (recipientAddress: string, destination: string[], compositeMailMessageId: string, expectedAccountId?: string): NoAccountError => ({ kind: "no_account_for_recipient", recipientAddress, destination, compositeMailMessageId, expectedAccountId });
 export const reindexSegmentProcessingError = (segment: number, failures: Array<{ signalId: string; cause: unknown }>): ReindexSegmentProcessingError => ({ kind: "reindex_segment_processing_error", segment, failureCount: failures.length, failures });
