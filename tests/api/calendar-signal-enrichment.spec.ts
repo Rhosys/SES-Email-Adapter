@@ -297,4 +297,48 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
     // type distinguishes it as a calendar card
     expect(body.signals[0]!.type).toBe("calendar_event");
   });
+
+  it("collapses an invite + update for the same event into one card carrying previousValues", async () => {
+    const inviteData = makeCalendarEventSignal().data;
+    const invite = makeCalendarEventSignal({ id: "sgn-cal-001", createdAt: "2025-03-15T09:00:00Z" });
+    const update = makeCalendarEventSignal({
+      id: "sgn-cal-002",
+      createdAt: "2025-03-16T09:00:00Z",
+      data: { ...inviteData, sequence: 1, startTime: "2025-03-15T14:00:00Z" },
+    });
+    threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-16T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-16T09:00:00Z" }));
+    threadDb.listSignals.mockResolvedValueOnce(ok({ items: [invite, update] }));
+    threadDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
+
+    const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { signals: Array<{ signalId: string; data: { startTime: string; previousValues?: { changedAt: string; startTime?: string } } }> };
+    // Only one calendar card — the superseded invite is dropped.
+    expect(body.signals).toHaveLength(1);
+    expect(body.signals[0]!.signalId).toBe("sgn-cal-002");
+    expect(body.signals[0]!.data.startTime).toBe("2025-03-15T14:00:00Z");
+    expect(body.signals[0]!.data.previousValues).toEqual({ changedAt: "2025-03-16T09:00:00Z", startTime: "2025-03-15T10:00:00Z" });
+  });
+
+  it("collapses an invite + cancellation into one card carrying cancelledAt, retaining the event fields", async () => {
+    const inviteData = makeCalendarEventSignal().data;
+    const invite = makeCalendarEventSignal({ id: "sgn-cal-001", createdAt: "2025-03-15T09:00:00Z" });
+    const cancel = makeCalendarEventSignal({
+      id: "sgn-cal-002",
+      createdAt: "2025-03-16T09:00:00Z",
+      data: { ...inviteData, method: "CANCEL", status: "CANCELLED", sequence: 1 },
+    });
+    threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-16T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-16T09:00:00Z" }));
+    threadDb.listSignals.mockResolvedValueOnce(ok({ items: [invite, cancel] }));
+    threadDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
+
+    const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { signals: Array<{ signalId: string; data: { title: string; cancelledAt?: string } }> };
+    expect(body.signals).toHaveLength(1);
+    expect(body.signals[0]!.signalId).toBe("sgn-cal-002");
+    expect(body.signals[0]!.data.cancelledAt).toBe("2025-03-16T09:00:00Z");
+    // Fields retained so the client can render them struck-through, not blank.
+    expect(body.signals[0]!.data.title).toBe("Team Standup");
+  });
 });

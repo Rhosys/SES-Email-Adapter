@@ -7,6 +7,8 @@ import { validateRecipientMx } from "../dns/mx-validator.js";
 import { computeUndoWindowSeconds } from "./undo-window.js";
 import { zParse } from "./validate.js";
 import { toApiThread, toApiSignal, withResolvedContentUrls } from "./signal-transforms.js";
+import { collapseCalendarSignals } from "./calendar-collapse.js";
+import type * as Api from "./schemas.js";
 import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../retention.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
@@ -328,14 +330,34 @@ export class ThreadsApi {
         }
       }
 
-      const enrichedSignals = signals.map(signal => {
+      // Collapse each event's invite/update/cancellation signals into one card. Superseded
+      // snapshots are dropped; the winner carries derived cancelledAt/previousValues.
+      const collapse = collapseCalendarSignals(calendarEventSignals);
+      for (const orphan of collapse.orphans) {
+        logger.track("Calendar update/cancellation has no prior invite in the loaded thread signals; returning best-effort card without a previous-values diff.", {
+          code: "api.thread.calendar_collapse_orphan",
+          accountId, threadId: thread.id, ...orphan,
+        });
+      }
+
+      const enrichedSignals: Array<Api.Signal & { latestResponse?: { decision: CalendarResponseData["decision"]; respondedAt: string } }> = [];
+      for (const signal of signals) {
         const withUrls = withResolvedContentUrls(signal, contentCdnBaseUrl);
-        const apiSignal = toApiSignal(withUrls);
-        if (isCalendarEventSignal(withUrls) && enrichments.has(withUrls.data.veventUid)) {
-          return { ...apiSignal, latestResponse: enrichments.get(withUrls.data.veventUid) };
+        if (isCalendarEventSignal(withUrls)) {
+          // Drop snapshots that lost to a later invite/cancellation in their event group.
+          if (collapse.superseded.has(withUrls.id)) continue;
+          const apiSignal = toApiSignal(withUrls) as Extract<Api.Signal, { type: "calendar_event" }>;
+          const calendarEnrichment = collapse.winners.get(withUrls.id) ?? {};
+          const latestResponse = enrichments.get(withUrls.data.veventUid);
+          enrichedSignals.push({
+            ...apiSignal,
+            data: { ...apiSignal.data, ...calendarEnrichment },
+            ...(latestResponse ? { latestResponse } : {}),
+          });
+          continue;
         }
-        return apiSignal;
-      });
+        enrichedSignals.push(toApiSignal(withUrls));
+      }
 
       return c.json(page("signals", enrichedSignals, result.value.nextCursor), 200);
     });
