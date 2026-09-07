@@ -142,4 +142,39 @@ describe("logger edge cases", () => {
       expect(trackPoints[0]!.elapsedMs).toBeGreaterThan(1_000_000_000);
     });
   });
+
+  describe("deeply nested embeddings redaction", () => {
+    let errorSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      errorSpy.mockRestore();
+    });
+
+    // When a context value is a JSON string (e.g. a raw SQS record.body, which
+    // handler.ts never parses in place), redact() must parse it and recurse into
+    // the decoded object so the same key rules apply — otherwise an `embeddings`
+    // key serialized inside the string escapes redaction and its vectors leak.
+    // The parsed value is emitted as an object, not re-stringified.
+    it("parses a JSON string value and redacts embeddings inside it", () => {
+      const logger = new RequestLogger({ containerId: "test1234" });
+      logger.startInvocation("test-invocation");
+
+      const vector = [-0.0254506804049, 0.0178525932133];
+      const body = JSON.stringify({ embeddings: { "amazon.titan-embed-text-v2:0": vector } });
+
+      logger.error("side-effect failed", { code: "handler.sqs.retry_threshold_exceeded", body });
+
+      const output = errorSpy.mock.calls[0]![0] as Record<string, unknown>;
+      // body was a JSON string on input; it is emitted as a parsed object.
+      const parsedBody = output.body as Record<string, unknown>;
+      expect(typeof parsedBody).toBe("object");
+      expect(parsedBody.embeddings).toBe("<Embeddings-Map-Array>");
+      // The raw vector must not appear anywhere in the emitted log.
+      expect(JSON.stringify(output)).not.toContain(String(vector[0]));
+    });
+  });
 });

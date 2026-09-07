@@ -88,6 +88,35 @@ function errorToPlain(e: Error): Record<string, unknown> {
   return { ...e, message: e.message, name: e.name, stack: e.stack };
 }
 
+// A context value can arrive already serialized as a JSON string — e.g. a raw
+// SQS record whose `body` is the original message text (handler parses a copy,
+// never the record). redact() walks object trees by key, so a serialized object
+// is an opaque scalar to it and any sensitive key nested inside (embeddings,
+// authorization, cognito ids) escapes redaction. When a string parses to an
+// object/array, decode it and recurse with the same key rules, emitting the
+// parsed value as an object — not a re-stringified string. Non-JSON strings and
+// JSON scalars (numbers, quoted strings) are returned unchanged.
+function parseJsonStringValue(value: string): { parsed: Record<string, unknown> | unknown[] } | undefined {
+  const trimmed = value.trim();
+  if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (parsed && typeof parsed === "object") return { parsed: parsed as Record<string, unknown> | unknown[] };
+  } catch {
+    // not JSON — fall through
+  }
+  return undefined;
+}
+
+function redactArray(arr: unknown[], seen: WeakSet<object>): unknown[] {
+  return arr.map((item) => {
+    const plainItem = item instanceof Error ? errorToPlain(item) : item;
+    return plainItem && typeof plainItem === "object" && !Array.isArray(plainItem)
+      ? redact(plainItem as Record<string, unknown>, seen)
+      : redactValue("", plainItem);
+  });
+}
+
 function redact(obj: Record<string, unknown>, seen = new WeakSet()): Record<string, unknown> {
   if (seen.has(obj)) return { _circular: true };
   seen.add(obj);
@@ -100,12 +129,16 @@ function redact(obj: Record<string, unknown>, seen = new WeakSet()): Record<stri
     } else if (value && typeof value === "object" && !Array.isArray(value)) {
       result[key] = redact(value as Record<string, unknown>, seen);
     } else if (Array.isArray(value)) {
-      result[key] = value.map((item) => {
-        const plainItem = item instanceof Error ? errorToPlain(item) : item;
-        return plainItem && typeof plainItem === "object" && !Array.isArray(plainItem)
-          ? redact(plainItem as Record<string, unknown>, seen)
-          : redactValue("", plainItem);
-      });
+      result[key] = redactArray(value, seen);
+    } else if (typeof value === "string") {
+      // A value serialized as JSON hides sensitive keys from key-based redaction.
+      // Decode it and recurse so the same rules apply; emit the parsed value.
+      const decoded = parseJsonStringValue(value);
+      result[key] = decoded === undefined
+        ? value
+        : Array.isArray(decoded.parsed)
+          ? redactArray(decoded.parsed, seen)
+          : redact(decoded.parsed, seen);
     } else {
       result[key] = value;
     }
