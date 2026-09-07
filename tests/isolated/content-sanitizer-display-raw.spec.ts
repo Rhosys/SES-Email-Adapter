@@ -52,7 +52,7 @@ afterEach(() => {
 });
 
 describe("content-sanitizer — display-safe raw email upload", () => {
-  it("uploads a display-safe raw copy with attachments stripped and returns its s3Key", async () => {
+  it("uploads a display-safe raw copy with attachments stripped", async () => {
     const uploads: Array<{ key: string; body: string }> = [];
     mockFetch(RAW_EMAIL_WITH_ATTACHMENT, uploads);
 
@@ -67,8 +67,6 @@ describe("content-sanitizer — display-safe raw email upload", () => {
 
     expect(result.success).toBe(true);
     if (!result.success) return;
-
-    expect(result.parsed.displayRawS3Key).toBe("emails/msg-display-raw/raw-display.eml");
 
     const displayUpload = uploads.find(u => u.key === "emails/msg-display-raw/raw-display.eml");
     expect(displayUpload).toBeDefined();

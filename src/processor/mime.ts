@@ -13,7 +13,6 @@ export interface ParsedMime {
   headers: Record<string, string>;
   sentAt?: string;
   inlineImages?: InlineImageRef[];
-  displayRawS3Key?: string;
 }
 
 export interface MimeParser {

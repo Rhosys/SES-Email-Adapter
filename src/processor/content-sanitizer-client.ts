@@ -76,7 +76,6 @@ export interface ContentSanitizeResponse {
     links?: ExtractedLink[];
     droppedAttachments?: DroppedAttachment[];
     inlineImages?: InlineImageRef[];
-    displayRawS3Key?: string;
   };
 }
 

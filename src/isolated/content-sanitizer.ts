@@ -144,7 +144,6 @@ interface ContentSanitizeResponse {
     links?: ExtractedLink[];
     droppedAttachments?: DroppedAttachment[];
     inlineImages?: InlineImageRef[];
-    displayRawS3Key?: string;
   };
 }
 
@@ -295,15 +294,13 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   // that path. Best-effort — a failure here must not fail the whole sanitize, the feature
   // just falls back to unavailable for this message.
   logger?.trackPoint("display_raw_build_start");
-  let displayRawS3Key: string | undefined;
   try {
     const displayRaw = buildDisplayRawEmail(rawMime.toString("latin1"));
     const key = `${event.keyPrefix}raw-display.eml`;
     const uploadResult = await uploadViaPresignedPost(event.presignedPost, key, Buffer.from(displayRaw, "latin1"), "message/rfc822");
-    if (uploadResult.ok) displayRawS3Key = key;
     logger?.trackPoint("display_raw_build_complete", { uploaded: uploadResult.ok, ...(uploadResult.ok ? {} : { detail: uploadResult.detail }) });
-  } catch {
-    logger?.trackPoint("display_raw_build_failed");
+  } catch (e) {
+    logger?.trackPoint("display_raw_build_failed", { detail: e instanceof Error ? e.message : "unknown" });
   }
 
   // 2. Parse with mailparser
@@ -637,9 +634,6 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   // here, or they'd be both an attachment and an unresolved inline ref.
   if (referencedInlineImages.length > 0) {
     result.parsed.inlineImages = referencedInlineImages;
-  }
-  if (displayRawS3Key) {
-    result.parsed.displayRawS3Key = displayRawS3Key;
   }
 
   logger?.trackPoint("response_built");

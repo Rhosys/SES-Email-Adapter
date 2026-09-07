@@ -11,7 +11,7 @@ import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../retention.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { EmailContentStore } from "./content-store.js";
-import type { Signal, AnySignal, InboundEmailSignalData, PageParams, ThreadStatus, Workflow } from "../types/index.js";
+import type { Signal, AnySignal, PageParams, ThreadStatus, Workflow } from "../types/index.js";
 import type { CalendarResponseData, DomainMisconfigurationData, Pagination } from "../types/index.js";
 import type { UpdateThreadFields, ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
@@ -808,15 +808,13 @@ export class ThreadsApi {
       }
 
       // Display: the sanitized copy (attachments stripped, small inline images kept — built by
-      // the content sanitizer, see raw-email-display.ts), served through the content CDN. If it
-      // is missing we do NOT fall back to the original — that would leak unsanitized bytes and
-      // the full-size original through a viewing path. The client renders an "unavailable"
-      // notice instead.
-      const displayRawS3Key = (signal.data as InboundEmailSignalData).displayRawS3Key;
-      if (!displayRawS3Key) {
-        logger.error("Display-safe raw email copy is missing — cannot render original email view.", { code: "api.signal.raw_display_missing", accountId, threadId, signalId: signal.id });
-        return err(c, 404, "Display copy unavailable", "RAW_DISPLAY_UNAVAILABLE");
-      }
+      // the content sanitizer, see raw-email-display.ts), served through the content CDN. Its key
+      // is deterministic — the sanitizer uploads it under the same content prefix used for
+      // extracted assets — so we reconstruct it here rather than persisting it on the signal. We
+      // never fall back to the original; that would leak unsanitized bytes and the full-size
+      // original through a viewing path. If the sanitizer failed to produce the copy the CDN
+      // returns 404 and the client renders an "unavailable" notice.
+      const displayRawS3Key = `content/accounts/${accountId}/extracted/${signal.signalLookupId}/raw-display.eml`;
       return c.redirect(`${contentCdnBaseUrl}/${displayRawS3Key}`, 307);
     });
 
