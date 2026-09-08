@@ -955,7 +955,7 @@ export class SignalProcessor {
         }
         // First delivery seeing an existing signal — true duplicate, already fully
         // processed (including dispatch). Dedup and return.
-        this.logger.warn("Signal already processed — dedup skip.", { code: "processor.dedup_skip", signalId: existing.id, accountId, compositeMailMessageId: msg.compositeMailMessageId });
+        this.logger.warn(`Signal ${existing.id} already processed — dedup skip.`, { code: "processor.dedup_skip", levelThreshold: 2, signalId: existing.id, accountId, compositeMailMessageId: msg.compositeMailMessageId });
         return ok(undefined);
       }
     }
@@ -1200,7 +1200,9 @@ export class SignalProcessor {
 
     let classificationOutput: ClassificationOutput;
     if (classification.isErr()) {
-      this.logger.warn("Classification failed — proceeding with workflow:none fallback.", { code: "processor.classification_fallback", accountId, compositeMailMessageId: msg.compositeMailMessageId, error: classification.error });
+      const cause = classification.error.cause;
+      const reason = cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "unknown cause";
+      this.logger.warn(`Classification failed [${reason}] — proceeding with workflow:none fallback.`, { code: "processor.classification_fallback", accountId, compositeMailMessageId: msg.compositeMailMessageId, error: classification.error });
       classificationOutput = { workflow: "unspecified", workflowData: { workflow: "unspecified" }, tags: [], summary: "", labels: [], actions: [] };
     } else {
       classificationOutput = classification.value;

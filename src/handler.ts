@@ -466,7 +466,9 @@ async function handleWebSocket(event: APIGatewayProxyWebsocketEventV2): Promise<
       // Send confirmation so the client knows the connection is fully established
       const confirmResult = await wsDeliverer.sendRaw(connectionId, JSON.stringify({ type: "connected", accountId, connectionId, timestamp: DateTime.utc().toISO() }));
       if (confirmResult.isErr()) {
-        logger.warn("Failed to send WS connect confirmation", { code: "handler.ws.confirm_failed", connectionId, error: confirmResult.error });
+        const wsError = confirmResult.error;
+        const detail = wsError.kind === "gone" ? "connection gone before confirmation" : wsError.reason;
+        logger.warn(`Failed to send WS connect confirmation: ${detail}`, { code: "handler.ws.confirm_failed", connectionId, error: wsError });
       }
 
       return { statusCode: 200 };

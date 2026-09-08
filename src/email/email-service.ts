@@ -285,6 +285,19 @@ export class EmailService {
       errorName === "AccessDeniedException";
 
     if (isPermanent) {
+      if (isMalformedRequest) {
+        // The raw MIME we handed SES is structurally invalid (unsupported header, bad parameter,
+        // unparseable body). This is a bug in how we built the message — not an SES-side problem —
+        // so it gets its own callout to separate it from verification/config permanent failures.
+        this.logger.error(`SES rejected malformed request [${errorName}]: ${errorMessage}.`, {
+          code: "email_service.malformed_request",
+          errorName,
+          httpStatus,
+          error: e,
+          opts,
+        });
+        return err(permanentSesError(errorName, httpStatus, errorMessage, e));
+      }
       this.logger.error(`SES permanent failure [${errorName}]: ${errorMessage}.`, {
         code: "email_service.permanent_failure",
         errorName,

@@ -18,6 +18,7 @@ export interface LogEntry {
   level: LogLevel;
   title: string;
   code?: string;
+  levelThreshold: number;
   timestamp: string;
   invocationId: string;
   containerId: string;
@@ -227,16 +228,23 @@ export class RequestLogger implements Logger {
     const includeTrackPoints = level === "track" || level === "error" || level === "critical";
     const includeStack = level === "error" || level === "critical";
 
-    // Extract code from context if present
+    // Extract code and levelThreshold from context if present. levelThreshold controls how
+    // frequently a message is expected — lower means rarer, so alerting can be tuned per site.
+    // Defaults to 20 when a call site does not specify one.
     let code: string | undefined;
-    let restContext: Record<string, unknown> | undefined;
-    if (context && "code" in context && typeof context.code === "string") {
-      const { code: extractedCode, ...rest } = context;
+    let levelThreshold = 20;
+    let restContext: Record<string, unknown> | undefined = context;
+    if (restContext && "code" in restContext && typeof restContext.code === "string") {
+      const { code: extractedCode, ...rest } = restContext;
       code = extractedCode;
-      restContext = Object.keys(rest).length > 0 ? rest : undefined;
-    } else {
-      restContext = context;
+      restContext = rest;
     }
+    if (restContext && "levelThreshold" in restContext && typeof restContext.levelThreshold === "number") {
+      const { levelThreshold: extractedThreshold, ...rest } = restContext;
+      levelThreshold = extractedThreshold;
+      restContext = rest;
+    }
+    if (restContext && Object.keys(restContext).length === 0) restContext = undefined;
 
     // Serialize Error instances in context so they don't become {}
     const serializedContext = restContext ? serializeErrors(restContext) : undefined;
@@ -246,6 +254,7 @@ export class RequestLogger implements Logger {
       level: level.toUpperCase() as unknown as LogLevel,
       title,
       ...(code !== undefined ? { code } : {}),
+      levelThreshold,
       timestamp: DateTime.utc().toISO()!,
       invocationId: this.invocationId,
       containerId: this.containerId,
@@ -256,6 +265,7 @@ export class RequestLogger implements Logger {
     // Re-assign required fields AFTER spread to guarantee context cannot overwrite them
     entry.level = level.toUpperCase() as unknown as LogLevel;
     entry.title = title;
+    entry.levelThreshold = levelThreshold;
     entry.invocationId = this.invocationId;
     entry.containerId = this.containerId;
     if (code !== undefined) entry.code = code;
