@@ -1382,6 +1382,28 @@ describe("API", () => {
         expect.objectContaining({ createdForOrigin: "github.com" }),
       );
     });
+
+    it("stores name when provided", async () => {
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain({ domain: "mydomain.com" })));
+      vi.mocked(accountDb.createAlias).mockResolvedValueOnce(ok(makeAlias({ name: "Support Team" })));
+      const res = await req(app, "POST", `${A}/aliases`, {
+        body: { address: "me@mydomain.com", name: "Support Team" },
+      });
+      expect(res.status).toBe(201);
+      const body = await res.json() as { name?: string };
+      expect(body.name).toBe("Support Team");
+      expect(accountDb.createAlias).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "Support Team" }),
+      );
+    });
+
+    it("returns 400 when name contains control characters", async () => {
+      vi.mocked(accountDb.getDomain).mockResolvedValueOnce(ok(makeDomain({ domain: "mydomain.com" })));
+      const res = await req(app, "POST", `${A}/aliases`, {
+        body: { address: "me@mydomain.com", name: "Evil\r\nBcc: attacker@evil.com" },
+      });
+      expect(res.status).toBe(400);
+    });
   });
 
   describe("PATCH /accounts/:accountId/aliases/:address", () => {
@@ -1406,6 +1428,20 @@ describe("API", () => {
       const saved = vi.mocked(accountDb.upsertAlias).mock.calls[0]![0] as Alias;
       expect(saved.id).toBe("user@example.com");
       expect(saved.unknownSenderPolicy).toBe("allow_all");
+    });
+
+    it("updates name and preserves it when patch omits it but alias already has one", async () => {
+      vi.mocked(accountDb.upsertAlias).mockResolvedValueOnce(ok(makeAlias({ name: "Support Team" })));
+      await req(app, "PATCH", `${A}/aliases/me%40mydomain.com`, {
+        body: { name: "Support Team" },
+      });
+      expect(accountDb.upsertAlias).toHaveBeenCalledWith(expect.objectContaining({ name: "Support Team" }));
+
+      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias({ name: "Support Team" })));
+      await req(app, "PATCH", `${A}/aliases/user%40example.com`, {
+        body: { unknownSenderPolicy: "allow_all" },
+      });
+      expect(accountDb.upsertAlias).toHaveBeenLastCalledWith(expect.objectContaining({ name: "Support Team" }));
     });
 
     it("renames alias when newAddress domain is registered", async () => {
