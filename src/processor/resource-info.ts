@@ -8,6 +8,8 @@ export interface ResourceInfo {
   displayDate: string;            // Display_Date — passthrough from workflowData
   resourceKey: string;
   assets: ResourceAsset[];
+  title?: string;
+  description?: string;
 }
 
 /**
@@ -75,7 +77,11 @@ export function deriveResourceInfo(
       const display = d.eventStartDatetime ?? d.eventDate;
       const instant = d.eventStartDatetime ? d.eventStartDatetimeInstant : d.eventDateInstant;
       if (!display || !instant || !key) return null;
-      return { expectedResolutionDate: instant, displayDate: display, resourceKey: key, assets: [] };
+      return {
+        expectedResolutionDate: instant, displayDate: display, resourceKey: key, assets: [],
+        title: d.eventName,
+        ...(d.description ? { description: d.description } : {}),
+      };
     }
 
     default:

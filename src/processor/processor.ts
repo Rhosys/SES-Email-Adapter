@@ -1610,6 +1610,8 @@ export class SignalProcessor {
         resourceKey: resourceInfo.resourceKey,
         expectedResolutionDate: resourceInfo.expectedResolutionDate,
         displayDate: resourceInfo.displayDate,
+        ...(resourceInfo.title !== undefined ? { title: resourceInfo.title } : {}),
+        ...(resourceInfo.description !== undefined ? { description: resourceInfo.description } : {}),
         ttl: resourceTtl,
         ...(allAssets.length > 0 ? { assets: allAssets } : {}),
       });

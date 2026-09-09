@@ -225,6 +225,7 @@ export interface EventsData {
   eventEndDatetime?: string;
   /** UTC instant derived from eventEndDatetime at classification time (internal; not in API schema). */
   eventEndDatetimeInstant?: string;
+  description?: string;
   performer?: string;
   ticketReference?: string;
   seatDetails?: string;
@@ -678,6 +679,10 @@ export interface Resource {
   status: ResourceStatus;
   expectedResolutionDate: string;
   displayDate?: string;
+  // Human-readable label/detail passed through from the originating workflowData
+  // (e.g. events' eventName/description) — not derived or reformatted here.
+  title?: string;
+  description?: string;
   resolvedAt?: string;
   assets: ResourceAsset[];
   createdAt: string;

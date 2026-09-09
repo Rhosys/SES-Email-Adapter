@@ -342,6 +342,7 @@ export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
       { name: "eventDate", type: "date", required: false, notes: "The event's calendar date with NO time — e.g. 'February 3, 2027'. ALWAYS populate this whenever the email states an event date anywhere (subject or body), even a save-the-date with no time. This field is date-only by design; never add a time here. This is the most important field for an event — only leave it out if the email states no date at all." },
       { name: "eventStartDatetime", type: "date", required: false, notes: "The event's start date AND clock time, together — e.g. 'February 3, 2027 18:00'. Only populate this when the email states an explicit time; if only a date is given, leave this empty and put the date in eventDate instead. Never fabricate a time." },
       { name: "eventEndDatetime", type: "date", required: false, notes: "the event end date/time exactly as written, when stated" },
+      { name: "description", type: "string", required: false, notes: "A short 1-2 sentence summary of what the event is about, distinct from eventName — e.g. the event's tagline, agenda highlight, or 'what to expect' blurb, when the email states one. Do not fabricate one from the event name alone." },
       { name: "performer", type: "string", required: false },
       { name: "ticketReference", type: "string", required: false },
       { name: "seatDetails", type: "string", required: false },
