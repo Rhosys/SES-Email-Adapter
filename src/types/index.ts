@@ -216,6 +216,9 @@ export interface EventsData {
   eventName: string;
   venueName?: string;
   venueAddress?: string;
+  eventDate?: string;
+  /** UTC instant derived from eventDate at classification time (internal; not in API schema). */
+  eventDateInstant?: string;
   eventStartDatetime?: string;
   /** UTC instant derived from eventStartDatetime at classification time (internal; not in API schema). */
   eventStartDatetimeInstant?: string;

@@ -284,6 +284,7 @@ export const EventsData = z.object({
   eventName: z.string(),
   venueName: z.string().optional(),
   venueAddress: z.string().optional(),
+  eventDate: z.string().optional(),
   eventStartDatetime: z.string().optional(),
   eventEndDatetime: z.string().optional(),
   performer: z.string().optional(),

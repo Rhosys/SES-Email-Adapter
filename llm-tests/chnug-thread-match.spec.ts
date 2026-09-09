@@ -122,11 +122,13 @@ describe("CHNUG #4 — Thread matching investigation", () => {
       expect((output.workflowData as { eventName?: string }).eventName).toBe("CHNUG #4");
       expect((output.workflowData as { eventType?: string }).eventType).toBe("update");
 
-      // The email says "August 26" — date only, no time, no timezone.
-      // After coercion of "August 26" → "2026-08-26" (date-only, no time).
-      const startDatetime = (output.workflowData as { eventStartDatetime?: string }).eventStartDatetime;
-      console.log("LLM extracted eventStartDatetime:", startDatetime);
-      expect(startDatetime).toMatch(/^\d{4}-\d{2}-\d{2}$/); // date-only, no T, no offset
+      // The email says "August 26" — date only, no time, no timezone. A date-only
+      // event goes in eventDate (date-only field), not eventStartDatetime (which is
+      // reserved for date+time). After coercion "August 26" → "2026-08-26".
+      const wd0 = output.workflowData as { eventDate?: string; eventStartDatetime?: string };
+      const eventDateValue = wd0.eventDate ?? wd0.eventStartDatetime;
+      console.log("LLM extracted eventDate/eventStartDatetime:", eventDateValue);
+      expect(eventDateValue).toMatch(/^\d{4}-\d{2}-\d{2}$/); // date-only, no T, no offset
 
       // Fields not present in the email should be null/undefined (not "not specified")
       // Note: LLM may still extract venueName from email context — assert only fields

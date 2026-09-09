@@ -329,11 +329,14 @@ describe("Signal Classifier — LLM integration tests", () => {
       expect(result.isOk()).toBe(true);
       const output = result._unsafeUnwrap();
       expect(output.workflow).toBe("events");
-      const data = output.workflowData as { eventName?: string; eventStartDatetime?: string };
+      const data = output.workflowData as { eventName?: string; eventStartDatetime?: string; eventDate?: string };
       expect(data.eventName).toBeTruthy();
-      // The start date is stated repeatedly (Feb 3rd, 2027) — it must be extracted, not dropped.
-      expect(data.eventStartDatetime).toBeTruthy();
-      expect(data.eventStartDatetime).toMatch(/2027/);
+      // The date is stated repeatedly (Feb 3rd, 2027) and must be extracted, not dropped.
+      // A save-the-date has no clock time, so the model puts it in eventDate (date-only);
+      // if a time were present it would go in eventStartDatetime. Either satisfies "a date".
+      const eventDateValue = data.eventStartDatetime ?? data.eventDate;
+      expect(eventDateValue).toBeTruthy();
+      expect(eventDateValue).toMatch(/2027/);
       assertCommonOutput(output);
     });
 

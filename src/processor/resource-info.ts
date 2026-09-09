@@ -70,8 +70,12 @@ export function deriveResourceInfo(
     case "events": {
       const d = workflowData as EventsData;
       const key = d.ticketReference ?? d.eventName;
-      if (!d.eventStartDatetime || !d.eventStartDatetimeInstant || !key) return null;
-      return { expectedResolutionDate: d.eventStartDatetimeInstant, displayDate: d.eventStartDatetime, resourceKey: key, assets: [] };
+      // Prefer the precise start datetime; fall back to the date-only eventDate. A
+      // save-the-date with no time still yields a resource via eventDate.
+      const display = d.eventStartDatetime ?? d.eventDate;
+      const instant = d.eventStartDatetime ? d.eventStartDatetimeInstant : d.eventDateInstant;
+      if (!display || !instant || !key) return null;
+      return { expectedResolutionDate: instant, displayDate: display, resourceKey: key, assets: [] };
     }
 
     default:

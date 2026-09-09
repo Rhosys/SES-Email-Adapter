@@ -171,6 +171,29 @@ describe("deriveResourceInfo", () => {
         workflow: "events", eventType: "reminder", eventName: "Concert", eventStartDatetime: "not-a-date",
       })).toBeNull();
     });
+
+    it("falls back to eventDate (date-only) when eventStartDatetime is absent — save-the-date", () => {
+      const info = deriveResourceInfo("events", {
+        workflow: "events", eventType: "save_the_date", eventName: "Red Hat Summit Zurich",
+        eventDate: "2027-02-03", eventDateInstant: "2027-02-02T23:00:00.000Z",
+      });
+      expect(info).toEqual({ expectedResolutionDate: "2027-02-02T23:00:00.000Z", displayDate: "2027-02-03", resourceKey: "Red Hat Summit Zurich", assets: [] });
+    });
+
+    it("prefers eventStartDatetime over eventDate when both are present", () => {
+      const info = deriveResourceInfo("events", {
+        workflow: "events", eventType: "ticket_confirmation", eventName: "Concert", ticketReference: "TIX-9",
+        eventDate: "2027-02-03", eventDateInstant: "2027-02-02T23:00:00.000Z",
+        eventStartDatetime: "2027-02-03T20:00", eventStartDatetimeInstant: "2027-02-03T19:00:00.000Z",
+      });
+      expect(info).toEqual({ expectedResolutionDate: "2027-02-03T19:00:00.000Z", displayDate: "2027-02-03T20:00", resourceKey: "TIX-9", assets: [] });
+    });
+
+    it("returns null when only eventDate is present but its instant sibling is missing", () => {
+      expect(deriveResourceInfo("events", {
+        workflow: "events", eventType: "save_the_date", eventName: "Concert", eventDate: "not-a-date",
+      })).toBeNull();
+    });
   });
 
   describe("resolution date is the precomputed instant sibling (passthrough, no reparse)", () => {
