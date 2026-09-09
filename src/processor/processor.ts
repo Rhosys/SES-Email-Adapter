@@ -2209,8 +2209,9 @@ function buildSignal(opts: {
     if (typeof value !== "string") continue;
     const existing = classifiedUrls.get(value);
     if (existing) {
-      logger?.track(`Link overlap: "${value}" already in ${existing}, also claimed by workflowData.${field}`, {
+      logger?.warn(`Link overlap: URL already in ${existing}, also claimed by workflowData.${field}`, {
         code: "processor.link_overlap",
+        levelThreshold: 2,
         url: value,
         existingBucket: existing,
         duplicateBucket: `workflowData.${field}`,
@@ -2227,8 +2228,9 @@ function buildSignal(opts: {
   for (const action of classification.actions) {
     const existing = classifiedUrls.get(action.url);
     if (existing) {
-      logger?.track(`Link overlap: "${action.url}" already in ${existing}, stripped from actions`, {
+      logger?.warn(`Link overlap: URL already in ${existing}, stripped from actions`, {
         code: "processor.link_overlap",
+        levelThreshold: 2,
         url: action.url,
         existingBucket: existing,
         duplicateBucket: "actions",

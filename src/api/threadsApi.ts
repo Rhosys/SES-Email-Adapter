@@ -334,8 +334,9 @@ export class ThreadsApi {
       // snapshots are dropped; the winner carries derived cancelledAt/previousValues.
       const collapse = collapseCalendarSignals(calendarEventSignals);
       for (const orphan of collapse.orphans) {
-        logger.track("Calendar update/cancellation has no prior invite in the loaded thread signals; returning best-effort card without a previous-values diff.", {
+        logger.warn("Calendar update/cancellation has no prior invite in the loaded thread signals; returning best-effort card without a previous-values diff.", {
           code: "api.thread.calendar_collapse_orphan",
+          levelThreshold: 2,
           accountId, threadId: thread.id, ...orphan,
         });
       }
