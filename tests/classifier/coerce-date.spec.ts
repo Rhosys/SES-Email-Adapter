@@ -106,17 +106,35 @@ describe("coerceDate", () => {
   // Slash-separated rejection
   // ---------------------------------------------------------------------------
 
-  describe("slash-separated numeric dates → null", () => {
-    it("rejects dd/MM/yyyy", () => {
-      expect(coerceDate("15/03/2025", RECEIVED_AT)).toBeNull();
+  describe("slash-separated numeric dates → disambiguated by value or setting", () => {
+    // A component > 12 must be the day — unambiguous regardless of the setting.
+    it("parses dd/MM/yyyy when first component > 12 (day-first)", () => {
+      expect(coerceDate("15/03/2025", RECEIVED_AT)).toBe("2025-03-15");
     });
 
-    it("rejects MM/dd/yyyy", () => {
-      expect(coerceDate("03/15/2025", RECEIVED_AT)).toBeNull();
+    it("parses MM/dd/yyyy when second component > 12 (month-first)", () => {
+      expect(coerceDate("03/15/2025", RECEIVED_AT)).toBe("2025-03-15");
     });
 
-    it("rejects d/M/yy", () => {
+    // Both components ≤ 12 — genuinely ambiguous, governed by ambiguousDateFormat.
+    it("defaults to skip (null) for ambiguous d/M/yy", () => {
       expect(coerceDate("3/5/25", RECEIVED_AT)).toBeNull();
+    });
+
+    it("month_then_day reads ambiguous 03/05/2025 as March 5", () => {
+      expect(coerceDate("03/05/2025", RECEIVED_AT, [], "month_then_day")).toBe("2025-03-05");
+    });
+
+    it("day_then_month reads ambiguous 03/05/2025 as May 3", () => {
+      expect(coerceDate("03/05/2025", RECEIVED_AT, [], "day_then_month")).toBe("2025-05-03");
+    });
+
+    it("preserves a trailing time after a pipe separator", () => {
+      expect(coerceDate("03/02/2027 | 18:30", RECEIVED_AT, [], "day_then_month")).toBe("2027-02-03T18:30");
+    });
+
+    it("rejects when both components > 12", () => {
+      expect(coerceDate("15/16/2025", RECEIVED_AT, [], "month_then_day")).toBeNull();
     });
   });
 
@@ -318,8 +336,8 @@ describe("coerceDate — noise stripping safety", () => {
     expect(coerceDate("15.03.2025", RECEIVED_AT)).toBe("2025-03-15");
   });
 
-  it("slash dates are still rejected", () => {
-    expect(coerceDate("15/03/2025", RECEIVED_AT)).toBeNull();
+  it("ambiguous slash dates default to skip (null)", () => {
+    expect(coerceDate("05/03/2025", RECEIVED_AT)).toBeNull();
   });
 });
 

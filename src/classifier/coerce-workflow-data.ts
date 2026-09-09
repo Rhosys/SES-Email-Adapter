@@ -2,6 +2,7 @@ import { DateTime } from "luxon";
 
 import type { Logger } from "../logger.js";
 import { CLASSIFIER_WORKFLOW_REGISTRY } from "../types/workflow-registry.js";
+import type { AmbiguousDateFormat } from "../types/index.js";
 
 /**
  * Coerces raw LLM workflowData fields to their declared types.
@@ -108,6 +109,7 @@ export function coerceWorkflowData(
   ctx: CoercionContext,
   receivedAt: string,
   localeHints: string[] = [],
+  ambiguousDateFormat: AmbiguousDateFormat = "skip",
 ): Record<string, unknown> {
   const result = { ...workflowData };
   const fields = WORKFLOW_FIELDS.get(workflow);
@@ -206,14 +208,25 @@ export function coerceWorkflowData(
       }
 
       case "date": {
-        const coerced = coerceDate(raw, receivedAt, localeHints);
+        const coerced = coerceDate(raw, receivedAt, localeHints, ambiguousDateFormat);
         if (coerced === null && typeof raw === "string" && raw.trim() !== "") {
-          logger.track(`Classifier returned unparseable date value "${raw}" — nullified.`, {
-            code: "classifier.date_parse_failed",
-            field: field.name,
-            value: raw,
-            ...ctx,
-          });
+          if (isAmbiguousSlashSkip(raw, ambiguousDateFormat)) {
+            // Expected policy skip — the date is a valid slash format but its
+            // month/day order is ambiguous and the account opted to skip. Omit the
+            // raw date: the value itself is not the problem, the ambiguity is.
+            logger.warn("Classifier returned an ambiguous slash date format — skipped per account setting.", {
+              code: "classifier.date_ambiguous_skipped",
+              field: field.name,
+              ...ctx,
+            });
+          } else {
+            logger.track(`Classifier returned unparseable date value "${raw}" — nullified.`, {
+              code: "classifier.date_parse_failed",
+              field: field.name,
+              value: raw,
+              ...ctx,
+            });
+          }
         }
         result[field.name] = coerced;
         break;
@@ -309,6 +322,104 @@ const TIME_SUFFIXES = ["", " HH:mm", " h:mm a", " 'at' HH:mm", " 'at' h:mm a"];
 
 /** Pattern to detect slash-separated numeric dates (e.g. 01/02/2025, 1/2/25). */
 const SLASH_DATE_PATTERN = /\d+\/\d+/;
+
+/** Captures the two numeric components and optional year of a slash date. */
+const SLASH_DATE_COMPONENTS = /(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/;
+
+/**
+ * True when a value was nullified specifically because it is a slash date whose
+ * component order is genuinely ambiguous (both ≤ 12) and the account setting is
+ * `skip`. Lets the caller downgrade the log to a WARN without the raw date — this
+ * is an expected policy skip, not a parse failure. A slash date with a component
+ * > 12 is unambiguous and would have parsed, so it is never an ambiguous skip.
+ */
+export function isAmbiguousSlashSkip(value: unknown, ambiguousDateFormat: AmbiguousDateFormat): boolean {
+  if (ambiguousDateFormat !== "skip") return false;
+  if (typeof value !== "string") return false;
+  const match = value.trim().match(SLASH_DATE_COMPONENTS);
+  if (!match) return false;
+  const first = Number(match[1]);
+  const second = Number(match[2]);
+  return first >= 1 && first <= 12 && second >= 1 && second <= 12;
+}
+
+/** Captures an optional clock time (with optional meridiem) anywhere in the string. */
+const SLASH_DATE_TIME = /(\d{1,2}):(\d{2})\s*([ap])\.?\s*m\.?/i;
+const SLASH_DATE_TIME_24H = /(\d{1,2}):(\d{2})/;
+
+/**
+ * Parses a slash-separated numeric date, disambiguating month/day order.
+ *
+ * Disambiguation:
+ * - If the first component > 12, it must be the day → day_then_month order.
+ * - Else if the second component > 12, it must be the day → month_then_day order.
+ * - Else both are ≤ 12 (genuinely ambiguous) → use `ambiguousDateFormat`:
+ *   month_then_day → first is month; day_then_month → first is day; skip → null.
+ *
+ * A two-digit year is interpreted via luxon's pivot (fromObject with a 4-digit
+ * year is unambiguous; two-digit years are expanded to 20xx by prefixing). A
+ * missing year resolves to the next future occurrence relative to receivedAt.
+ * An optional trailing time (after any separator, including "|") is preserved.
+ */
+function coerceSlashDate(
+  input: string,
+  receivedAt: DateTime,
+  ambiguousDateFormat: AmbiguousDateFormat,
+): string | null {
+  const dateMatch = input.match(SLASH_DATE_COMPONENTS);
+  if (!dateMatch) return null;
+
+  const first = Number(dateMatch[1]);
+  const second = Number(dateMatch[2]);
+  const yearRaw = dateMatch[3];
+
+  let month: number;
+  let day: number;
+  if (first > 12 && second <= 12) {
+    day = first; month = second;
+  } else if (second > 12 && first <= 12) {
+    month = first; day = second;
+  } else if (first > 12 && second > 12) {
+    return null; // Neither can be a month — not a real date.
+  } else {
+    // Ambiguous — both ≤ 12.
+    if (ambiguousDateFormat === "skip") return null;
+    if (ambiguousDateFormat === "month_then_day") { month = first; day = second; }
+    else { day = first; month = second; }
+  }
+
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+
+  // Optional time — prefer meridiem form, fall back to bare 24h. Search the whole
+  // string so separators like "03/02/2027 | 18:30" don't need special handling.
+  let hour: number | null = null;
+  let minute = 0;
+  const meridiem = input.match(SLASH_DATE_TIME);
+  const bare = input.match(SLASH_DATE_TIME_24H);
+  if (meridiem) {
+    hour = Number(meridiem[1]) % 12;
+    if (meridiem[3]!.toLowerCase() === "p") hour += 12;
+    minute = Number(meridiem[2]);
+  } else if (bare) {
+    hour = Number(bare[1]);
+    minute = Number(bare[2]);
+  }
+
+  const hasTime = hour !== null;
+
+  let dt: DateTime;
+  if (yearRaw !== undefined) {
+    const year = yearRaw.length === 2 ? 2000 + Number(yearRaw) : Number(yearRaw);
+    dt = DateTime.fromObject({ year, month, day, ...(hasTime ? { hour: hour!, minute } : {}) });
+  } else {
+    const resolved = resolveYearFree(month, day, receivedAt);
+    dt = hasTime ? resolved.set({ hour: hour!, minute }) : resolved;
+  }
+
+  if (!dt.isValid) return null;
+  if (hasTime) return `${dt.toFormat("yyyy-MM-dd")}T${dt.toFormat("HH:mm")}`;
+  return dt.toFormat("yyyy-MM-dd");
+}
 
 /**
  * Resolves a year-free date to the next occurrence strictly after receivedAt.
@@ -422,22 +533,34 @@ function reorderTimeFirst(input: string, localeHints: string[]): string {
  * 3. Locale-aware fallback using localeHints (Content-Language, html lang, classifier-detected)
  * 4. null on failure
  *
- * Slash-separated numeric dates are rejected as ambiguous.
+ * Slash-separated numeric dates ("03/02/2027") are disambiguated by value where
+ * possible (a component > 12 must be the day); when both components are ≤ 12 the
+ * order is genuinely ambiguous and the account's `ambiguousDateFormat` setting
+ * decides (month_then_day / day_then_month / skip).
  *
  * Output format:
  * - date+time+offset → "YYYY-MM-DDTHH:mm±HH:mm"
  * - date+time, no offset → "YYYY-MM-DDTHH:mm"
  * - date only → "YYYY-MM-DD"
  */
-export function coerceDate(value: unknown, receivedAt: string, localeHints: string[] = []): string | null {
+export function coerceDate(
+  value: unknown,
+  receivedAt: string,
+  localeHints: string[] = [],
+  ambiguousDateFormat: AmbiguousDateFormat = "skip",
+): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (trimmed === "") return null;
 
-  // Reject slash-separated numeric dates (ambiguous dd/MM vs MM/dd)
-  if (SLASH_DATE_PATTERN.test(trimmed)) return null;
-
   const receivedAtDt = DateTime.fromISO(receivedAt, { zone: "utc" });
+
+  // Slash-separated numeric dates are ambiguous (dd/MM vs MM/dd). Disambiguate by
+  // value, else fall back to the account setting. Handled before the format loops
+  // because ISO/word-based formats never contain slashes.
+  if (SLASH_DATE_PATTERN.test(trimmed)) {
+    return coerceSlashDate(trimmed, receivedAtDt, ambiguousDateFormat);
+  }
 
   // 1. Try ISO 8601
   const iso = DateTime.fromISO(trimmed, { setZone: true });

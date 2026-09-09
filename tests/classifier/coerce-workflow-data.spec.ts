@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { coerceWorkflowData, coerceNumericToString, coerceBoolean, coerceString } from "../../src/classifier/coerce-workflow-data.js";
+import { coerceWorkflowData, coerceNumericToString, coerceBoolean, coerceString, isAmbiguousSlashSkip } from "../../src/classifier/coerce-workflow-data.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
@@ -460,6 +460,111 @@ describe("coerceWorkflowData", () => {
       };
       const result = coerceWorkflowData(data, "auth", logger, { ...ctx, workflow: "auth" }, receivedAt);
       expect(result.expiresInMinutes).toBe("10");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Date fields — slash-date disambiguation + logging branch
+  // -------------------------------------------------------------------------
+
+  describe("date fields — slash-date logging branch", () => {
+    const travelCtx = { ...ctx, workflow: "travel" };
+    const base = { workflow: "travel", travelType: "flight", provider: "Swiss" };
+
+    it("parses unambiguous slash date (component > 12) with no log", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "15/03/2025" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBe("2025-03-15");
+      expect(logger.calls).toHaveLength(0);
+    });
+
+    it("ambiguous slash date under skip → WARN without the raw date, value nullified", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "03/02/2027 | 18:30" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBeNull();
+
+      const warn = logger.calls.find(c => c.method === "warn");
+      expect(warn).toBeDefined();
+      expect(warn!.context).toEqual(expect.objectContaining({
+        code: "classifier.date_ambiguous_skipped",
+        field: "departureDate",
+      }));
+      // The raw ambiguous date must not leak into the message or context.
+      expect(warn!.message).not.toContain("03/02/2027");
+      expect(warn!.context).not.toHaveProperty("value");
+      // And it must not be logged as a TRACK parse failure.
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("ambiguous slash date under month_then_day → parses, no log", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "03/02/2027" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "month_then_day");
+      expect(result.departureDate).toBe("2027-03-02");
+      expect(logger.calls).toHaveLength(0);
+    });
+
+    it("ambiguous slash date under day_then_month → parses, no log", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "03/02/2027" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "day_then_month");
+      expect(result.departureDate).toBe("2027-02-03");
+      expect(logger.calls).toHaveLength(0);
+    });
+
+    it("genuinely unparseable date → TRACK with the raw value (not a WARN)", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "not a date at all" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBeNull();
+
+      const track = logger.calls.find(c => c.method === "track");
+      expect(track).toBeDefined();
+      expect(track!.context).toEqual(expect.objectContaining({
+        code: "classifier.date_parse_failed",
+        field: "departureDate",
+        value: "not a date at all",
+      }));
+      expect(logger.calls.some(c => c.method === "warn")).toBe(false);
+    });
+
+    it("defaults to skip when ambiguousDateFormat arg is omitted", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "03/02/2027" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt);
+      expect(result.departureDate).toBeNull();
+      expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "classifier.date_ambiguous_skipped")).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // isAmbiguousSlashSkip predicate
+  // -------------------------------------------------------------------------
+
+  describe("isAmbiguousSlashSkip", () => {
+    it.each([
+      { value: "03/02/2027", label: "ambiguous full date" },
+      { value: "3/2/27", label: "ambiguous short date" },
+      { value: "03/02/2027 | 18:30", label: "ambiguous date with time" },
+      { value: "01/12", label: "ambiguous year-free date" },
+    ])("true for $label under skip", ({ value }) => {
+      expect(isAmbiguousSlashSkip(value, "skip")).toBe(true);
+    });
+
+    it.each([
+      { value: "15/03/2027", label: "first component > 12 (unambiguous)" },
+      { value: "03/15/2027", label: "second component > 12 (unambiguous)" },
+      { value: "15/16/2027", label: "both components > 12 (not a date)" },
+      { value: "not a date", label: "non-slash string" },
+      { value: "2025-03-15", label: "ISO date" },
+      { value: 42, label: "non-string" },
+      { value: null, label: "null" },
+    ])("false for $label under skip", ({ value }) => {
+      expect(isAmbiguousSlashSkip(value, "skip")).toBe(false);
+    });
+
+    it("false when setting is month_then_day even for an ambiguous date", () => {
+      expect(isAmbiguousSlashSkip("03/02/2027", "month_then_day")).toBe(false);
+    });
+
+    it("false when setting is day_then_month even for an ambiguous date", () => {
+      expect(isAmbiguousSlashSkip("03/02/2027", "day_then_month")).toBe(false);
     });
   });
 });

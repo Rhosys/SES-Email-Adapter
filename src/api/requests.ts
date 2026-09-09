@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { emailRegex } from "../email/validate-email.js";
-import { WORKFLOWS } from "../types/index.js";
+import { WORKFLOWS, AMBIGUOUS_DATE_FORMATS } from "../types/index.js";
 import { RetentionDuration } from "./schemas.js";
 
 // ---- Shared primitives ----
@@ -250,6 +250,7 @@ const DigestSchema = z.object({
 export const UpdateAccountRequest = z.object({
   name: z.string().optional(),
   timezone: z.string().optional(),
+  ambiguousDateFormat: z.enum(AMBIGUOUS_DATE_FORMATS).optional(),
   retentionDuration: RetentionDuration.optional(),
   digest: DigestSchema,
   filtering: AccountFilteringConfigSchema.optional(),

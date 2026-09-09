@@ -1196,6 +1196,7 @@ export class SignalProcessor {
       signalId: msg.compositeMailMessageId,
       accountId,
       accountTimezone: account?.timezone ?? "UTC",
+      ambiguousDateFormat: account?.ambiguousDateFormat ?? "skip",
     });
 
     let classificationOutput: ClassificationOutput;

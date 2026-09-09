@@ -25,6 +25,7 @@ function toApiAccount(account: DbAccount): Api.Account {
     accountId: account.id,
     name: account.name,
     timezone: account.timezone,
+    ...(account.ambiguousDateFormat ? { ambiguousDateFormat: account.ambiguousDateFormat } : {}),
     ...(account.retentionDuration ? { retentionDuration: account.retentionDuration as Api.Account["retentionDuration"] } : {}),
     ...(account.digest !== undefined ? { digest: account.digest } : {}),
     // Always populated — accounts that never explicitly saved a filtering preference fall back to the
@@ -223,7 +224,7 @@ export class AccountsApi {
         const existing = existingResult.value;
         body.onboarding = { ...existing?.onboarding, ...body.onboarding };
       }
-      const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingTargetId" | "timezone">>);
+      const updateResult = await accountDb.updateAccount(accountId, body as Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingTargetId" | "timezone" | "ambiguousDateFormat">>);
       if (updateResult.isErr()) { logger.error("Failed to update account.", { code: "api.accounts.patch.update_failed", accountId, error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
 
       // Trigger immediate digest only on frequency increase or target change

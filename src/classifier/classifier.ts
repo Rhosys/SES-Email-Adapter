@@ -1,7 +1,7 @@
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 import type { Result } from "neverthrow";
 import { ok, err } from "neverthrow";
-import type { Workflow, WorkflowData, SignalAction } from "../types/index.js";
+import type { Workflow, WorkflowData, SignalAction, AmbiguousDateFormat } from "../types/index.js";
 import { WORKFLOWS } from "../types/index.js";
 import type { Logger } from "../logger.js";
 import { buildSystemPrompt, buildUserMessage, redactUrls } from "./prompt-builder.js";
@@ -32,6 +32,7 @@ export interface ClassificationInput {
   signalId?: string;
   accountId?: string;
   accountTimezone?: string;
+  ambiguousDateFormat?: AmbiguousDateFormat;
 }
 
 /**
@@ -282,7 +283,7 @@ export class SignalClassifier {
       signalId: input.signalId,
       accountId: input.accountId,
       workflow: raw.workflow,
-    }, input.receivedAt, localeHints);
+    }, input.receivedAt, localeHints, input.ambiguousDateFormat);
 
     // Validate currency fields — must be a valid ISO 4217 code (3 uppercase letters)
     if (typeof coercedWorkflowData.currency === "string") {

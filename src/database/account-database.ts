@@ -5,7 +5,7 @@ import { dbError, notFoundError, ok, err } from "../errors.js";
 import type { Result, DbError, NotFoundError } from "../errors.js";
 import { generateId } from "../utils/id.js";
 import type { Account, View, Label, Rule, RuleStatus, Domain, Alias, AliasSender, SenderPolicy, AccountFilteringConfig, UnknownSenderPolicy, ForwardingTarget, EmailTemplate, WsConnection, IUserConfiguration } from "../types/index.js";
-import { USER_CONFIGURATION_DEFAULTS } from "../types/index.js";
+import { USER_CONFIGURATION_DEFAULTS, DEFAULT_AMBIGUOUS_DATE_FORMAT } from "../types/index.js";
 import { DEFAULT_TIMEZONE } from "../api/timezone-allowlist.js";
 import { SYSTEM_RULES } from "../processor/system-rules.js";
 import { SystemAccountDb, isSystemAccount } from "./system-account-db.js";
@@ -70,6 +70,7 @@ export class AccountDatabase {
       if (!res.Item) return ok(null);
       const account = res.Item as Account;
       if (!account.timezone) { account.timezone = DEFAULT_TIMEZONE; }
+      if (!account.ambiguousDateFormat) { account.ambiguousDateFormat = DEFAULT_AMBIGUOUS_DATE_FORMAT; }
       return ok(account);
     } catch (e) {
       return err(dbError(e));
@@ -89,7 +90,7 @@ export class AccountDatabase {
     }
   }
 
-  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingTargetId" | "timezone">>): Promise<Result<Account, DbError>> {
+  async updateAccount(accountId: string, update: Partial<Pick<Account, "name" | "retentionDuration" | "digest" | "filtering" | "onboarding" | "defaultCalendarInviteForwardingTargetId" | "timezone" | "ambiguousDateFormat">>): Promise<Result<Account, DbError>> {
     const now = DateTime.utc().toISO()!;
     const setParts: string[] = ["updatedAt = :now", "gsi1pk = :g1pk", "gsi1sk = :g1sk"];
     const exprValues: Record<string, unknown> = { ":now": now, ":g1pk": "META", ":g1sk": `ACCT#${accountId}` };
@@ -105,6 +106,7 @@ export class AccountDatabase {
     if (update.defaultCalendarInviteForwardingTargetId === null) { removeParts.push("defaultCalendarInviteForwardingTargetId"); }
     else if (update.defaultCalendarInviteForwardingTargetId !== undefined) { setParts.push("defaultCalendarInviteForwardingTargetId = :dcifa"); exprValues[":dcifa"] = update.defaultCalendarInviteForwardingTargetId; }
     if (update.timezone !== undefined) { setParts.push("timezone = :tz"); exprValues[":tz"] = update.timezone; }
+    if (update.ambiguousDateFormat !== undefined) { setParts.push("ambiguousDateFormat = :adf"); exprValues[":adf"] = update.ambiguousDateFormat; }
 
     let updateExpression = `SET ${setParts.join(", ")}`;
     if (removeParts.length > 0) { updateExpression += ` REMOVE ${removeParts.join(", ")}`; }

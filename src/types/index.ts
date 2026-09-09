@@ -851,10 +851,24 @@ export interface AccountOnboarding {
   testEmailReceivedAt?: string;
 }
 
+/**
+ * How to interpret slash-separated numeric dates (e.g. "03/02/2027") when the
+ * classifier extracts one and the component order is genuinely ambiguous (both
+ * values ≤ 12). When one component is > 12 it is unambiguously the day and this
+ * setting is ignored.
+ * - month_then_day: interpret as M/d/yyyy (US-style)
+ * - day_then_month: interpret as d/M/yyyy (rest-of-world)
+ * - skip: do not parse ambiguous slash dates — nullify them (default)
+ */
+export const AMBIGUOUS_DATE_FORMATS = ["month_then_day", "day_then_month", "skip"] as const;
+export type AmbiguousDateFormat = (typeof AMBIGUOUS_DATE_FORMATS)[number];
+export const DEFAULT_AMBIGUOUS_DATE_FORMAT: AmbiguousDateFormat = "skip";
+
 export interface Account {
   id: string;
   name: string;
   timezone: string;
+  ambiguousDateFormat?: AmbiguousDateFormat;
   retentionDuration?: import("../processor/retention.js").RetentionDuration;
   digest?: { frequency: "daily" | "weekly" | "monthly"; forwardingTargetId: string } | null;
   filtering?: AccountFilteringConfig;

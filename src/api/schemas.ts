@@ -1,4 +1,5 @@
 import { z } from "@hono/zod-openapi";
+import { AMBIGUOUS_DATE_FORMATS } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -724,6 +725,7 @@ export const Account = z.object({
   accountId: z.string().readonly(),
   name: z.string(),
   timezone: z.string(),
+  ambiguousDateFormat: z.enum(AMBIGUOUS_DATE_FORMATS).optional(),
   retentionDuration: RetentionDuration.optional(),
   digest: z.object({ frequency: z.enum(["daily", "weekly", "monthly"]), forwardingTargetId: z.string() }).nullable().optional(),
   filtering: AccountFilteringConfig,
