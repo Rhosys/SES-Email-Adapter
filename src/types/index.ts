@@ -150,15 +150,6 @@ export interface ContentData {
   expiryDate?: string;
   /** UTC instant derived from expiryDate at classification time (internal; not in API schema). */
   expiryDateInstant?: string;
-  eventStartDatetime?: string;
-  /** UTC instant derived from eventStartDatetime at classification time (internal; not in API schema). */
-  eventStartDatetimeInstant?: string;
-  eventEndDatetime?: string;
-  /** UTC instant derived from eventEndDatetime at classification time (internal; not in API schema). */
-  eventEndDatetimeInstant?: string;
-  location?: string;
-  organizer?: string;
-  eventUrl?: string;
 }
 
 export interface OnboardingData {
@@ -221,7 +212,7 @@ export interface SupportData {
 
 export interface EventsData {
   workflow: "events";
-  eventType: "ticket_confirmation" | "reminder" | "update" | "cancellation" | "venue_change";
+  eventType: "save_the_date" | "ticket_confirmation" | "reminder" | "update" | "cancellation" | "venue_change";
   eventName: string;
   venueName?: string;
   venueAddress?: string;

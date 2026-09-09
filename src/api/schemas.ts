@@ -230,11 +230,6 @@ export const ContentData = z.object({
   discountCode: z.string().optional(),
   discountAmount: z.string().optional(),
   expiryDate: z.string().optional(),
-  eventStartDatetime: z.string().optional(),
-  eventEndDatetime: z.string().optional(),
-  location: z.string().optional(),
-  organizer: z.string().optional(),
-  eventUrl: z.string().optional(),
 }).openapi("ContentData");
 
 export const NoticeData = z.object({
@@ -285,7 +280,7 @@ export const OnboardingData = z.object({
 
 export const EventsData = z.object({
   workflow: z.literal("events"),
-  eventType: z.enum(["ticket_confirmation", "reminder", "update", "cancellation", "venue_change"]),
+  eventType: z.enum(["save_the_date", "ticket_confirmation", "reminder", "update", "cancellation", "venue_change"]),
   eventName: z.string(),
   venueName: z.string().optional(),
   venueAddress: z.string().optional(),

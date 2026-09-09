@@ -198,25 +198,20 @@ export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
   },
   {
     name: "content",
-    description: "Newsletters, promotions, social digests — read or unsubscribe",
+    description: "Newsletters, promotions, social digests — read or unsubscribe. Use for general marketing and editorial content with no single dated event at its center. If the email is primarily about one specific dated event (a summit, webinar, launch, meetup — even a save-the-date or invitation), classify it as 'events' instead, not here.",
     fields: [
       { name: "contentType", type: "enum", required: true, enumValues: [
         e("newsletter", "recurring editorial or curated content digest"),
         e("promotion", "marketing offer, sale, or discount"),
         e("social_digest", "summary of social media activity or notifications"),
         e("product_update", "changelog, new feature announcement, or release notes"),
-        e("announcement", "one-off company or service announcement"),
+        e("announcement", "one-off company or service announcement that is NOT centered on a specific dated event — a dated event announcement is 'events'"),
       ] },
       { name: "publisher", type: "string", required: true, identity: true },
       { name: "topics", type: "array", required: false, notes: "string[]" },
       { name: "discountCode", type: "string", required: false },
       { name: "discountAmount", type: "string", required: false },
       { name: "expiryDate", type: "date", required: false },
-      { name: "eventStartDatetime", type: "date", required: false, notes: "when the announcement describes a dated event (webinar, launch, session) — the start date/time exactly as written" },
-      { name: "eventEndDatetime", type: "date", required: false, notes: "the event end date/time exactly as written, when stated" },
-      { name: "location", type: "string", required: false, notes: "physical venue or online platform for the event, when stated" },
-      { name: "organizer", type: "string", required: false, notes: "person or team hosting the event, when stated" },
-      { name: "eventUrl", type: "string", required: false, notes: "registration or join link for the event" },
     ],
   },
   {
@@ -331,9 +326,10 @@ export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
   },
   {
     name: "events",
-    description: "Ticketed events: concerts, conferences, sports, theatre — venue + date + seats",
+    description: "A specific dated event the recipient may attend: concerts, conferences, summits, meetups, sports, theatre, webinars, launches. Use this whenever the email is about a single event with a date (and usually a venue) — including save-the-dates, invitations, and announcements that a named event will happen, NOT only confirmed ticket purchases. A ticket or seat is NOT required. Prefer this over 'content' for any email centered on one dated event.",
     fields: [
       { name: "eventType", type: "enum", required: true, enumValues: [
+        e("save_the_date", "advance notice or invitation for a specific dated event, before tickets/registration — includes 'mark your calendar' and 'save the date' announcements"),
         e("ticket_confirmation", "event ticket purchase confirmed"),
         e("reminder", "upcoming event reminder"),
         e("update", "event details changed — time, lineup, or other info"),
