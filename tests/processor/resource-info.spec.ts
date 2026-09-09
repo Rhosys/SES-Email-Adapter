@@ -146,12 +146,12 @@ describe("deriveResourceInfo", () => {
   });
 
   describe("events", () => {
-    it("keys by ticketReference when present", () => {
+    it("keys by ticketReference when present, title passed through from eventName", () => {
       const info = deriveResourceInfo("events", {
         workflow: "events", eventType: "reminder", eventName: "Concert",
         eventStartDatetime: "2024-06-01T20:00:00Z", eventStartDatetimeInstant: "2024-06-01T20:00:00.000Z", ticketReference: "TIX-1",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2024-06-01T20:00:00.000Z", displayDate: "2024-06-01T20:00:00Z", resourceKey: "TIX-1", assets: [] });
+      expect(info).toEqual({ expectedResolutionDate: "2024-06-01T20:00:00.000Z", displayDate: "2024-06-01T20:00:00Z", resourceKey: "TIX-1", assets: [], title: "Concert" });
     });
 
     it("falls back to eventName when ticketReference is absent", () => {
@@ -159,7 +159,15 @@ describe("deriveResourceInfo", () => {
         workflow: "events", eventType: "reminder", eventName: "Concert",
         eventStartDatetime: "2024-06-01T20:00:00Z", eventStartDatetimeInstant: "2024-06-01T20:00:00.000Z",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2024-06-01T20:00:00.000Z", displayDate: "2024-06-01T20:00:00Z", resourceKey: "Concert", assets: [] });
+      expect(info).toEqual({ expectedResolutionDate: "2024-06-01T20:00:00.000Z", displayDate: "2024-06-01T20:00:00Z", resourceKey: "Concert", assets: [], title: "Concert" });
+    });
+
+    it("passes description through when present", () => {
+      const info = deriveResourceInfo("events", {
+        workflow: "events", eventType: "reminder", eventName: "Concert", description: "An evening of live jazz.",
+        eventStartDatetime: "2024-06-01T20:00:00Z", eventStartDatetimeInstant: "2024-06-01T20:00:00.000Z", ticketReference: "TIX-1",
+      });
+      expect(info).toEqual({ expectedResolutionDate: "2024-06-01T20:00:00.000Z", displayDate: "2024-06-01T20:00:00Z", resourceKey: "TIX-1", assets: [], title: "Concert", description: "An evening of live jazz." });
     });
 
     it("returns null when eventStartDatetime is missing", () => {
@@ -177,7 +185,7 @@ describe("deriveResourceInfo", () => {
         workflow: "events", eventType: "save_the_date", eventName: "Red Hat Summit Zurich",
         eventDate: "2027-02-03", eventDateInstant: "2027-02-02T23:00:00.000Z",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2027-02-02T23:00:00.000Z", displayDate: "2027-02-03", resourceKey: "Red Hat Summit Zurich", assets: [] });
+      expect(info).toEqual({ expectedResolutionDate: "2027-02-02T23:00:00.000Z", displayDate: "2027-02-03", resourceKey: "Red Hat Summit Zurich", assets: [], title: "Red Hat Summit Zurich" });
     });
 
     it("prefers eventStartDatetime over eventDate when both are present", () => {
@@ -186,7 +194,7 @@ describe("deriveResourceInfo", () => {
         eventDate: "2027-02-03", eventDateInstant: "2027-02-02T23:00:00.000Z",
         eventStartDatetime: "2027-02-03T20:00", eventStartDatetimeInstant: "2027-02-03T19:00:00.000Z",
       });
-      expect(info).toEqual({ expectedResolutionDate: "2027-02-03T19:00:00.000Z", displayDate: "2027-02-03T20:00", resourceKey: "TIX-9", assets: [] });
+      expect(info).toEqual({ expectedResolutionDate: "2027-02-03T19:00:00.000Z", displayDate: "2027-02-03T20:00", resourceKey: "TIX-9", assets: [], title: "Concert" });
     });
 
     it("returns null when only eventDate is present but its instant sibling is missing", () => {
