@@ -102,7 +102,7 @@ describe("Onboarding email send", () => {
 
     expect(result.isOk()).toBe(true);
     expect((emailService.send as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(expect.objectContaining({
-      to: "user@example.com",
+      to: ["user@example.com"],
       subject: "The Next Step",
       htmlBody: "<html>rendered</html>",
       fromSender: expect.stringContaining("Numaeel"),

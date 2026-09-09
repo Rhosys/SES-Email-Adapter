@@ -13,6 +13,15 @@
 export interface MimeMessageOptions {
   from: string;
   to: string;
+  /** Comma-separated address list, same shape as `to`. Omit when there are no Cc recipients. */
+  cc?: string;
+  /**
+   * Comma-separated address list, same shape as `to`. Present only in the raw MIME handed to a
+   * provider's sendMessage (Gmail/Graph deliver to a Bcc header and strip it from the copy every
+   * other recipient sees) — an SES send must NEVER carry this header; Bcc there goes exclusively
+   * through SendEmailCommand's `Destination.BccAddresses`, outside the message bytes entirely.
+   */
+  bcc?: string;
   subject: string;
   textBody: string;
   /** Rendered HTML counterpart of textBody. When present, the message is built as
@@ -87,7 +96,7 @@ function encodeBody(body: string): string {
 }
 
 /** Headers the builder always emits itself — a caller-supplied duplicate is dropped. */
-const RESERVED_HEADERS = new Set(["from", "to", "subject", "date", "mime-version", "content-type", "content-transfer-encoding"]);
+const RESERVED_HEADERS = new Set(["from", "to", "cc", "bcc", "subject", "date", "mime-version", "content-type", "content-transfer-encoding"]);
 
 /**
  * Builds a complete RFC 5322 message. Body is always UTF-8 base64 so that non-ASCII content
@@ -103,6 +112,8 @@ export function buildMimeMessage(options: MimeMessageOptions): Uint8Array {
   const lines: string[] = [
     `From: ${encodeAddressList(options.from)}`,
     `To: ${encodeAddressList(options.to)}`,
+    ...(options.cc ? [`Cc: ${encodeAddressList(options.cc)}`] : []),
+    ...(options.bcc ? [`Bcc: ${encodeAddressList(options.bcc)}`] : []),
     `Subject: ${encodeUnstructured(options.subject)}`,
     `Date: ${date.toUTCString().replace("GMT", "+0000")}`,
     "MIME-Version: 1.0",

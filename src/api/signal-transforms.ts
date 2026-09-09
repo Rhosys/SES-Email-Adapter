@@ -119,7 +119,7 @@ function toApiEmailSignalData(data: EmailSignalData): Api.InboundEmailSignalData
       from: data.from,
       to: data.to,
       cc: data.cc,
-      bcc: [],
+      bcc: data.bcc,
       ...(data.replyTo ? { replyTo: data.replyTo } : {}),
       subject: data.subject,
       ...(data.htmlBody ? { body: data.htmlBody } : {}),

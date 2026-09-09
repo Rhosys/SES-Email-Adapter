@@ -111,7 +111,7 @@ describe("ReplySenderService.sendReply()", () => {
     (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "msg-123" }));
 
     await handler.sendReply({
-      to: "recipient@example.com",
+      to: ["recipient@example.com"],
       from: "sender@example.com",
       subject: "Original Subject",
       body: "Reply body text",
@@ -121,7 +121,7 @@ describe("ReplySenderService.sendReply()", () => {
     });
 
     expect(emailService.send).toHaveBeenCalledWith({
-      to: "recipient@example.com",
+      to: ["recipient@example.com"],
       fromSender: "sender@example.com",
       subject: "Re: Original Subject",
       textBody: "Reply body text",
@@ -143,7 +143,7 @@ describe("ReplySenderService.sendReply()", () => {
     (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "ses-reply-456" }));
 
     const result = await handler.sendReply({
-      to: "user@test.com",
+      to: ["user@test.com"],
       from: "noreply@test.com",
       subject: "Test",
       body: "Content",
@@ -160,7 +160,7 @@ describe("ReplySenderService.sendReply()", () => {
     (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "ses-reply-456" }));
 
     const result = await handler.sendReply({
-      to: "user@test.com",
+      to: ["user@test.com"],
       from: "noreply@test.com",
       subject: "Test",
       body: "Content",
@@ -179,7 +179,7 @@ describe("ReplySenderService.sendReply()", () => {
     (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "m-md" }));
 
     await handler.sendReply({
-      to: "recipient@example.com",
+      to: ["recipient@example.com"],
       from: "sender@example.com",
       subject: "Original Subject",
       body: "Hello **world**\n\n- one\n- two",
@@ -212,7 +212,7 @@ describe("ReplySenderService tag integration", () => {
       (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "m-1" }));
 
       await handler.sendReply({
-        to: "a@b.com",
+        to: ["a@b.com"],
         from: "c@d.com",
         subject: "Hi",
         body: "Hello",
@@ -232,7 +232,7 @@ describe("ReplySenderService tag integration", () => {
       (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "m-2" }));
 
       await handler.sendReply({
-        to: "a@b.com",
+        to: ["a@b.com"],
         from: "c@d.com",
         subject: "Hi",
         body: "Hello",
@@ -266,7 +266,7 @@ describe("ReplySenderService — routing to an external mailbox", () => {
   }
 
   const REPLY = {
-    to: "recipient@example.com",
+    to: ["recipient@example.com"],
     from: "user@gmail.com",
     subject: "Original",
     body: "Reply body",
@@ -444,7 +444,7 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     const handler = makeSender({ emailService, accountDb, exchangesDb });
 
     const result = await handler.sendReply({
-      to: "recipient@example.com",
+      to: ["recipient@example.com"],
       from: "noreply@platform.email.rhosys.cloud",
       subject: "Original",
       body: "Reply body",
@@ -491,7 +491,7 @@ describe("ReplySenderService — allowFallbackToPlatformSending", () => {
   const MAIL_DOMAIN = process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud";
 
   const REPLY_UNVERIFIED = {
-    to: "recipient@example.com",
+    to: ["recipient@example.com"],
     from: "me@unverified.com",
     subject: "Original",
     body: "Reply body",
@@ -597,7 +597,7 @@ describe("ReplySenderService — reply subject normalization", () => {
     (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "m-1" }));
     const handler = makeSender({ emailService });
 
-    await handler.sendReply({ to: "a@b.com", from: "c@d.com", subject: input, body: "Hello", accountId: "acct-test", allowFallbackToPlatformSending: false });
+    await handler.sendReply({ to: ["a@b.com"], from: "c@d.com", subject: input, body: "Hello", accountId: "acct-test", allowFallbackToPlatformSending: false });
 
     expect((emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0].subject).toBe(expected);
   });
@@ -611,7 +611,7 @@ describe("ReplySenderService — mail-loop guard", () => {
     (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "m-1" }));
     const handler = makeSender({ emailService });
 
-    await handler.sendReply({ to: "a@b.com", from: "c@d.com", subject: "Hi", body: "Hello", accountId: "acct-test", allowFallbackToPlatformSending: false });
+    await handler.sendReply({ to: ["a@b.com"], from: "c@d.com", subject: "Hi", body: "Hello", accountId: "acct-test", allowFallbackToPlatformSending: false });
 
     const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(call.headers).toContainEqual({ Name: "X-Numaeel-Hop-Count", Value: "1" });
@@ -622,7 +622,7 @@ describe("ReplySenderService — mail-loop guard", () => {
     (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "m-1" }));
     const handler = makeSender({ emailService });
 
-    await handler.sendReply({ to: "a@b.com", from: "c@d.com", subject: "Hi", body: "Hello", accountId: "acct-test", hopCount: 41, allowFallbackToPlatformSending: false });
+    await handler.sendReply({ to: ["a@b.com"], from: "c@d.com", subject: "Hi", body: "Hello", accountId: "acct-test", hopCount: 41, allowFallbackToPlatformSending: false });
 
     const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(call.headers).toContainEqual({ Name: "X-Numaeel-Hop-Count", Value: "42" });
@@ -633,7 +633,7 @@ describe("ReplySenderService — mail-loop guard", () => {
     const logger = createMockLogger();
     const handler = makeSender({ emailService, logger });
 
-    const result = await handler.sendReply({ to: "a@b.com", from: "c@d.com", subject: "Hi", body: "Hello", accountId: "acct-test", hopCount: 100, allowFallbackToPlatformSending: false });
+    const result = await handler.sendReply({ to: ["a@b.com"], from: "c@d.com", subject: "Hi", body: "Hello", accountId: "acct-test", hopCount: 100, allowFallbackToPlatformSending: false });
 
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr()).toEqual({ kind: "loop_guard_tripped", hopCount: 101 });
@@ -646,10 +646,10 @@ describe("ReplySenderService — mail-loop guard", () => {
     (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValue(ok({ messageId: "m-1" }));
     const handler = makeSender({ emailService });
 
-    await handler.sendReply({ to: "a@b.com", from: "c@d.com", subject: "Hi", body: "Hello", accountId: "acct-test", allowFallbackToPlatformSending: false });
+    await handler.sendReply({ to: ["a@b.com"], from: "c@d.com", subject: "Hi", body: "Hello", accountId: "acct-test", allowFallbackToPlatformSending: false });
     expect((emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0].headers).not.toContainEqual(expect.objectContaining({ Name: "Auto-Submitted" }));
 
-    await handler.sendReply({ to: "a@b.com", from: "c@d.com", subject: "Hi", body: "Hello", accountId: "acct-test", autoSubmitted: true, allowFallbackToPlatformSending: false });
+    await handler.sendReply({ to: ["a@b.com"], from: "c@d.com", subject: "Hi", body: "Hello", accountId: "acct-test", autoSubmitted: true, allowFallbackToPlatformSending: false });
     expect((emailService.send as ReturnType<typeof vi.fn>).mock.calls[1]![0].headers).toContainEqual({ Name: "Auto-Submitted", Value: "auto-replied" });
   });
 });
@@ -664,7 +664,7 @@ describe("ReplySenderService — permanent SES error", () => {
     (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(err({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400, message: "Email address is not verified", cause: new Error("test") }));
 
     const result = await handler.sendReply({
-      to: "bounce@example.com",
+      to: ["bounce@example.com"],
       from: "sender@example.com",
       subject: "Test",
       body: "Content",

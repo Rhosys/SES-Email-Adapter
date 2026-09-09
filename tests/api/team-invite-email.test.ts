@@ -90,7 +90,7 @@ describe("Team invite email", () => {
 
     const sendCall = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
     expect(sendCall).toBeDefined();
-    expect(sendCall.to).toBe("newuser@example.com");
+    expect(sendCall.to).toEqual(["newuser@example.com"]);
     expect(sendCall.subject).toBe("You've been invited to join Acme Corp on Numaeel");
     expect(sendCall.fromSender).toMatch(/^"Numaeel" <noreply@/);
     expect(sendCall.htmlBody).toBe("<html>team-invite-rendered</html>");

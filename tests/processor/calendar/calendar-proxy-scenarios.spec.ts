@@ -191,7 +191,7 @@ describe("Scenario: calendar invite from approved sender is forwarded to user's 
 
     // Email was sent to the user's real calendar address
     const sendCall = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-    expect(sendCall.to).toBe(FORWARDING_ADDRESS);
+    expect(sendCall.to).toEqual([FORWARDING_ADDRESS]);
 
     // The .ics body contains a proxy UID (not the original)
     const icsBody: string = rawIcsOf(emailService);
@@ -325,7 +325,7 @@ describe("Scenario: UI RSVP sends masked reply to organizer preserving user priv
     const sendCall = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
 
     // Sent TO the organizer (RFC 6047)
-    expect(sendCall.to).toBe(ORGANIZER_EMAIL);
+    expect(sendCall.to).toEqual([ORGANIZER_EMAIL]);
 
     // Sent FROM the alias (privacy preserved)
     expect(sendCall.fromSender).toBe(ALIAS_ADDRESS);
@@ -636,7 +636,7 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
     const emailSend = calendarIForwardingServiceEmailService.sendRaw as ReturnType<typeof vi.fn>;
     expect(emailSend).toHaveBeenCalledOnce();
     const sendArgs = emailSend.mock.calls[0]![0];
-    expect(sendArgs.to).toBe(FORWARDING_ADDRESS);
+    expect(sendArgs.to).toEqual([FORWARDING_ADDRESS]);
   });
 });
 

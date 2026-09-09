@@ -157,7 +157,7 @@ export class ForwardingService implements IForwardingService {
     })
 
     const result = await this.emailService.send({
-      to: target,
+      to: [target],
       subject: "Verify your forwarding address",
       textBody: `Click the link below to verify that you want to receive forwarded emails at ${target}:\n\n${verifyUrl}`,
       htmlBody,
@@ -186,7 +186,7 @@ export class ForwardingService implements IForwardingService {
     const tags = buildOutboundTags("forward", { accountId: context.accountId, signalId: context.signalId, threadId: context.threadId })
 
     const result = await this.emailService.sendRaw({
-      to: toAddress,
+      to: [toAddress],
       rawData,
       accountId: context.accountId,
       tags,
