@@ -13,6 +13,7 @@ import type { EmailServiceError } from "../email/email-service.js"
 import type { Logger } from "../logger.js"
 import type { EmailService } from "../email/email-service.js"
 import type { AccountDatabase } from "../database/account-database.js"
+import { platformFromAddress } from "../types/index.js"
 import type { ThreadDatabase } from "../database/thread-database.js"
 import { shouldDispatchDigest, buildDigestSubject } from "./digest-frequency-filter.js"
 import type { DigestFrequency } from "./digest-frequency-filter.js"
@@ -171,7 +172,7 @@ export class DigestWorker {
       htmlBody,
       headers,
       tags,
-      fromSender: `"Numaeel Digest" <digest@${fromDomain}>`,
+      fromSender: platformFromAddress("digest", fromDomain),
       accountId: sendAccountId,
     })
 

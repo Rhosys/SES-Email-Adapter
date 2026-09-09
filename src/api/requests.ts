@@ -21,6 +21,10 @@ const trimmedEmail = z.string()
 
 // Lowercases + trims a domain string (no email-format validation).
 const lowerDomain = z.string().transform(s => s.toLowerCase().trim());
+
+// Sender display name for an alias, e.g. "Support Team". Control characters (including CR/LF,
+// which could inject extra headers) are rejected; everything else is left permissive.
+const displayName = z.string().max(255).regex(/^[^\x00-\x1F\x7F]*$/, "Name must not contain control characters");
 const ThreadStatus = z.enum(["active", "archived", "deleted", "report_violation"]);
 const ResourceStatus = z.enum(["active", "complete"]);
 const ThreadUrgency = z.enum(["critical", "high", "normal", "low", "silent"]);
@@ -183,6 +187,7 @@ export type CreateDomainRequest = z.infer<typeof CreateDomainRequest>;
 
 export const CreateAliasRequest = z.object({
   address: lowerEmail,
+  name: displayName.optional(),
   unknownSenderPolicy: UnknownSenderPolicy.optional(),
   createdForOrigin: z.string().optional(),
 });
@@ -190,6 +195,7 @@ export type CreateAliasRequest = z.infer<typeof CreateAliasRequest>;
 
 export const UpdateAliasRequest = z.object({
   newAddress: lowerEmail.optional(),
+  name: displayName.optional(),
   unknownSenderPolicy: UnknownSenderPolicy.optional(),
   createdForOrigin: z.string().optional(),
 });

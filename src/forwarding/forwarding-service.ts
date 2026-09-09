@@ -8,6 +8,7 @@ import type { Result } from "neverthrow"
 import type { DbError, TransientSesError } from "../errors.js"
 import type { EmailServiceError } from "../email/email-service.js"
 import type { ForwardingTarget, Signal, Thread } from "../types/index.js"
+import { platformFromAddress } from "../types/index.js"
 import type { EmailService } from "../email/email-service.js"
 import type { IEmailSignalStore } from "../database/email-signal-store.js"
 import type { Logger } from "../logger.js"
@@ -162,7 +163,7 @@ export class ForwardingService implements IForwardingService {
       textBody: `Click the link below to verify that you want to receive forwarded emails at ${target}:\n\n${verifyUrl}`,
       htmlBody,
       tags,
-      fromSender: `"Numaeel" <noreply@${this.mailDomain}>`,
+      fromSender: platformFromAddress("notifications", this.mailDomain),
       accountId: this.emailService.platformTenant,
     })
 

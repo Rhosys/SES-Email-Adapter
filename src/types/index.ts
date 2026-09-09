@@ -319,6 +319,8 @@ export interface Alias {
   domain: string;               // Full domain, e.g. "acme.com"
   aliasName: string;            // Local part before @, e.g. "me"
   unknownSenderPolicy: UnknownSenderPolicy;
+  // Display name used as the sender name when sending mail from this alias, e.g. "Alice Smith"
+  name?: string;
   // eTLD+1 of the site this alias was created for (set by the extension on alias generation)
   createdForOrigin?: string;
   // Set when this alias is backed by an external mailbox (Gmail/Outlook/IMAP/JMAP). Outbound
@@ -327,6 +329,18 @@ export interface Alias {
   emxId?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// Platform-level senders: not stored in the DB (not user-owned aliases), just hardcoded
+// local-part + display name pairs used to build a "Name <local@MAIL_DOMAIN>" From address.
+export const PLATFORM_ALIASES = {
+  notifications: { localPart: "noreply", name: "Numaeel" },
+  digest: { localPart: "digest", name: "Numaeel Digest" },
+} as const;
+
+export function platformFromAddress(key: keyof typeof PLATFORM_ALIASES, domain: string): string {
+  const { localPart, name } = PLATFORM_ALIASES[key];
+  return `"${name}" <${localPart}@${domain}>`;
 }
 
 // Approved/blocked sender domain per alias — stored as individual DynamoDB items

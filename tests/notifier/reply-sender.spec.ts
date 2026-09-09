@@ -515,7 +515,7 @@ describe("ReplySenderService — allowFallbackToPlatformSending", () => {
 
     expect(result.isOk()).toBe(true);
     const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-    expect(call.fromSender).toBe(`noreply@${MAIL_DOMAIN}`);
+    expect(call.fromSender).toBe(`"Numaeel" <noreply@${MAIL_DOMAIN}>`);
     expect(call.accountId).toBe("platform-tenant");
   });
 
@@ -541,6 +541,18 @@ describe("ReplySenderService — allowFallbackToPlatformSending", () => {
     const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(call.fromSender).toBe("user@gmail.com");
     expect(call.accountId).toBe("acct-test");
+  });
+
+  it("decorates the From with the alias's display name when one is set", async () => {
+    const emailService = makeEmailService();
+    (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "ses-1" }));
+    const handler = makeSender({ emailService, accountDb: makeAccountDb({ alias: { ...aliasWithoutExchange(), name: "Support Team" }, senderSetupComplete: true }) });
+
+    const result = await handler.sendReply({ ...REPLY_UNVERIFIED, from: "user@gmail.com", allowFallbackToPlatformSending: false });
+
+    expect(result.isOk()).toBe(true);
+    const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(call.fromSender).toBe(`"Support Team" <user@gmail.com>`);
   });
 
   it("errors (never degrades) when an exchange-backed alias cannot send, regardless of the flag", async () => {
@@ -576,7 +588,7 @@ describe("ReplySenderService — allowFallbackToPlatformSending", () => {
 
     expect(result.isOk()).toBe(true);
     const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-    expect(call.fromSender).toBe(`noreply@${MAIL_DOMAIN}`);
+    expect(call.fromSender).toBe(`"Numaeel" <noreply@${MAIL_DOMAIN}>`);
     expect(call.accountId).toBe("platform-tenant");
   });
 });
