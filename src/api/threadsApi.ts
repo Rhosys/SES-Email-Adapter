@@ -4,6 +4,7 @@ import { DateTime } from "luxon";
 import { generateId } from "../utils/id.js";
 import { getDomain } from "tldts";
 import { validateRecipientMx } from "../dns/mx-validator.js";
+import { isValidEmail } from "../email/validate-email.js";
 import { computeUndoWindowSeconds } from "./undo-window.js";
 import { zParse } from "./validate.js";
 import { toApiThread, toApiSignal, withResolvedContentUrls } from "./signal-transforms.js";
@@ -510,6 +511,16 @@ export class ThreadsApi {
       if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
       if (signal.threadId !== thread.id) return err(c, 400, "Signal does not belong to this thread", "SIGNAL_THREAD_MISMATCH");
       if (signal.status !== "draft") return err(c, 400, "Only draft signals can be sent", "SIGNAL_NOT_DRAFT");
+
+      // Re-validate address format at the point the draft actually goes out — schema validation
+      // at create/replace/patch time covers the common path, but this catches drafts written
+      // before that validation existed and any other way an address could still be malformed.
+      // Same syntax check SES itself would apply ("Illegal address"), just synchronous.
+      const invalidAddresses = [signal.data.from.address, ...signal.data.to.map(r => r.address)]
+        .filter(address => !isValidEmail(address, logger));
+      if (invalidAddresses.length > 0) {
+        return err(c, 400, "Invalid recipient or sender address", "INVALID_EMAIL", { invalidAddresses });
+      }
 
       const mxResult = await validateRecipientMx(signal.data.to);
       if (mxResult.isErr()) {
