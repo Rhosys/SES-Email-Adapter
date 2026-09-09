@@ -314,6 +314,29 @@ describe("Signal Classifier — LLM integration tests", () => {
       assertCommonOutput(output);
     });
 
+    it("events — save-the-date summit announcement (no ticket) must be events with a date, not content", async () => {
+      // Regression: this Red Hat Summit save-the-date was classified as content/announcement
+      // with a null eventStartDatetime, so no resource was created. A dated event without a
+      // ticket is still an event — it must classify as events with the start date extracted.
+      const input = makeInput({
+        from: "engage@go.explore.redhat.com",
+        to: ["redhat@vortex.link"],
+        subject: "Mark your calendar: Red Hat Summit: Connect Zurich returns on Feb 3rd, 2027!",
+        body: "Red Hat Summit: Connect 2027 Zurich\n\nZurich, Switzerland\nFebruary 3, 2027\n\nHi Warren,\n\nTo start next year with the right focus, please save the date for our main gathering of the year: Red Hat Summit: Connect Zurich is returning on February 3rd, 2027.\n\nThis is a day dedicated entirely to learning by doing.\n\nRed Hat Summit: Connect Zurich 2027\nDate: February 3rd, 2027\nLocation: The Hall, Dübendorf, Zurich\n\nMore details about the agenda will be shared soon. Keep an eye out for updates!\n\nWarm regards,\nTeam Red Hat Switzerland",
+        headers: { "authentication-results": "spf=pass dkim=pass dmarc=pass", "list-unsubscribe": "<https://click.explore.redhat.com/unsub>" },
+      });
+      const result = await classifier.classify(input);
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("events");
+      const data = output.workflowData as { eventName?: string; eventStartDatetime?: string };
+      expect(data.eventName).toBeTruthy();
+      // The start date is stated repeatedly (Feb 3rd, 2027) — it must be extracted, not dropped.
+      expect(data.eventStartDatetime).toBeTruthy();
+      expect(data.eventStartDatetime).toMatch(/2027/);
+      assertCommonOutput(output);
+    });
+
     it("test — self-sent test email", async () => {
       const input = makeInput({
         from: "warren@mydomain.com",
