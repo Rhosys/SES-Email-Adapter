@@ -567,4 +567,64 @@ describe("coerceWorkflowData", () => {
       expect(isAmbiguousSlashSkip("03/02/2027", "day_then_month")).toBe(false);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Instant siblings — the display -> instant computation now happens here,
+  // once, at coercion time, storing a "<field>Instant" sibling next to the
+  // display string. deriveResourceInfo reads this instead of reparsing.
+  // -------------------------------------------------------------------------
+
+  describe("instant siblings", () => {
+    const eventsCtx = { ...ctx, workflow: "events" };
+    const eventsBase = { workflow: "events", eventType: "reminder", eventName: "Concert" };
+
+    it("stores an instant sibling next to a date field, applying account tz to an offset-free display", () => {
+      const data: Record<string, unknown> = { ...eventsBase, eventStartDatetime: "2027-02-03T18:00" };
+      const result = coerceWorkflowData(data, "events", logger, eventsCtx, receivedAt, [], "skip", "Europe/Zurich");
+      // Feb is CET (+01:00): 18:00 Zurich -> 17:00 UTC.
+      expect(result.eventStartDatetime).toBe("2027-02-03T18:00");
+      expect(result.eventStartDatetimeInstant).toBe("2027-02-03T17:00:00.000Z");
+    });
+
+    it("ignores account tz when the display already carries an offset", () => {
+      const data: Record<string, unknown> = { ...eventsBase, eventStartDatetime: "2027-02-03T18:00:00+02:00" };
+      const result = coerceWorkflowData(data, "events", logger, eventsCtx, receivedAt, [], "skip", "America/New_York");
+      expect(result.eventStartDatetime).toBe("2027-02-03T18:00+02:00");
+      expect(result.eventStartDatetimeInstant).toBe("2027-02-03T16:00:00.000Z");
+    });
+
+    it("date-only display -> midnight in account tz", () => {
+      const data: Record<string, unknown> = { ...eventsBase, eventStartDatetime: "2027-02-03" };
+      const result = coerceWorkflowData(data, "events", logger, eventsCtx, receivedAt, [], "skip", "Europe/Zurich");
+      // Midnight Feb 3 Zurich (CET, +01:00) -> 23:00 Feb 2 UTC.
+      expect(result.eventStartDatetime).toBe("2027-02-03");
+      expect(result.eventStartDatetimeInstant).toBe("2027-02-02T23:00:00.000Z");
+    });
+
+    it("defaults to Europe/London when no account tz is supplied", () => {
+      const data: Record<string, unknown> = { ...eventsBase, eventStartDatetime: "2027-01-15T09:00" };
+      const result = coerceWorkflowData(data, "events", logger, eventsCtx, receivedAt);
+      // January in London is GMT: 09:00 -> 09:00 UTC.
+      expect(result.eventStartDatetimeInstant).toBe("2027-01-15T09:00:00.000Z");
+    });
+
+    it("stores a null instant sibling when the date is unparseable", () => {
+      const data: Record<string, unknown> = { ...eventsBase, eventStartDatetime: "not-a-date" };
+      const result = coerceWorkflowData(data, "events", logger, eventsCtx, receivedAt, [], "skip", "Europe/Zurich");
+      expect(result.eventStartDatetime).toBeNull();
+      expect(result.eventStartDatetimeInstant).toBeNull();
+    });
+
+    it("computes an instant sibling for every date field on a multi-date workflow (travel)", () => {
+      const data: Record<string, unknown> = {
+        workflow: "travel", travelType: "flight", provider: "Swiss",
+        departureDate: "2027-03-15T08:00", returnDate: "2027-03-20T20:00", boardingTime: "2027-03-15T07:30",
+      };
+      const result = coerceWorkflowData(data, "travel", logger, { ...ctx, workflow: "travel" }, receivedAt, [], "skip", "Europe/Zurich");
+      // March 15/20 Zurich is CET (+01:00) -> subtract 1h for UTC.
+      expect(result.departureDateInstant).toBe("2027-03-15T07:00:00.000Z");
+      expect(result.returnDateInstant).toBe("2027-03-20T19:00:00.000Z");
+      expect(result.boardingTimeInstant).toBe("2027-03-15T06:30:00.000Z");
+    });
+  });
 });

@@ -74,6 +74,8 @@ export interface PackageData {
   trackingNumber?: string;
   trackingUrl?: string;
   estimatedDelivery?: string;
+  /** UTC instant derived from estimatedDelivery at classification time (internal; not in API schema). */
+  estimatedDeliveryInstant?: string;
   items?: Array<{ name: string; quantity: string; price?: string }>;
   totalAmount?: string;
   currency?: string;
@@ -85,7 +87,11 @@ export interface TravelData {
   provider: string;
   confirmationNumber?: string;
   departureDate?: string;
+  /** UTC instant derived from departureDate at classification time (internal; not in API schema). */
+  departureDateInstant?: string;
   returnDate?: string;
+  /** UTC instant derived from returnDate at classification time (internal; not in API schema). */
+  returnDateInstant?: string;
   origin?: string;
   destination?: string;
   passengers?: Array<{ name: string }>;
@@ -94,6 +100,8 @@ export interface TravelData {
   flightNumber?: string;
   seatNumber?: string;
   boardingTime?: string;
+  /** UTC instant derived from boardingTime at classification time (internal; not in API schema). */
+  boardingTimeInstant?: string;
 }
 
 
@@ -104,9 +112,13 @@ export interface PaymentsData {
   paymentType: "invoice" | "receipt" | "subscription_renewal" | "payment_failed" | "plan_changed" | "tax" | "wire_transfer" | "refund" | "statement" | "other";
   vendor: string;
   date: string;
+  /** UTC instant derived from date at classification time (internal; not in API schema). */
+  dateInstant?: string;
   amount?: string;
   currency?: string;
   dueDate?: string;
+  /** UTC instant derived from dueDate at classification time (internal; not in API schema). */
+  dueDateInstant?: string;
   invoiceNumber?: string;
   accountLastFour?: string;
   downloadUrl?: string;
@@ -136,8 +148,14 @@ export interface ContentData {
   discountCode?: string;
   discountAmount?: string;
   expiryDate?: string;
+  /** UTC instant derived from expiryDate at classification time (internal; not in API schema). */
+  expiryDateInstant?: string;
   eventStartDatetime?: string;
+  /** UTC instant derived from eventStartDatetime at classification time (internal; not in API schema). */
+  eventStartDatetimeInstant?: string;
   eventEndDatetime?: string;
+  /** UTC instant derived from eventEndDatetime at classification time (internal; not in API schema). */
+  eventEndDatetimeInstant?: string;
   location?: string;
   organizer?: string;
   eventUrl?: string;
@@ -156,6 +174,8 @@ export interface NoticeData {
     | "service_notice" | "government" | "account_notification" | "security_awareness" | "other";
   provider: string;
   effectiveDate?: string;
+  /** UTC instant derived from effectiveDate at classification time (internal; not in API schema). */
+  effectiveDateInstant?: string;
   referenceNumber?: string;
   documentUrl?: string;
 }
@@ -165,6 +185,8 @@ export interface HealthcareData {
   eventType: "appointment_reminder" | "appointment_confirmation" | "test_results" | "prescription" | "insurance_update" | "billing" | "referral";
   provider?: string;
   appointmentDate?: string;
+  /** UTC instant derived from appointmentDate at classification time (internal; not in API schema). */
+  appointmentDateInstant?: string;
   location?: string;
   requiresAction: boolean;
   portalUrl?: string;
@@ -179,6 +201,8 @@ export interface JobData {
   location?: string;
   salary?: string;
   interviewDate?: string;
+  /** UTC instant derived from interviewDate at classification time (internal; not in API schema). */
+  interviewDateInstant?: string;
   applicationStatus?: "submitted" | "reviewing" | "interview" | "offer" | "rejected";
   contactName?: string;
   contactEmail?: string;
@@ -202,7 +226,11 @@ export interface EventsData {
   venueName?: string;
   venueAddress?: string;
   eventStartDatetime?: string;
+  /** UTC instant derived from eventStartDatetime at classification time (internal; not in API schema). */
+  eventStartDatetimeInstant?: string;
   eventEndDatetime?: string;
+  /** UTC instant derived from eventEndDatetime at classification time (internal; not in API schema). */
+  eventEndDatetimeInstant?: string;
   performer?: string;
   ticketReference?: string;
   seatDetails?: string;

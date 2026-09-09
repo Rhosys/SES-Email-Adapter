@@ -3,6 +3,7 @@ import { DateTime } from "luxon";
 import type { Logger } from "../logger.js";
 import { CLASSIFIER_WORKFLOW_REGISTRY } from "../types/workflow-registry.js";
 import type { AmbiguousDateFormat } from "../types/index.js";
+import { displayToInstant } from "./display-to-instant.js";
 
 /**
  * Coerces raw LLM workflowData fields to their declared types.
@@ -110,6 +111,7 @@ export function coerceWorkflowData(
   receivedAt: string,
   localeHints: string[] = [],
   ambiguousDateFormat: AmbiguousDateFormat = "skip",
+  accountTimezone = "Europe/London",
 ): Record<string, unknown> {
   const result = { ...workflowData };
   const fields = WORKFLOW_FIELDS.get(workflow);
@@ -229,6 +231,11 @@ export function coerceWorkflowData(
           }
         }
         result[field.name] = coerced;
+        // Compute the UTC instant once, here, alongside the display string. The
+        // account timezone is only a fallback for offset-free display strings.
+        // Stored as a "<field>Instant" sibling so downstream consumers (resource
+        // resolution, thread triggers) never reparse the display string.
+        result[`${field.name}Instant`] = coerced === null ? null : displayToInstant(coerced, accountTimezone);
         break;
       }
 

@@ -171,7 +171,12 @@ describe("workflow registry ↔ TypeScript type alignment", () => {
         const tsFieldNames = new Set(tsFields.map((f) => f.name));
         const registryFieldNames = new Set(entry.fields.map((f) => f.name));
 
-        const missingInRegistry = [...tsFieldNames].filter((n) => !registryFieldNames.has(n));
+        // "<field>Instant" siblings are derived at the coercion boundary (display -> UTC instant)
+        // and stored internally next to their date field. They are not LLM-facing and therefore
+        // intentionally absent from the classifier registry — exclude them from alignment.
+        const isDerivedInstant = (name: string) => name.endsWith("Instant") && registryFieldNames.has(name.slice(0, -"Instant".length));
+
+        const missingInRegistry = [...tsFieldNames].filter((n) => !registryFieldNames.has(n) && !isDerivedInstant(n));
         const extraInRegistry = [...registryFieldNames].filter((n) => !tsFieldNames.has(n));
 
         expect(missingInRegistry, `Fields in TypeScript but missing from registry`).toEqual([]);

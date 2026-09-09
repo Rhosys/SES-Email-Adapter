@@ -283,7 +283,7 @@ export class SignalClassifier {
       signalId: input.signalId,
       accountId: input.accountId,
       workflow: raw.workflow,
-    }, input.receivedAt, localeHints, input.ambiguousDateFormat);
+    }, input.receivedAt, localeHints, input.ambiguousDateFormat, input.accountTimezone);
 
     // Validate currency fields — must be a valid ISO 4217 code (3 uppercase letters)
     if (typeof coercedWorkflowData.currency === "string") {

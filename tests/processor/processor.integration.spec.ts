@@ -569,6 +569,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
           retailer: "Amazon",
           orderNumber: "123-456-789",
           estimatedDelivery: "2024-01-20T00:00:00Z",
+          estimatedDeliveryInstant: "2024-01-20T00:00:00.000Z",
         },
         tags: [],
         summary: "Your package is on its way.",
@@ -604,6 +605,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
           retailer: "Amazon",
           orderNumber: "123-456-789",
           estimatedDelivery: "2024-01-20T00:00:00Z",
+          estimatedDeliveryInstant: "2024-01-20T00:00:00.000Z",
         },
         tags: [],
         summary: "Your package was delivered.",
@@ -636,7 +638,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
         workflow: "package",
         workflowData: {
           workflow: "package", packageType: "shipping", retailer: "Amazon",
-          orderNumber: "123-456-789", estimatedDelivery: "2030-01-20T00:00:00Z",
+          orderNumber: "123-456-789", estimatedDelivery: "2030-01-20T00:00:00Z", estimatedDeliveryInstant: "2030-01-20T00:00:00.000Z",
         },
         tags: [], summary: "Your package is on its way.", labels: [], actions: [],
       }));
@@ -659,7 +661,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
         workflow: "package",
         workflowData: {
           workflow: "package", packageType: "shipping", retailer: "Amazon",
-          orderNumber: "123-456-789", estimatedDelivery: "2025-06-01T00:00:00Z",
+          orderNumber: "123-456-789", estimatedDelivery: "2025-06-01T00:00:00Z", estimatedDeliveryInstant: "2025-06-01T00:00:00.000Z",
         },
         tags: [], summary: "Your package is on its way.", labels: [], actions: [],
       }));
