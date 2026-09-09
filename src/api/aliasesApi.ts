@@ -21,6 +21,7 @@ import type { IForwardingService } from "../forwarding/forwarding-service.js";
 function toApiAlias(alias: DbAlias): Api.Alias {
   return {
     alias: alias.id,
+    ...(alias.name !== undefined ? { name: alias.name } : {}),
     unknownSenderPolicy: alias.unknownSenderPolicy as Api.Alias["unknownSenderPolicy"],
     createdAt: alias.createdAt,
     updatedAt: alias.updatedAt,
@@ -125,6 +126,7 @@ export class AliasesApi {
         domain: body.address.split("@")[1]!,
         aliasName: body.address.split("@")[0]!,
         unknownSenderPolicy: body.unknownSenderPolicy ?? "quarantine_visible",
+        ...(body.name !== undefined ? { name: body.name } : {}),
         ...(body.createdForOrigin !== undefined ? { createdForOrigin: body.createdForOrigin } : {}),
         createdAt: now,
         updatedAt: now,
@@ -172,6 +174,7 @@ export class AliasesApi {
         domain: address.split("@")[1]!,
         aliasName: address.split("@")[0]!,
         unknownSenderPolicy: body.unknownSenderPolicy ?? existing?.unknownSenderPolicy ?? "quarantine_visible",
+        ...(body.name !== undefined ? { name: body.name } : existing?.name !== undefined ? { name: existing.name } : {}),
         ...(body.createdForOrigin !== undefined ? { createdForOrigin: body.createdForOrigin } : existing?.createdForOrigin !== undefined ? { createdForOrigin: existing.createdForOrigin } : {}),
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,

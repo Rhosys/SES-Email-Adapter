@@ -3,6 +3,7 @@ import { S3Client } from "@aws-sdk/client-s3";
 import { LambdaClient } from "@aws-sdk/client-lambda";
 import { SFNClient } from "@aws-sdk/client-sfn";
 import { KMSClient } from "@aws-sdk/client-kms";
+import { platformFromAddress } from "./types/index.js";
 import { OnboardingTaskHandler } from "./onboarding/onboarding-task-handler.js";
 import { SfnAccountCreationStarter } from "./onboarding/account-creation-starter.js";
 import type { AccountCreationStarter } from "./onboarding/account-creation-starter.js";
@@ -151,7 +152,7 @@ export class CompositeRoot {
     const SES_CONFIG_SET_NAME = SES_CONFIG_SET_ARN.split("/").pop()!;
     const PLATFORM_TENANT = SES_CONFIG_SET_NAME.replace(/-sending$/, "-platform");
     const MAIL_DOMAIN = process.env["MAIL_DOMAIN"]!;
-    const NOTIFICATION_FROM = `noreply@${MAIL_DOMAIN}`;
+    const NOTIFICATION_FROM = platformFromAddress("notifications", MAIL_DOMAIN);
     const DKIM_PRIVATE_KEY = process.env["DKIM_PRIVATE_KEY"] ?? "";
 
     if (!MAIL_DOMAIN) {
