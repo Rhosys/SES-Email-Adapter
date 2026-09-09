@@ -6,6 +6,14 @@ import type { ReplySender } from "../src/processor/processor.js";
 import type { DraftSendPayload } from "../src/processor/draft-send-dispatcher.js";
 import type { Signal } from "../src/types/index.js";
 import { createMockLogger } from "./helpers/mock-logger.js";
+import { validateRecipientMx, mxValidationError } from "../src/dns/mx-validator.js";
+
+// MX validation is a real DNS lookup — stubbed here so unit tests never touch the network.
+// validateRecipientMx itself has its own coverage in tests/mx-validator.test.ts.
+vi.mock("../src/dns/mx-validator.js", async () => {
+  const actual = await vi.importActual<typeof import("../src/dns/mx-validator.js")>("../src/dns/mx-validator.js");
+  return { ...actual, validateRecipientMx: vi.fn() };
+});
 
 function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit<Signal, "data">> = {}): Signal {
   const { data: dataOverrides, ...baseOverrides } = overrides;
@@ -67,6 +75,7 @@ describe("DraftSendWorker", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(validateRecipientMx).mockResolvedValue(ok(undefined));
     threadDb = makeThreadDb();
     replySender = makeReplySender();
     worker = new DraftSendWorker(threadDb, replySender, createMockLogger());
@@ -249,6 +258,20 @@ describe("DraftSendWorker", () => {
     expect(threadDb.updateSignalSendStatus).toHaveBeenCalledWith("acct-001", "USR#signal-001", expect.objectContaining({
       status: "draft",
       sendFailureReason: expect.stringContaining("Reconnect the mailbox"),
+    }));
+  });
+
+  it("parks the draft when the recipient domain has no mail exchanger, without calling SES", async () => {
+    vi.mocked(validateRecipientMx).mockResolvedValueOnce(err(mxValidationError(["nonexistent.invalid"])));
+
+    const result = await worker.process(PAYLOAD);
+
+    expect(result.isOk()).toBe(true);
+    expect(replySender.sendReply).not.toHaveBeenCalled();
+    expect(threadDb.updateSignalSendStatus).toHaveBeenCalledWith("acct-001", "USR#signal-001", expect.objectContaining({
+      status: "draft",
+      sendInitiatedAt: null,
+      sendFailureReason: expect.stringContaining("nonexistent.invalid"),
     }));
   });
 
