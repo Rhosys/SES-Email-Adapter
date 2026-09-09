@@ -93,9 +93,8 @@ export class DraftSendWorker {
       return this.parkDraft(accountId, signal, threadId, `Recipient domain does not accept mail: ${mxResult.error.invalidDomains.join(", ")}`);
     }
 
-    // Send via SES — join all recipients
-    const from = signal.data.from.address;
-    const to = signal.data.to.map(r => r.address).join(", ");
+    const from = signal.data.from;
+    const to = signal.data.to;
     const subject = signal.data.subject;
     const body = "textBody" in signal.data ? (signal.data.textBody ?? "") : "";
     const inReplyTo = await this.resolveInReplyTo(accountId, threadId, signal);

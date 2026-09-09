@@ -24,6 +24,8 @@ import type { Result } from "../errors.js";
 import { ok, err } from "../errors.js";
 import { buildOutboundTags, TAG_HOP_COUNT, MAX_HOP_COUNT } from "../email/ses-tags.js";
 import { buildMimeMessage } from "../email/mime-builder.js";
+import { extractAddress, formatAddress, formatAddressList } from "../email/address.js";
+import type { Address } from "../email/address.js";
 import { renderMarkdownToHtml } from "../email/markdown.js";
 import { buildOutboundMsgId } from "../processor/message-id.js";
 import type { Logger } from "../logger.js";
@@ -58,8 +60,10 @@ export class ReplySenderService implements ReplySender {
   }
 
   async sendReply(opts: {
-    to: string;
-    from: string;
+    /** Recipients — display name carried through to the outbound To: header when present. */
+    to: Address[];
+    /** Sender — display name carried through to the outbound From: header when present. */
+    from: Address;
     subject: string;
     body: string;
     /** RFC 5322 Message-ID of the specific message being replied to, e.g. "<abc@mail.example.com>".
@@ -119,7 +123,12 @@ export class ReplySenderService implements ReplySender {
     // route resolution below is deliberately given the original, possibly-absent accountId.
     const resolvedAccountId = opts.accountId ?? this.emailService.platformTenant;
 
-    const routeResult = await this.resolveRoute(opts.accountId, opts.from, opts.allowFallbackToPlatformSending);
+    // Formatted once here — every downstream consumer (routing, the MIME/SES headers) works off
+    // a plain RFC 5322 string; resolveRoute pulls the bare addr-spec back out for lookups.
+    const from = formatAddress(opts.from);
+    const to = formatAddressList(opts.to);
+
+    const routeResult = await this.resolveRoute(opts.accountId, from, opts.allowFallbackToPlatformSending);
     if (routeResult.isErr()) return err(routeResult.error);
     const route = routeResult.value;
 
@@ -128,13 +137,13 @@ export class ReplySenderService implements ReplySender {
     const htmlBody = renderMarkdownToHtml(opts.body);
 
     if (route.kind === "provider") {
-      return this.sendViaProvider(route.exchange, { ...opts, htmlBody, accountId: resolvedAccountId, subject, headers });
+      return this.sendViaProvider(route.exchange, { ...opts, to, from, htmlBody, accountId: resolvedAccountId, subject, headers });
     }
     if (route.kind === "platform") {
       // Degrade to the platform domain: rewrite the from and send under the platform tenant.
-      return this.sendViaSes({ ...opts, htmlBody, from: `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`, accountId: this.emailService.platformTenant, subject, headers });
+      return this.sendViaSes({ ...opts, to, htmlBody, from: `noreply@${process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud"}`, accountId: this.emailService.platformTenant, subject, headers });
     }
-    return this.sendViaSes({ ...opts, htmlBody, accountId: resolvedAccountId, subject, headers });
+    return this.sendViaSes({ ...opts, to, from, htmlBody, accountId: resolvedAccountId, subject, headers });
   }
 
   // ---------------------------------------------------------------------------
@@ -155,7 +164,7 @@ export class ReplySenderService implements ReplySender {
     // platform tenant (the caller supplied the platform from-address and omitted the account).
     if (!accountId) return ok({ kind: "ses" });
     // Pulls the bare addr-spec out of a From value that may be `"Name" <addr@host>`.
-    const fromAddress = (/<([^>]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
+    const fromAddress = extractAddress(from);
 
     const aliasResult = await this.accountDb.getAlias(accountId, fromAddress);
     if (aliasResult.isErr()) return err(aliasResult.error);

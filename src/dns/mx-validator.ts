@@ -1,6 +1,7 @@
 import dns from "dns/promises";
 import { ok, err } from "../errors.js";
 import type { Result } from "../errors.js";
+import { addressDomain } from "../email/address.js";
 
 export interface MxValidationError {
   kind: "mx_validation_failed";
@@ -16,7 +17,7 @@ export async function validateRecipientMx(
   recipients: Array<{ address: string }>,
   timeoutMs: number = 2000,
 ): Promise<Result<void, MxValidationError>> {
-  const domains = [...new Set(recipients.map(r => r.address.split("@")[1]!))];
+  const domains = [...new Set(recipients.map(r => addressDomain(r.address)))];
   const invalidDomains: string[] = [];
 
   await Promise.all(domains.map(async (domain) => {

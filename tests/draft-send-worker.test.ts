@@ -114,8 +114,8 @@ describe("DraftSendWorker", () => {
 
     expect(result.isOk()).toBe(true);
     expect(replySender.sendReply).toHaveBeenCalledWith({
-      to: "recipient@example.com",
-      from: "me@example.com",
+      to: [{ address: "recipient@example.com" }],
+      from: { address: "me@example.com" },
       subject: "Hello",
       body: "Hi there",
       accountId: "acct-001",
@@ -187,16 +187,16 @@ describe("DraftSendWorker", () => {
     });
   });
 
-  it("joins multiple recipients in the to field", async () => {
+  it("passes all recipients through to the reply sender, names included", async () => {
     vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({
-      data: { to: [{ address: "a@example.com" }, { address: "b@example.com" }] },
+      data: { to: [{ address: "a@example.com", name: "Ada" }, { address: "b@example.com" }] },
     })));
 
     const result = await worker.process(PAYLOAD);
 
     expect(result.isOk()).toBe(true);
     expect(replySender.sendReply).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "a@example.com, b@example.com" }),
+      expect.objectContaining({ to: [{ address: "a@example.com", name: "Ada" }, { address: "b@example.com" }] }),
     );
   });
 

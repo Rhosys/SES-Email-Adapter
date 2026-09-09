@@ -1,4 +1,5 @@
 import type { EmailContentStore, ContentStore } from "../content-store.js";
+import type { Address } from "../email/address.js";
 import { DateTime, Duration } from "luxon";
 import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
@@ -92,8 +93,10 @@ export type ReplySendError = EmailServiceError | ProviderSendError | DbError | {
 
 export interface ReplySender {
   sendReply(opts: {
-    to: string;
-    from: string;
+    /** Recipients — display name carried through to the outbound To: header when present. */
+    to: Address[];
+    /** Sender — display name carried through to the outbound From: header when present. */
+    from: Address;
     subject: string;
     body: string;
     /** RFC 5322 Message-ID of the specific message being replied to. Omit when there isn't one. */
@@ -618,8 +621,8 @@ export class SignalProcessor {
         // the account never verified). allowFallbackToPlatformSending makes that degrade explicit.
         const hopCount = parseHopCount(signal.data.headers);
         const sendResult = await this.replySender.sendReply({
-          to: signal.data.from.address,
-          from: signal.data.recipientAddress,
+          to: [signal.data.from],
+          from: { address: signal.data.recipientAddress },
           subject: signal.data.subject ?? "",
           body: "textBody" in signal.data ? (signal.data.textBody ?? "") : "",
           ...(signal.data.headers["message-id"] ? { inReplyTo: signal.data.headers["message-id"] } : {}),
