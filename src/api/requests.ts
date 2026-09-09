@@ -12,6 +12,13 @@ const lowerEmail = z.string()
   .transform(s => s.toLowerCase().trim())
   .pipe(z.string().email().regex(emailRegex, "Invalid email address"));
 
+// Trims and validates format (both Zod's email check and the RFC regex), preserving case —
+// draft to/from addresses are compared against thread.recipientAddress elsewhere and must not
+// be silently rewritten.
+const trimmedEmail = z.string()
+  .transform(s => s.trim())
+  .pipe(z.string().email().regex(emailRegex, "Invalid email address"));
+
 // Lowercases + trims a domain string (no email-format validation).
 const lowerDomain = z.string().transform(s => s.toLowerCase().trim());
 const ThreadStatus = z.enum(["active", "archived", "deleted", "report_violation"]);
@@ -29,7 +36,7 @@ const RuleActionType = z.enum([
 const RuleStatus = z.enum(["enabled", "disabled"]);
 
 const EmailAddressSchema = z.object({
-  address: z.string(),
+  address: trimmedEmail,
   name: z.string().optional(),
 });
 

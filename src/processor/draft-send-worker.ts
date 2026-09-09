@@ -7,6 +7,7 @@ import type { ReplySender, ReplySendError } from "./processor.js";
 import type { DraftSendPayload } from "./draft-send-dispatcher.js";
 import { buildSignalGsi3pk } from "./message-id.js";
 import { parseHopCount } from "../email/ses-tags.js";
+import { validateRecipientMx } from "../dns/mx-validator.js";
 
 /**
  * Send failures that no amount of retrying will clear: SES refused the message outright, the
@@ -83,6 +84,15 @@ export class DraftSendWorker {
       return ok(undefined);
     }
 
+    // MX/DNS lookups are real network calls (per-domain, ~2s timeout each) — too expensive to
+    // do inline on the send-trigger request. They run here instead, off the request path, right
+    // before the message actually goes out.
+    const mxResult = await validateRecipientMx(signal.data.to);
+    if (mxResult.isErr()) {
+      this.logger.warn("Draft send: recipient domain has no mail exchanger — parking draft.", { code: "draft_send.invalid_recipient_domain", signalId, accountId, invalidDomains: mxResult.error.invalidDomains });
+      return this.parkDraft(accountId, signal, threadId, `Recipient domain does not accept mail: ${mxResult.error.invalidDomains.join(", ")}`);
+    }
+
     // Send via SES — join all recipients
     const from = signal.data.from.address;
     const to = signal.data.to.map(r => r.address).join(", ");
@@ -111,14 +121,7 @@ export class DraftSendWorker {
         // The message itself is the problem — a retry sends the same bytes to the same
         // rejection. Park the draft with the reason so the user can fix and resend.
         this.logger.warn("Draft send permanently rejected — will not retry.", { code: "draft_send.send_permanent", signalId, accountId, error: sendResult.error });
-        const failureResult = await this.threadDb.updateSignalSendStatus(accountId, signal.signalLookupId, {
-          status: "draft",
-          sendInitiatedAt: null,
-          sendFailureReason: describeSendFailure(sendResult.error),
-          threadId,
-        });
-        if (failureResult.isErr()) return err(failureResult.error);
-        return ok(undefined);
+        return this.parkDraft(accountId, signal, threadId, describeSendFailure(sendResult.error));
       }
       // Transient — let SQS retry
       return err(sendResult.error);
@@ -142,6 +145,18 @@ export class DraftSendWorker {
     if (updateResult.isErr()) return err(updateResult.error);
 
     this.logger.info("Draft send: signal sent successfully", { code: "draft_send.sent", signalId, accountId, sesMessageId: messageId });
+    return ok(undefined);
+  }
+
+  /** Reverts a signal to "draft" with a user-facing reason — the outcome for any permanent, non-retryable send failure. */
+  private async parkDraft(accountId: string, signal: Signal, threadId: string, reason: string): Promise<Result<void, DbError | ReplySendError>> {
+    const failureResult = await this.threadDb.updateSignalSendStatus(accountId, signal.signalLookupId, {
+      status: "draft",
+      sendInitiatedAt: null,
+      sendFailureReason: reason,
+      threadId,
+    });
+    if (failureResult.isErr()) return err(failureResult.error);
     return ok(undefined);
   }
 

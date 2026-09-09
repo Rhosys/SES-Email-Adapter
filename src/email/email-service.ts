@@ -289,7 +289,12 @@ export class EmailService {
         // The raw MIME we handed SES is structurally invalid (unsupported header, bad parameter,
         // unparseable body). This is a bug in how we built the message — not an SES-side problem —
         // so it gets its own callout to separate it from verification/config permanent failures.
-        this.logger.error(`SES rejected malformed request [${errorName}]: ${errorMessage}.`, {
+        // SES's "Illegal address" message doesn't say which of To/From failed to parse, so we
+        // surface both here instead of making the reader dig through the logged `opts`.
+        const addressHint = errorMessage.includes("Illegal address")
+          ? ` (to="${opts.to}", from="${opts.fromSender ?? this.from}" — one of these is not a valid RFC 5322 address)`
+          : "";
+        this.logger.error(`SES rejected malformed request [${errorName}]: ${errorMessage}${addressHint}.`, {
           code: "email_service.malformed_request",
           errorName,
           httpStatus,
