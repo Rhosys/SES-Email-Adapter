@@ -13,7 +13,7 @@ import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../retention.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { EmailContentStore } from "./content-store.js";
-import type { Signal, AnySignal, PageParams, ThreadStatus, Workflow } from "../types/index.js";
+import type { Signal, AnySignal, PageParams, ThreadStatus, Workflow, OutboundEmailSignalData } from "../types/index.js";
 import type { CalendarResponseData, DomainMisconfigurationData, Pagination } from "../types/index.js";
 import type { UpdateThreadFields, ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
@@ -402,9 +402,10 @@ export class ThreadsApi {
         createdAt: now,
         data: {
           receivedAt: now,
-          from: body.from as Signal["data"]["from"],
-          to: body.to as Signal["data"]["to"],
-          cc: [],
+          from: body.from as OutboundEmailSignalData["from"],
+          to: body.to as OutboundEmailSignalData["to"],
+          cc: (body.cc ?? []) as OutboundEmailSignalData["cc"],
+          bcc: (body.bcc ?? []) as OutboundEmailSignalData["bcc"],
           subject: body.subject,
           ...(body.textBody != null ? { textBody: body.textBody } : {}),
           ...(body.linkedSignalId != null ? { linkedSignalId: body.linkedSignalId } : {}),
@@ -464,8 +465,10 @@ export class ThreadsApi {
       if (signal.status !== "draft") return err(c, 400, "Only draft signals can be replaced", "SIGNAL_NOT_DRAFT");
       const body = await zParse(ReplaceDraftSignalRequest, c.req.raw);
       const updateResult = await threadDb.updateSignal(accountId, signal.signalLookupId, {
-        from: body.from as Signal["data"]["from"],
-        to: body.to as Signal["data"]["to"],
+        from: body.from as OutboundEmailSignalData["from"],
+        to: body.to as OutboundEmailSignalData["to"],
+        cc: (body.cc ?? []) as OutboundEmailSignalData["cc"],
+        bcc: (body.bcc ?? []) as OutboundEmailSignalData["bcc"],
         subject: body.subject,
         ...(body.textBody != null ? { textBody: body.textBody } : {}),
       });

@@ -121,7 +121,7 @@ describe("ReplySenderService.sendReply()", () => {
     });
 
     expect(emailService.send).toHaveBeenCalledWith({
-      to: "recipient@example.com",
+      to: ["recipient@example.com"],
       fromSender: "sender@example.com",
       subject: "Re: Original Subject",
       textBody: "Reply body text",
@@ -137,6 +137,43 @@ describe("ReplySenderService.sendReply()", () => {
         { Name: "X-Numaeel-AccountId", Value: "acct-test" },
       ],
     });
+  });
+
+  it("formats to/cc/bcc as separate SES array entries, each carrying its own display name", async () => {
+    (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "msg-cc-bcc" }));
+
+    await handler.sendReply({
+      to: [{ address: "a@example.com", name: "Ada" }, { address: "b@example.com" }],
+      cc: [{ address: "c@example.com", name: "Carl" }],
+      bcc: [{ address: "d@example.com" }],
+      from: { address: "sender@example.com" },
+      subject: "Hi",
+      body: "Hello",
+      accountId: "acct-test",
+      allowFallbackToPlatformSending: false,
+    });
+
+    const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(call.to).toEqual(["Ada <a@example.com>", "b@example.com"]);
+    expect(call.cc).toEqual(["Carl <c@example.com>"]);
+    expect(call.bcc).toEqual(["d@example.com"]);
+  });
+
+  it("omits cc/bcc from the emailService call entirely when none are given", async () => {
+    (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "msg-no-cc" }));
+
+    await handler.sendReply({
+      to: [{ address: "a@example.com" }],
+      from: { address: "sender@example.com" },
+      subject: "Hi",
+      body: "Hello",
+      accountId: "acct-test",
+      allowFallbackToPlatformSending: false,
+    });
+
+    const call = (emailService.send as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(call).not.toHaveProperty("cc");
+    expect(call).not.toHaveProperty("bcc");
   });
 
   it("returns the messageId from emailService", async () => {
@@ -358,6 +395,28 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     expect(message).toContain("Subject: Re: Original");
     expect(message).toContain("In-Reply-To: <original@mail.example.com>");
     expect(message).toContain("References: <original@mail.example.com>");
+  });
+
+  it("carries Cc (with its display name) in the provider MIME message, and Bcc only there — never as an SES header", async () => {
+    const adapter = makeGmailAdapter(ok({ providerMessageId: "gmail-msg-1" }));
+    const handler = makeSender({
+      emailService: makeEmailService(),
+      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE }), exchangesDb: makeExchangesDb({ exchange: ACTIVE_GMAIL_EXCHANGE }),
+      adapters: { gmail: adapter },
+    });
+
+    await handler.sendReply({
+      ...REPLY,
+      cc: [{ address: "cc@example.com", name: "Cc Person" }],
+      bcc: [{ address: "bcc@example.com" }],
+    });
+
+    const rawMime = (adapter.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Uint8Array;
+    const message = Buffer.from(rawMime).toString("utf8");
+    expect(message).toContain("Cc: Cc Person <cc@example.com>");
+    // A provider's own Bcc header is stripped from the copy other recipients see — this is
+    // the one send route where it's actually correct for the header to be present.
+    expect(message).toContain("Bcc: bcc@example.com");
   });
 
   it("builds a multipart/alternative message carrying the rendered HTML alongside the Markdown source", async () => {

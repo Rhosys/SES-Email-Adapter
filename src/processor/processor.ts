@@ -95,6 +95,10 @@ export interface ReplySender {
   sendReply(opts: {
     /** Recipients — display name carried through to the outbound To: header when present. */
     to: Address[];
+    /** Cc recipients, same shape as `to`. Omit when there are none. */
+    cc?: Address[];
+    /** Bcc recipients, same shape as `to`. Omit when there are none — never carried in a MIME header for an SES send. */
+    bcc?: Address[];
     /** Sender — display name carried through to the outbound From: header when present. */
     from: Address;
     subject: string;
@@ -801,6 +805,7 @@ export class SignalProcessor {
               from: { address: signal.data.recipientAddress },
               to: [signal.data.from],
               cc: [],
+              bcc: [],
               subject: renderTemplate(tmpl.subject, actionVars),
               textBody: renderTemplate(tmpl.body, actionVars),
               attachments: [],

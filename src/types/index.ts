@@ -519,6 +519,7 @@ export interface InboundEmailSignalData extends EmailSignalDataBase {
 export interface OutboundEmailSignalData extends EmailSignalDataBase {
   /** SES message ID assigned after successful delivery via SES. */
   sesMessageId?: string;
+  bcc: EmailAddress[];
   textBody?: string;
   htmlBody?: string;
   sendInitiatedAt?: string;    // ISO 8601 — when POST /send was called

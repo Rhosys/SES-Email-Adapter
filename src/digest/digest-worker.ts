@@ -166,7 +166,7 @@ export class DigestWorker {
     const sendAccountId = senderDomain ? accountId : emailService.platformTenant
 
     const sendResult = await emailService.send({
-      to: target.target,
+      to: [target.target],
       subject,
       textBody,
       htmlBody,

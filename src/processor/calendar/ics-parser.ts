@@ -257,7 +257,12 @@ export function parseIcs(icsBytes: Uint8Array): Result<IcsParseResult, IcsParseE
   const sanitizedUrl = urlRaw ? sanitizeUrl(urlRaw) : undefined;
 
   // --- Build CalendarEventData ---
-  const endTimeIso = dtend ? icalTimeToIso(dtend) : undefined;
+  const startTimeIso = icalTimeToIso(dtstart);
+  const dtendIso = dtend ? icalTimeToIso(dtend) : undefined;
+  // Guard against malformed source data (e.g. a stale DTEND from a cloned recurring
+  // event template): an end before the start isn't a usable range, so drop it rather
+  // than surface a nonsensical date span.
+  const endTimeIso = dtendIso && startTimeIso && dtendIso < startTimeIso ? undefined : dtendIso;
   const createdIso = created ? icalTimeToIso(created) : undefined;
   const lastModifiedIso = lastModified ? icalTimeToIso(lastModified) : undefined;
   const recurrenceIdIso = recurrenceId ? icalTimeToIso(recurrenceId) : undefined;
@@ -265,7 +270,7 @@ export function parseIcs(icsBytes: Uint8Array): Result<IcsParseResult, IcsParseE
   const calendarData = {
     title,
     ...(description !== null ? { description } : {}),
-    startTime: icalTimeToIso(dtstart) ?? "",
+    startTime: startTimeIso ?? "",
     ...(endTimeIso !== undefined ? { endTime: endTimeIso } : {}),
     ...(location !== null ? { location } : {}),
     ...(sanitizedUrl !== undefined ? { url: sanitizedUrl } : {}),

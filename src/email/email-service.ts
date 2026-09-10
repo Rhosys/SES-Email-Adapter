@@ -13,7 +13,9 @@ import { addressDomain } from "./address.js";
 export type EmailServiceError = TransientSesError | InvalidArgumentError | PermanentSesError;
 
 export interface EmailSendOptions {
-  to: string;
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
   subject: string;
   textBody: string;
   htmlBody?: string;
@@ -31,7 +33,9 @@ export interface EmailSendOptions {
 }
 
 export interface EmailRawOptions {
-  to: string;
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
   rawData: Uint8Array;
   tags?: Array<{ Name: string; Value: string }>;
   /**
@@ -135,16 +139,19 @@ export class EmailService {
       return err(tenantMismatch.error);
     }
 
-    // Check if recipient is on the suppression list — log but still send
+    // Check if any recipient is on the suppression list — log but still send
     if (this.suppressionChecker) {
-      const suppressionResult = await this.suppressionChecker.isAddressSuppressed(opts.to);
-      if (suppressionResult.isOk() && suppressionResult.value) {
-        this.logger.error("Sending to a suppressed address — recipient has previously bounced or complained. Proceeding with send anyway.", {
-          code: "email_service.sending_to_suppressed",
-          to: opts.to,
-          accountId: opts.accountId,
-          subject: opts.subject,
-        });
+      const allRecipients = [...opts.to, ...(opts.cc ?? []), ...(opts.bcc ?? [])];
+      for (const recipient of allRecipients) {
+        const suppressionResult = await this.suppressionChecker.isAddressSuppressed(recipient);
+        if (suppressionResult.isOk() && suppressionResult.value) {
+          this.logger.error("Sending to a suppressed address — recipient has previously bounced or complained. Proceeding with send anyway.", {
+            code: "email_service.sending_to_suppressed",
+            to: recipient,
+            accountId: opts.accountId,
+            subject: opts.subject,
+          });
+        }
       }
     }
 
@@ -155,7 +162,11 @@ export class EmailService {
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
         FromEmailAddress: fromAddress,
-        Destination: { ToAddresses: [opts.to] },
+        Destination: {
+          ToAddresses: opts.to,
+          ...(opts.cc?.length ? { CcAddresses: opts.cc } : {}),
+          ...(opts.bcc?.length ? { BccAddresses: opts.bcc } : {}),
+        },
         Content: {
           Simple: {
             Subject: { Data: opts.subject, Charset: "UTF-8" },
@@ -198,7 +209,11 @@ export class EmailService {
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
         FromEmailAddress: fromAddress,
-        Destination: { ToAddresses: [opts.to] },
+        Destination: {
+          ToAddresses: opts.to,
+          ...(opts.cc?.length ? { CcAddresses: opts.cc } : {}),
+          ...(opts.bcc?.length ? { BccAddresses: opts.bcc } : {}),
+        },
         Content: { Raw: { Data: opts.rawData } },
         ConfigurationSetName: this.configSetName,
         TenantName: opts.accountId,
@@ -293,7 +308,7 @@ export class EmailService {
         // SES's "Illegal address" message doesn't say which of To/From failed to parse, so we
         // surface both here instead of making the reader dig through the logged `opts`.
         const addressHint = errorMessage.includes("Illegal address")
-          ? ` (to="${opts.to}", from="${opts.fromSender ?? this.from}" — one of these is not a valid RFC 5322 address)`
+          ? ` (to="${opts.to.join(", ")}", from="${opts.fromSender ?? this.from}" — one of these is not a valid RFC 5322 address)`
           : "";
         this.logger.error(`SES rejected malformed request [${errorName}]: ${errorMessage}${addressHint}.`, {
           code: "email_service.malformed_request",

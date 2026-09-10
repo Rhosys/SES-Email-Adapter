@@ -24,7 +24,7 @@ import type { Result } from "../errors.js";
 import { ok, err } from "../errors.js";
 import { buildOutboundTags, TAG_HOP_COUNT, MAX_HOP_COUNT } from "../email/ses-tags.js";
 import { buildMimeMessage } from "../email/mime-builder.js";
-import { extractAddress, formatAddress, formatAddressList } from "../email/address.js";
+import { extractAddress, formatAddress } from "../email/address.js";
 import type { Address } from "../email/address.js";
 import { renderMarkdownToHtml } from "../email/markdown.js";
 import { buildOutboundMsgId } from "../processor/message-id.js";
@@ -63,6 +63,10 @@ export class ReplySenderService implements ReplySender {
   async sendReply(opts: {
     /** Recipients — display name carried through to the outbound To: header when present. */
     to: Address[];
+    /** Cc recipients, same shape as `to`. Omit when there are none. */
+    cc?: Address[];
+    /** Bcc recipients, same shape as `to`. Omit when there are none — never carried in a MIME header for an SES send. */
+    bcc?: Address[];
     /** Sender — display name carried through to the outbound From: header when present. */
     from: Address;
     subject: string;
@@ -125,9 +129,19 @@ export class ReplySenderService implements ReplySender {
     const resolvedAccountId = opts.accountId ?? this.emailService.platformTenant;
 
     // Formatted once here — every downstream consumer (routing, the MIME/SES headers) works off
-    // a plain RFC 5322 string; resolveRoute pulls the bare addr-spec back out for lookups.
+    // plain RFC 5322 strings; resolveRoute pulls the bare addr-spec back out of `from` for
+    // lookups. `to`/`cc`/`bcc` stay one formatted string per recipient (not joined) — SES's
+    // Destination wants a separate array entry per address, and a MIME "To:"/"Cc:" header is
+    // built by joining that array, never by re-splitting a pre-joined string.
+    // cc/bcc are destructured out of the rest so the Address[]-typed originals never leak into
+    // the ...rest spread below — only the reformatted string[] versions go to the send routes.
+    const { cc: _unusedCc, bcc: _unusedBcc, ...rest } = opts;
     const from = formatAddress(opts.from);
-    const to = formatAddressList(opts.to);
+    const to = opts.to.map(formatAddress);
+    const ccBcc = {
+      ...(opts.cc ? { cc: opts.cc.map(formatAddress) } : {}),
+      ...(opts.bcc ? { bcc: opts.bcc.map(formatAddress) } : {}),
+    };
 
     const routeResult = await this.resolveRoute(opts.accountId, from, opts.allowFallbackToPlatformSending);
     if (routeResult.isErr()) return err(routeResult.error);
@@ -138,15 +152,15 @@ export class ReplySenderService implements ReplySender {
     const htmlBody = renderMarkdownToHtml(opts.body);
 
     if (route.kind === "provider") {
-      return this.sendViaProvider(route.exchange, { ...opts, to, from: route.from, htmlBody, accountId: resolvedAccountId, subject, headers });
+      return this.sendViaProvider(route.exchange, { ...rest, to, ...ccBcc, from: route.from, htmlBody, accountId: resolvedAccountId, subject, headers });
     }
     if (route.kind === "platform") {
       // Degrade to the platform domain: rewrite the from and send under the platform tenant.
       const { localPart, name } = PLATFORM_ALIASES.notifications;
       const platformDomain = process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud";
-      return this.sendViaSes({ ...opts, to, htmlBody, from: formatAddress({ address: `${localPart}@${platformDomain}`, name }), accountId: this.emailService.platformTenant, subject, headers });
+      return this.sendViaSes({ ...rest, to, ...ccBcc, htmlBody, from: formatAddress({ address: `${localPart}@${platformDomain}`, name }), accountId: this.emailService.platformTenant, subject, headers });
     }
-    return this.sendViaSes({ ...opts, to, from: route.from, htmlBody, accountId: resolvedAccountId, subject, headers });
+    return this.sendViaSes({ ...rest, to, ...ccBcc, from: route.from, htmlBody, accountId: resolvedAccountId, subject, headers });
   }
 
   // ---------------------------------------------------------------------------
@@ -232,7 +246,7 @@ export class ReplySenderService implements ReplySender {
 
   private async sendViaProvider(
     emx: ExternalMailExchange,
-    opts: { to: string; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; headers: Array<{ Name: string; Value: string }> },
+    opts: { to: string[]; cc?: string[]; bcc?: string[]; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; headers: Array<{ Name: string; Value: string }> },
   ): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
     const adapter = this.adapters[emx.platform];
     // resolveRoute already established this; narrowing for the type checker.
@@ -240,7 +254,9 @@ export class ReplySenderService implements ReplySender {
 
     const rawMime = buildMimeMessage({
       from: opts.from,
-      to: opts.to,
+      to: opts.to.join(", "),
+      ...(opts.cc?.length ? { cc: opts.cc.join(", ") } : {}),
+      ...(opts.bcc?.length ? { bcc: opts.bcc.join(", ") } : {}),
       subject: opts.subject,
       textBody: opts.body,
       htmlBody: opts.htmlBody,
@@ -266,7 +282,7 @@ export class ReplySenderService implements ReplySender {
   }
 
   private async sendViaSes(
-    opts: { to: string; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; threadId?: string; headers: Array<{ Name: string; Value: string }> },
+    opts: { to: string[]; cc?: string[]; bcc?: string[]; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; threadId?: string; headers: Array<{ Name: string; Value: string }> },
   ): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
     const tags = buildOutboundTags("reply", {
       accountId: opts.accountId,
@@ -276,6 +292,8 @@ export class ReplySenderService implements ReplySender {
 
     const result = await this.emailService.send({
       to: opts.to,
+      ...(opts.cc?.length ? { cc: opts.cc } : {}),
+      ...(opts.bcc?.length ? { bcc: opts.bcc } : {}),
       fromSender: opts.from,
       subject: opts.subject,
       textBody: opts.body,

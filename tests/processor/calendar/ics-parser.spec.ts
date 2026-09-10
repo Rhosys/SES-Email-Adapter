@@ -227,6 +227,49 @@ describe("parseIcs — VALARM stripping", () => {
 });
 
 // ---------------------------------------------------------------------------
+// DTEND before DTSTART: malformed source data is dropped, not surfaced
+// ---------------------------------------------------------------------------
+
+describe("parseIcs — DTEND earlier than DTSTART", () => {
+  it("omits endTime when DTEND predates DTSTART", () => {
+    const veventBody = [
+      "UID:stale-dtend-uid",
+      "DTSTART:20260930T180000Z",
+      "DTEND:20210427T180000Z",
+      "SUMMARY:Stale DTEND Event",
+      "ORGANIZER:mailto:org@example.com",
+    ].join("\r\n");
+
+    const ics = buildIcs({ veventBody });
+    const result = parseIcs(toBytes(ics));
+
+    expect(result.isOk()).toBe(true);
+    const { calendarData } = result._unsafeUnwrap();
+
+    expect(calendarData.startTime).toBe("2026-09-30T18:00:00.000Z");
+    expect(calendarData.endTime).toBeUndefined();
+  });
+
+  it("keeps endTime when DTEND is at or after DTSTART", () => {
+    const veventBody = [
+      "UID:valid-dtend-uid",
+      "DTSTART:20260930T180000Z",
+      "DTEND:20260930T190000Z",
+      "SUMMARY:Valid Event",
+      "ORGANIZER:mailto:org@example.com",
+    ].join("\r\n");
+
+    const ics = buildIcs({ veventBody });
+    const result = parseIcs(toBytes(ics));
+
+    expect(result.isOk()).toBe(true);
+    const { calendarData } = result._unsafeUnwrap();
+
+    expect(calendarData.endTime).toBe("2026-09-30T19:00:00.000Z");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Property 5: URL sanitization rejects disallowed schemes and invalid hosts
 // Validates: Requirements 6.1, 6.2, 6.3, 6.4, 6.5
 // ---------------------------------------------------------------------------

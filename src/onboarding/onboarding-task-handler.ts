@@ -247,7 +247,7 @@ export class OnboardingTaskHandler {
     // 12. Send via EmailService — terminal operation, no DB writes after send
     const textBody = `${emailContent.textBody}\n\nView your account: ${this.emailService.appBaseUrl}/a/`;
     const sendResult = await this.emailService.send({
-      to: email,
+      to: [email],
       subject: "The Next Step",
       textBody,
       htmlBody,

@@ -103,7 +103,7 @@ describe("CalendarForwarder.sendReply — RSVP targets ORGANIZER mailto: address
     );
 
     const sendCall = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-    expect(sendCall.to).toBe(expectedTo);
+    expect(sendCall.to).toEqual([expectedTo]);
   });
 });
 
