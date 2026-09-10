@@ -24,20 +24,12 @@ import type { Result } from "../errors.js";
 import { ok, err } from "../errors.js";
 import { buildOutboundTags, TAG_HOP_COUNT, MAX_HOP_COUNT } from "../email/ses-tags.js";
 import { buildMimeMessage } from "../email/mime-builder.js";
+import { extractAddress, formatAddress } from "../email/address.js";
+import type { Address } from "../email/address.js";
 import { renderMarkdownToHtml } from "../email/markdown.js";
 import { buildOutboundMsgId } from "../processor/message-id.js";
 import { PLATFORM_ALIASES } from "../types/index.js";
 import type { Logger } from "../logger.js";
-
-/** Backslash-escapes `"` and `\` so a name can safely sit inside an RFC 5322 quoted-string. */
-function quoteDisplayName(name: string): string {
-  return `"${name.replace(/(["\\])/g, "\\$1")}"`;
-}
-
-/** Builds a `"Name" <addr>` From value when a display name is set, else the bare address. */
-function formatFrom(address: string, name: string | undefined): string {
-  return name ? `${quoteDisplayName(name)} <${address}>` : address;
-}
 
 interface ReplySenderDeps {
   emailService: EmailService;
@@ -69,10 +61,14 @@ export class ReplySenderService implements ReplySender {
   }
 
   async sendReply(opts: {
-    to: string[];
-    cc?: string[];
-    bcc?: string[];
-    from: string;
+    /** Recipients — display name carried through to the outbound To: header when present. */
+    to: Address[];
+    /** Cc recipients, same shape as `to`. Omit when there are none. */
+    cc?: Address[];
+    /** Bcc recipients, same shape as `to`. Omit when there are none — never carried in a MIME header for an SES send. */
+    bcc?: Address[];
+    /** Sender — display name carried through to the outbound From: header when present. */
+    from: Address;
     subject: string;
     body: string;
     /** RFC 5322 Message-ID of the specific message being replied to, e.g. "<abc@mail.example.com>".
@@ -132,7 +128,22 @@ export class ReplySenderService implements ReplySender {
     // route resolution below is deliberately given the original, possibly-absent accountId.
     const resolvedAccountId = opts.accountId ?? this.emailService.platformTenant;
 
-    const routeResult = await this.resolveRoute(opts.accountId, opts.from, opts.allowFallbackToPlatformSending);
+    // Formatted once here — every downstream consumer (routing, the MIME/SES headers) works off
+    // plain RFC 5322 strings; resolveRoute pulls the bare addr-spec back out of `from` for
+    // lookups. `to`/`cc`/`bcc` stay one formatted string per recipient (not joined) — SES's
+    // Destination wants a separate array entry per address, and a MIME "To:"/"Cc:" header is
+    // built by joining that array, never by re-splitting a pre-joined string.
+    // cc/bcc are destructured out of the rest so the Address[]-typed originals never leak into
+    // the ...rest spread below — only the reformatted string[] versions go to the send routes.
+    const { cc: _unusedCc, bcc: _unusedBcc, ...rest } = opts;
+    const from = formatAddress(opts.from);
+    const to = opts.to.map(formatAddress);
+    const ccBcc = {
+      ...(opts.cc ? { cc: opts.cc.map(formatAddress) } : {}),
+      ...(opts.bcc ? { bcc: opts.bcc.map(formatAddress) } : {}),
+    };
+
+    const routeResult = await this.resolveRoute(opts.accountId, from, opts.allowFallbackToPlatformSending);
     if (routeResult.isErr()) return err(routeResult.error);
     const route = routeResult.value;
 
@@ -141,15 +152,15 @@ export class ReplySenderService implements ReplySender {
     const htmlBody = renderMarkdownToHtml(opts.body);
 
     if (route.kind === "provider") {
-      return this.sendViaProvider(route.exchange, { ...opts, from: route.from, htmlBody, accountId: resolvedAccountId, subject, headers });
+      return this.sendViaProvider(route.exchange, { ...rest, to, ...ccBcc, from: route.from, htmlBody, accountId: resolvedAccountId, subject, headers });
     }
     if (route.kind === "platform") {
       // Degrade to the platform domain: rewrite the from and send under the platform tenant.
       const { localPart, name } = PLATFORM_ALIASES.notifications;
       const platformDomain = process.env["MAIL_DOMAIN"] ?? "platform.email.rhosys.cloud";
-      return this.sendViaSes({ ...opts, htmlBody, from: formatFrom(`${localPart}@${platformDomain}`, name), accountId: this.emailService.platformTenant, subject, headers });
+      return this.sendViaSes({ ...rest, to, ...ccBcc, htmlBody, from: formatAddress({ address: `${localPart}@${platformDomain}`, name }), accountId: this.emailService.platformTenant, subject, headers });
     }
-    return this.sendViaSes({ ...opts, from: route.from, htmlBody, accountId: resolvedAccountId, subject, headers });
+    return this.sendViaSes({ ...rest, to, ...ccBcc, from: route.from, htmlBody, accountId: resolvedAccountId, subject, headers });
   }
 
   // ---------------------------------------------------------------------------
@@ -170,14 +181,14 @@ export class ReplySenderService implements ReplySender {
     // platform tenant (the caller supplied the platform from-address and omitted the account).
     if (!accountId) return ok({ kind: "ses", from });
     // Pulls the bare addr-spec out of a From value that may be `"Name" <addr@host>`.
-    const fromAddress = (/<([^>]+)>/.exec(from)?.[1] ?? from).trim().toLowerCase();
+    const fromAddress = extractAddress(from);
 
     const aliasResult = await this.accountDb.getAlias(accountId, fromAddress);
     if (aliasResult.isErr()) return err(aliasResult.error);
     const alias = aliasResult.value;
     // The alias's configured display name takes precedence over any name already present on
     // the caller-supplied `from` (callers here only ever pass a bare address in practice).
-    const decoratedFrom = formatFrom(fromAddress, alias?.name);
+    const decoratedFrom = formatAddress({ address: fromAddress, ...(alias?.name ? { name: alias.name } : {}) });
 
     // Not exchange-backed: the address sends as itself over SES if its domain is verified,
     // otherwise it cannot send as itself and the platform-fallback decision applies.

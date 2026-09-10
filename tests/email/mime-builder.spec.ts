@@ -56,6 +56,19 @@ describe("buildMimeMessage", () => {
     expect(message).toMatch(/From: =\?UTF-8\?B\?[^?]+\?= <jorg@example\.com>/);
   });
 
+  // Multiple recipients where one display name contains a comma AND the whole To value has a
+  // non-ASCII character somewhere (forcing the RFC 2047 encode path) — this is what a naive
+  // `.split(",")` on the address list would have cut in half, wrongly turning `"Doe, Jane"
+  // <jane@x.com>` into two entries instead of one.
+  it("does not split a comma inside a quoted display name when encoding a multi-recipient list", () => {
+    const message = build({ to: '"Doe, Jane" <jane@example.com>, "Müller, Jörg" <jorg@example.com>' });
+    // Jane's all-ASCII name is a naive-split casualty if the list is ever cut on every comma —
+    // it must survive as one recipient with its comma intact. Jörg's name is non-ASCII, so it
+    // additionally gets RFC 2047-encoded (the reason this whole header hits the encode path).
+    const jorgEncoded = `=?UTF-8?B?${Buffer.from("Müller, Jörg", "utf8").toString("base64")}?=`;
+    expect(message).toContain(`To: "Doe, Jane" <jane@example.com>, ${jorgEncoded} <jorg@example.com>\r\n`);
+  });
+
   it("passes extra headers through", () => {
     const message = build({ headers: [{ Name: "In-Reply-To", Value: "<abc@x.com>" }, { Name: "References", Value: "<abc@x.com>" }] });
     expect(message).toContain("In-Reply-To: <abc@x.com>\r\n");

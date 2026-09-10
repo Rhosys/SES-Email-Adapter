@@ -96,10 +96,10 @@ export class DraftSendWorker {
       return this.parkDraft(accountId, signal, threadId, `Recipient domain does not accept mail: ${mxResult.error.invalidDomains.join(", ")}`);
     }
 
-    const from = signal.data.from.address;
-    const to = signal.data.to.map(r => r.address);
-    const cc = signal.data.cc.map(r => r.address);
-    const bccAddresses = bcc.map(r => r.address);
+    const from = signal.data.from;
+    const to = signal.data.to;
+    const cc = signal.data.cc;
+    const bccAddresses = bcc;
     const subject = signal.data.subject;
     const body = "textBody" in signal.data ? (signal.data.textBody ?? "") : "";
     const inReplyTo = await this.resolveInReplyTo(accountId, threadId, signal);
