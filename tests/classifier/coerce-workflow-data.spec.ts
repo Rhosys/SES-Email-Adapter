@@ -534,6 +534,58 @@ describe("coerceWorkflowData", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Date fields — real-world formats seen in production TRACK logs, currently
+  // nullified. TDD: these must parse (no TRACK log) once implemented.
+  // -------------------------------------------------------------------------
+
+  describe("date fields — production formats currently unparseable", () => {
+    const travelCtx = { ...ctx, workflow: "travel" };
+    const base = { workflow: "travel", travelType: "flight", provider: "Swiss" };
+
+    it("parses an ordinal day with year: 'February 3rd, 2027'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "February 3rd, 2027" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBe("2027-02-03");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses an ordinal day without year: 'September 10th'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "September 10th" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBe("2025-09-10");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses a comma-separated dotted time: 'Oct 27, 2026, 18.30'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "Oct 27, 2026, 18.30" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBe("2026-10-27T18:30");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses a comma-separated dotted time: 'Oct 27, 2026, 09.00'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "Oct 27, 2026, 09.00" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBe("2026-10-27T09:00");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses 'Sept' month abbreviation with a trailing zone abbreviation: 'Wednesday, 30 Sept 2026 18:00 (CEST)'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "Wednesday, 30 Sept 2026 18:00 (CEST)" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBe("2026-09-30T18:00");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses 'Sept' month abbreviation with a trailing zone abbreviation: 'Wednesday, 30 Sept 2026 21:00 (CEST)'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "Wednesday, 30 Sept 2026 21:00 (CEST)" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBe("2026-09-30T21:00");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // isAmbiguousSlashSkip predicate
   // -------------------------------------------------------------------------
 
