@@ -647,6 +647,117 @@ describe("API", () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // Address format on the draft create/replace/patch routes — the app-side entry points for
+  // to/from `{address, name?}`. `address` must be a bare addr-spec (a display name belongs in
+  // the separate `name` field); these routes reject a decorated `"Name" <addr>` string in
+  // `address` at 400 rather than letting it reach a draft, matching the ingest side's contract
+  // that address and name are always split apart before storage.
+  // ---------------------------------------------------------------------------
+
+  describe("POST /accounts/:accountId/threads/:threadId/signals — create draft", () => {
+    beforeEach(() => {
+      vi.mocked(threadDb.getThread).mockResolvedValue(ok(makeThread()));
+    });
+
+    it("creates a draft with a bare to/from address and a separate display name", async () => {
+      const res = await req(app, "POST", `${A}/threads/arc-001/signals`, {
+        body: {
+          from: { address: "me@example.com", name: "Me" },
+          to: [{ address: "jane@example.com", name: "Jane Doe" }],
+          subject: "Hello",
+        },
+      });
+      expect(res.status).toBe(201);
+      expect(threadDb.createSignal).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          from: { address: "me@example.com", name: "Me" },
+          to: [{ address: "jane@example.com", name: "Jane Doe" }],
+        }),
+      }));
+    });
+
+    it("accepts a to/from address with no display name at all", async () => {
+      const res = await req(app, "POST", `${A}/threads/arc-001/signals`, {
+        body: { from: { address: "me@example.com" }, to: [{ address: "jane@example.com" }], subject: "Hello" },
+      });
+      expect(res.status).toBe(201);
+    });
+
+    it("rejects a display-name-decorated string in the from address field", async () => {
+      const res = await req(app, "POST", `${A}/threads/arc-001/signals`, {
+        body: { from: { address: "Me <me@example.com>" }, to: [{ address: "jane@example.com" }], subject: "Hello" },
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json() as { errorCode: string };
+      expect(body.errorCode).toBe("INVALID_REQUEST");
+      expect(threadDb.createSignal).not.toHaveBeenCalled();
+    });
+
+    it("rejects a display-name-decorated string in a to address field", async () => {
+      const res = await req(app, "POST", `${A}/threads/arc-001/signals`, {
+        body: { from: { address: "me@example.com" }, to: [{ address: '"Doe, Jane" <jane@example.com>' }], subject: "Hello" },
+      });
+      expect(res.status).toBe(400);
+      expect(threadDb.createSignal).not.toHaveBeenCalled();
+    });
+
+    it("rejects an empty to list", async () => {
+      const res = await req(app, "POST", `${A}/threads/arc-001/signals`, {
+        body: { from: { address: "me@example.com" }, to: [], subject: "Hello" },
+      });
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 404 for an unknown thread", async () => {
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(null));
+      const res = await req(app, "POST", `${A}/threads/nope/signals`, {
+        body: { from: { address: "me@example.com" }, to: [{ address: "jane@example.com" }], subject: "Hello" },
+      });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("PUT /accounts/:accountId/threads/:threadId/signals/:id — replace draft", () => {
+    beforeEach(() => {
+      vi.mocked(threadDb.getThread).mockResolvedValue(ok(makeThread()));
+      vi.mocked(threadDb.getSignalById).mockResolvedValue(ok(makeSignal({ status: "draft" })));
+    });
+
+    it("replaces a draft with a bare to/from address and a separate display name", async () => {
+      const res = await req(app, "PUT", `${A}/threads/arc-001/signals/SES%23msg-001`, {
+        body: {
+          from: { address: "me@example.com", name: "Me" },
+          to: [{ address: "jane@example.com", name: "Jane Doe" }],
+          subject: "Hello",
+        },
+      });
+      expect(res.status).toBe(200);
+      expect(threadDb.updateSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "SES#msg-001", expect.objectContaining({
+        from: { address: "me@example.com", name: "Me" },
+        to: [{ address: "jane@example.com", name: "Jane Doe" }],
+      }));
+    });
+
+    it("rejects a display-name-decorated string in the from address field", async () => {
+      const res = await req(app, "PUT", `${A}/threads/arc-001/signals/SES%23msg-001`, {
+        body: { from: { address: '"Me" <me@example.com>' }, to: [{ address: "jane@example.com" }], subject: "Hello" },
+      });
+      expect(res.status).toBe(400);
+      expect(threadDb.updateSignal).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 when the signal is not a draft", async () => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
+      const res = await req(app, "PUT", `${A}/threads/arc-001/signals/SES%23msg-001`, {
+        body: { from: { address: "me@example.com" }, to: [{ address: "jane@example.com" }], subject: "Hello" },
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json() as { errorCode: string };
+      expect(body.errorCode).toBe("SIGNAL_NOT_DRAFT");
+    });
+  });
+
   describe("PATCH /accounts/:accountId/threads/:threadId/signals/:id — draft update", () => {
     it("updates a draft signal and returns 200 + full resource", async () => {
       const draft = makeSignal({ status: "draft" });
@@ -657,6 +768,29 @@ describe("API", () => {
       const body = await res.json() as Signal;
       expect(body.data.subject).toBe("Updated subject");
       expect(threadDb.updateSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, draft.signalLookupId, expect.objectContaining({ subject: "Updated subject" }));
+    });
+
+    it("updates the to address list with a mix of named and bare recipients", async () => {
+      const draft = makeSignal({ status: "draft" });
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(draft));
+      const res = await req(app, "PATCH", `${A}/threads/arc-001/signals/SES%23msg-001`, {
+        body: { to: [{ address: "jane@example.com", name: "Jane Doe" }, { address: "bob@example.com" }] },
+      });
+      expect(res.status).toBe(200);
+      expect(threadDb.updateSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, draft.signalLookupId, expect.objectContaining({
+        to: [{ address: "jane@example.com", name: "Jane Doe" }, { address: "bob@example.com" }],
+      }));
+    });
+
+    it("rejects a display-name-decorated string in a to address field", async () => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "draft" })));
+      const res = await req(app, "PATCH", `${A}/threads/arc-001/signals/SES%23msg-001`, {
+        body: { to: [{ address: "Jane Doe <jane@example.com>" }] },
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json() as { errorCode: string };
+      expect(body.errorCode).toBe("INVALID_REQUEST");
+      expect(threadDb.updateSignal).not.toHaveBeenCalled();
     });
 
     it("returns 400 when signal is not a draft", async () => {
@@ -695,6 +829,22 @@ describe("API", () => {
       vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(makeThread()));
       const res = await req(app, "POST", `${A}/threads/arc-001/signals/nonexistent/send`);
       expect(res.status).toBe(404);
+    });
+
+    // Defense-in-depth: create/replace/patch already reject a decorated address in `.address`,
+    // but this re-checks at send time so a draft written before that validation existed (or
+    // written any other way `.address` could end up malformed) still can't go out.
+    it("returns 400 INVALID_EMAIL when a stored draft's address is display-name-decorated", async () => {
+      vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(makeThread({ recipientAddress: "user@example.com" })));
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({
+        status: "draft",
+        data: { from: { address: "user@example.com" }, to: [{ address: '"Doe, Jane" <jane@example.com>' }] },
+      })));
+      const res = await req(app, "POST", `${A}/threads/arc-001/signals/SES%23msg-001/send`);
+      expect(res.status).toBe(400);
+      const body = await res.json() as { errorCode: string };
+      expect(body.errorCode).toBe("INVALID_EMAIL");
+      expect(threadDb.updateSignalSendStatus).not.toHaveBeenCalled();
     });
   });
 
