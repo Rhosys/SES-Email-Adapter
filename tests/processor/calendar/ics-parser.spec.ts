@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { findCalendarAttachment, parseIcs, sanitizeUrl } from "../../../src/processor/calendar/ics-parser.js";
+import { findCalendarAttachments, parseIcs, parseIcsEvents, collapseCalendarEvents, sanitizeUrl } from "../../../src/processor/calendar/ics-parser.js";
 import { createMockLogger } from "../../helpers/mock-logger.js";
 import type { Attachment } from "../../../src/types/index.js";
+import type { CalendarEventData } from "../../../src/types/calendar.js";
 
 function makeAttachment(overrides: Partial<Attachment> = {}): Attachment {
   return {
@@ -18,7 +19,7 @@ function makeAttachment(overrides: Partial<Attachment> = {}): Attachment {
 // Validates: Requirements 2.1, 2.4
 // ---------------------------------------------------------------------------
 
-describe("findCalendarAttachment — MIME/extension detection", () => {
+describe("findCalendarAttachments — MIME/extension detection", () => {
   it.each([
     { mime: "text/calendar", filename: "invite.ics", workflow: "job", detected: true, reason: "text/calendar MIME + .ics extension" },
     { mime: "text/calendar", filename: "meeting.dat", workflow: "healthcare", detected: true, reason: "text/calendar MIME alone (no .ics extension)" },
@@ -28,66 +29,57 @@ describe("findCalendarAttachment — MIME/extension detection", () => {
   ])("$reason → detected=$detected", ({ mime, filename, detected }) => {
     const logger = createMockLogger();
     const attachment = makeAttachment({ mimeType: mime, filename });
-    const result = findCalendarAttachment([attachment], logger);
+    const result = findCalendarAttachments([attachment], logger);
 
     if (detected) {
-      expect(result).not.toBeNull();
-      expect(result!.filename).toBe(filename);
+      expect(result).toHaveLength(1);
+      expect(result[0]!.filename).toBe(filename);
     } else {
-      expect(result).toBeNull();
+      expect(result).toHaveLength(0);
     }
   });
 });
 
 // ---------------------------------------------------------------------------
-// Property 2: Multi-attachment priority selects first with METHOD
+// Property 2: every calendar attachment is returned, none discarded
 // Validates: Requirements 2.3, 2.5
 // ---------------------------------------------------------------------------
 
-describe("findCalendarAttachment — multi-attachment priority", () => {
+describe("findCalendarAttachments — returns every calendar attachment", () => {
   it.each([
     {
-      label: "selects first attachment with METHOD when it appears second",
+      label: "returns both attachments regardless of METHOD presence/order",
       attachments: [
         makeAttachment({ filename: "no-method.ics", mimeType: "text/calendar", s3Key: "a/no-method" }),
         makeAttachment({ filename: "has-method.ics", mimeType: "text/calendar; method=REQUEST", s3Key: "a/has-method" }),
       ],
-      expectedFilename: "has-method.ics",
+      expectedFilenames: ["no-method.ics", "has-method.ics"],
     },
     {
-      label: "selects first METHOD attachment when multiple have METHOD",
+      label: "returns all attachments when multiple have METHOD",
       attachments: [
         makeAttachment({ filename: "has-method-1.ics", mimeType: "text/calendar; method=REQUEST", s3Key: "a/method-1" }),
         makeAttachment({ filename: "has-method-2.ics", mimeType: "text/calendar; method=CANCEL", s3Key: "a/method-2" }),
       ],
-      expectedFilename: "has-method-1.ics",
-    },
-    {
-      label: "falls back to first .ics when none have METHOD",
-      attachments: [
-        makeAttachment({ filename: "no-method-1.ics", mimeType: "text/calendar", s3Key: "a/no-method-1" }),
-        makeAttachment({ filename: "no-method-2.ics", mimeType: "text/calendar", s3Key: "a/no-method-2" }),
-      ],
-      expectedFilename: "no-method-1.ics",
+      expectedFilenames: ["has-method-1.ics", "has-method-2.ics"],
     },
     {
       label: "returns the single attachment when only one exists",
       attachments: [
         makeAttachment({ filename: "single.ics", mimeType: "text/calendar", s3Key: "a/single" }),
       ],
-      expectedFilename: "single.ics",
+      expectedFilenames: ["single.ics"],
     },
-  ])("$label", ({ attachments, expectedFilename }) => {
+  ])("$label", ({ attachments, expectedFilenames }) => {
     const logger = createMockLogger();
-    const result = findCalendarAttachment(attachments, logger);
+    const result = findCalendarAttachments(attachments, logger);
 
-    expect(result).not.toBeNull();
-    expect(result!.filename).toBe(expectedFilename);
+    expect(result.map(a => a.filename)).toEqual(expectedFilenames);
   });
 
   it("logs TRACK when multiple calendar attachments found", () => {
     const logger = createMockLogger();
-    findCalendarAttachment([
+    findCalendarAttachments([
       makeAttachment({ filename: "a.ics", mimeType: "text/calendar", s3Key: "a/1" }),
       makeAttachment({ filename: "b.ics", mimeType: "text/calendar", s3Key: "a/2" }),
     ], logger);
@@ -100,11 +92,145 @@ describe("findCalendarAttachment — multi-attachment priority", () => {
 
   it("does not log TRACK for a single calendar attachment", () => {
     const logger = createMockLogger();
-    findCalendarAttachment([
+    findCalendarAttachments([
       makeAttachment({ filename: "single.ics", mimeType: "text/calendar", s3Key: "a/1" }),
     ], logger);
 
     expect(logger.calls.filter(c => c.method === "track")).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseIcsEvents / collapseCalendarEvents — multi-event, multi-attachment flow
+// ---------------------------------------------------------------------------
+
+function makeCalendarEvent(overrides: Partial<CalendarEventData> = {}): CalendarEventData {
+  return {
+    title: "Event",
+    startTime: "2026-01-01T10:00:00.000Z",
+    organizer: "org@example.com",
+    attendees: [],
+    veventUid: "uid-1",
+    method: "REQUEST",
+    sequence: 0,
+    originalVeventUid: "uid-1",
+    linkedSignalId: "",
+    ...overrides,
+  };
+}
+
+describe("collapseCalendarEvents — grouping and method collapse", () => {
+  it("groups by UID and keeps the highest-SEQUENCE snapshot as the winner", () => {
+    const logger = createMockLogger();
+    const records = [
+      { event: makeCalendarEvent({ sequence: 0, title: "Original" }), rawIcsContent: "raw-0" },
+      { event: makeCalendarEvent({ sequence: 1, title: "Updated" }), rawIcsContent: "raw-1" },
+    ];
+
+    const { collapsed } = collapseCalendarEvents(records, logger);
+
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0]!.data.title).toBe("Updated");
+    expect(collapsed[0]!.rawIcsContent).toBe("raw-1");
+  });
+
+  it("keeps RECURRENCE-ID exceptions as a separate group from the master series", () => {
+    const logger = createMockLogger();
+    const records = [
+      { event: makeCalendarEvent({ title: "Master" }), rawIcsContent: "raw-master" },
+      { event: makeCalendarEvent({ title: "Exception", recurrenceId: "2026-02-01T10:00:00.000Z" }), rawIcsContent: "raw-exception" },
+    ];
+
+    const { collapsed } = collapseCalendarEvents(records, logger);
+
+    expect(collapsed).toHaveLength(2);
+    expect(collapsed.map(c => c.data.title).sort()).toEqual(["Exception", "Master"]);
+  });
+
+  it("marks the event CANCELLED when a CANCEL record is present", () => {
+    const logger = createMockLogger();
+    const records = [
+      { event: makeCalendarEvent({ sequence: 0 }), rawIcsContent: "raw-0" },
+      { event: makeCalendarEvent({ sequence: 1, method: "CANCEL" }), rawIcsContent: "raw-1" },
+    ];
+
+    const { collapsed } = collapseCalendarEvents(records, logger);
+
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0]!.data.status).toBe("CANCELLED");
+  });
+
+  it("merges REPLY attendee PARTSTAT onto the matching invite without overwriting other fields", () => {
+    const logger = createMockLogger();
+    const records = [
+      {
+        event: makeCalendarEvent({
+          title: "Invite",
+          attendees: [{ address: "bob@example.com", partstat: "NEEDS-ACTION" }],
+        }),
+        rawIcsContent: "raw-invite",
+      },
+      {
+        event: makeCalendarEvent({
+          method: "REPLY",
+          title: "",
+          attendees: [{ address: "bob@example.com", partstat: "ACCEPTED" }],
+        }),
+        rawIcsContent: "raw-reply",
+      },
+    ];
+
+    const { collapsed } = collapseCalendarEvents(records, logger);
+
+    expect(collapsed).toHaveLength(1);
+    expect(collapsed[0]!.data.title).toBe("Invite");
+    expect(collapsed[0]!.data.attendees).toEqual([{ address: "bob@example.com", partstat: "ACCEPTED" }]);
+  });
+
+  it("skips a REPLY-only group with no matching invite in the batch", () => {
+    const logger = createMockLogger();
+    const records = [
+      { event: makeCalendarEvent({ method: "REPLY" }), rawIcsContent: "raw-reply" },
+    ];
+
+    const { collapsed, skippedReplyOnly } = collapseCalendarEvents(records, logger);
+
+    expect(collapsed).toHaveLength(0);
+    expect(skippedReplyOnly).toBe(1);
+    expect(logger.calls).toContainEqual(expect.objectContaining({ method: "track" }));
+  });
+});
+
+describe("parseIcsEvents — extracts every VEVENT from one .ics", () => {
+  it("returns one CalendarEventData per VEVENT component", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Test//Test//EN",
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:multi-uid",
+      "DTSTART:20260101T100000Z",
+      "SUMMARY:Master",
+      "ORGANIZER:mailto:org@example.com",
+      "END:VEVENT",
+      "BEGIN:VEVENT",
+      "UID:multi-uid",
+      "RECURRENCE-ID:20260108T100000Z",
+      "DTSTART:20260108T130000Z",
+      "SUMMARY:Rescheduled occurrence",
+      "ORGANIZER:mailto:org@example.com",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+
+    const result = parseIcsEvents(new TextEncoder().encode(ics));
+
+    expect(result.isOk()).toBe(true);
+    const { events } = result._unsafeUnwrap();
+    expect(events).toHaveLength(2);
+    expect(events.map(e => e.title)).toEqual(["Master", "Rescheduled occurrence"]);
+    expect(events[1]!.recurrenceId).toBeDefined();
   });
 });
 
