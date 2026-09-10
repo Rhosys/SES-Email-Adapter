@@ -510,7 +510,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
       expect(result.isOk()).toBe(true);
       expect(replySender.sendReply).toHaveBeenCalledOnce();
       expect(replySender.sendReply).toHaveBeenCalledWith(expect.objectContaining({
-        to: signal.data.from.address,
+        to: [signal.data.from.address],
         from: signal.data.recipientAddress,
         accountId: TEST_ACCOUNT_ID,
         allowFallbackToPlatformSending: true,

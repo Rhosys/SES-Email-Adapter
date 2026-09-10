@@ -244,7 +244,7 @@ describe("DigestWorker — REQ-1.1, REQ-1.4, REQ-0.7", () => {
 
       const sendArgs = deps.mockSend.mock.calls[0]![0]
       // Correct recipient from forwarding target
-      expect(sendArgs.to).toBe("user@example.com")
+      expect(sendArgs.to).toEqual(["user@example.com"])
       // fromSender uses digest@ prefix
       expect(sendArgs.fromSender).toMatch(/^"Numaeel Digest" <digest@/)
       // HTML body from template renderer mock

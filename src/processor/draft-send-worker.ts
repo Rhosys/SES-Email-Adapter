@@ -86,16 +86,20 @@ export class DraftSendWorker {
 
     // MX/DNS lookups are real network calls (per-domain, ~2s timeout each) — too expensive to
     // do inline on the send-trigger request. They run here instead, off the request path, right
-    // before the message actually goes out.
-    const mxResult = await validateRecipientMx(signal.data.to);
+    // before the message actually goes out. Every recipient the message will actually reach —
+    // To, Cc, and Bcc alike — needs a deliverable domain, not just the To line.
+    const bcc = "bcc" in signal.data ? signal.data.bcc : [];
+    const allRecipients = [...signal.data.to, ...signal.data.cc, ...bcc];
+    const mxResult = await validateRecipientMx(allRecipients);
     if (mxResult.isErr()) {
       this.logger.warn("Draft send: recipient domain has no mail exchanger — parking draft.", { code: "draft_send.invalid_recipient_domain", signalId, accountId, invalidDomains: mxResult.error.invalidDomains });
       return this.parkDraft(accountId, signal, threadId, `Recipient domain does not accept mail: ${mxResult.error.invalidDomains.join(", ")}`);
     }
 
-    // Send via SES — join all recipients
     const from = signal.data.from.address;
-    const to = signal.data.to.map(r => r.address).join(", ");
+    const to = signal.data.to.map(r => r.address);
+    const cc = signal.data.cc.map(r => r.address);
+    const bccAddresses = bcc.map(r => r.address);
     const subject = signal.data.subject;
     const body = "textBody" in signal.data ? (signal.data.textBody ?? "") : "";
     const inReplyTo = await this.resolveInReplyTo(accountId, threadId, signal);
@@ -103,6 +107,8 @@ export class DraftSendWorker {
 
     const sendResult = await this.replySender.sendReply({
       to,
+      ...(cc.length ? { cc } : {}),
+      ...(bccAddresses.length ? { bcc: bccAddresses } : {}),
       from,
       subject,
       body,

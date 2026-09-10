@@ -201,7 +201,7 @@ export class CalendarForwarder {
 
     try {
       const result = await this.emailService.sendRaw({
-        to: send.to,
+        to: [send.to],
         rawData,
         fromSender: send.from,
         accountId: send.tenant,

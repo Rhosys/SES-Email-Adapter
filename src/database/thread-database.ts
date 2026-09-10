@@ -396,7 +396,7 @@ export class ThreadDatabase {
     }
   }
 
-  async updateSignal(accountId: string, signalLookupId: string, update: Partial<Pick<OutboundEmailSignalData, "subject" | "textBody" | "from" | "to">>): Promise<Result<Signal, DbError>> {
+  async updateSignal(accountId: string, signalLookupId: string, update: Partial<Pick<OutboundEmailSignalData, "subject" | "textBody" | "from" | "to" | "cc" | "bcc">>): Promise<Result<Signal, DbError>> {
     const now = DateTime.utc().toISO()!;
     const setParts: string[] = ["updatedAt = :now"];
     const exprValues: Record<string, unknown> = { ":now": now };
@@ -406,6 +406,8 @@ export class ThreadDatabase {
     if (update.textBody !== undefined) { setParts.push("#data.textBody = :textBody"); exprValues[":textBody"] = update.textBody; exprNames["#data"] = "data"; }
     if (update.from !== undefined) { setParts.push("#data.#from = :from"); exprValues[":from"] = update.from; exprNames["#from"] = "from"; exprNames["#data"] = "data"; }
     if (update.to !== undefined) { setParts.push("#data.#to = :to"); exprValues[":to"] = update.to; exprNames["#to"] = "to"; exprNames["#data"] = "data"; }
+    if (update.cc !== undefined) { setParts.push("#data.#cc = :cc"); exprValues[":cc"] = update.cc; exprNames["#cc"] = "cc"; exprNames["#data"] = "data"; }
+    if (update.bcc !== undefined) { setParts.push("#data.bcc = :bcc"); exprValues[":bcc"] = update.bcc; exprNames["#data"] = "data"; }
 
     try {
       const result = await dynamo.send(new UpdateCommand({

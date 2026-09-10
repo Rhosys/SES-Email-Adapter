@@ -114,7 +114,7 @@ describe("DraftSendWorker", () => {
 
     expect(result.isOk()).toBe(true);
     expect(replySender.sendReply).toHaveBeenCalledWith({
-      to: "recipient@example.com",
+      to: ["recipient@example.com"],
       from: "me@example.com",
       subject: "Hello",
       body: "Hi there",
@@ -187,7 +187,7 @@ describe("DraftSendWorker", () => {
     });
   });
 
-  it("joins multiple recipients in the to field", async () => {
+  it("passes multiple recipients as separate addresses in the to field", async () => {
     vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({
       data: { to: [{ address: "a@example.com" }, { address: "b@example.com" }] },
     })));
@@ -196,7 +196,7 @@ describe("DraftSendWorker", () => {
 
     expect(result.isOk()).toBe(true);
     expect(replySender.sendReply).toHaveBeenCalledWith(
-      expect.objectContaining({ to: "a@example.com, b@example.com" }),
+      expect.objectContaining({ to: ["a@example.com", "b@example.com"] }),
     );
   });
 

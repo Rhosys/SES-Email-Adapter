@@ -92,7 +92,9 @@ export type ReplySendError = EmailServiceError | ProviderSendError | DbError | {
 
 export interface ReplySender {
   sendReply(opts: {
-    to: string;
+    to: string[];
+    cc?: string[];
+    bcc?: string[];
     from: string;
     subject: string;
     body: string;
@@ -618,7 +620,7 @@ export class SignalProcessor {
         // the account never verified). allowFallbackToPlatformSending makes that degrade explicit.
         const hopCount = parseHopCount(signal.data.headers);
         const sendResult = await this.replySender.sendReply({
-          to: signal.data.from.address,
+          to: [signal.data.from.address],
           from: signal.data.recipientAddress,
           subject: signal.data.subject ?? "",
           body: "textBody" in signal.data ? (signal.data.textBody ?? "") : "",
@@ -798,6 +800,7 @@ export class SignalProcessor {
               from: { address: signal.data.recipientAddress },
               to: [signal.data.from],
               cc: [],
+              bcc: [],
               subject: renderTemplate(tmpl.subject, actionVars),
               textBody: renderTemplate(tmpl.body, actionVars),
               attachments: [],

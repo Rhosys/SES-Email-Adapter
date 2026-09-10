@@ -69,7 +69,9 @@ export class ReplySenderService implements ReplySender {
   }
 
   async sendReply(opts: {
-    to: string;
+    to: string[];
+    cc?: string[];
+    bcc?: string[];
     from: string;
     subject: string;
     body: string;
@@ -233,7 +235,7 @@ export class ReplySenderService implements ReplySender {
 
   private async sendViaProvider(
     emx: ExternalMailExchange,
-    opts: { to: string; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; headers: Array<{ Name: string; Value: string }> },
+    opts: { to: string[]; cc?: string[]; bcc?: string[]; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; headers: Array<{ Name: string; Value: string }> },
   ): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
     const adapter = this.adapters[emx.platform];
     // resolveRoute already established this; narrowing for the type checker.
@@ -241,7 +243,9 @@ export class ReplySenderService implements ReplySender {
 
     const rawMime = buildMimeMessage({
       from: opts.from,
-      to: opts.to,
+      to: opts.to.join(", "),
+      ...(opts.cc?.length ? { cc: opts.cc.join(", ") } : {}),
+      ...(opts.bcc?.length ? { bcc: opts.bcc.join(", ") } : {}),
       subject: opts.subject,
       textBody: opts.body,
       htmlBody: opts.htmlBody,
@@ -267,7 +271,7 @@ export class ReplySenderService implements ReplySender {
   }
 
   private async sendViaSes(
-    opts: { to: string; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; threadId?: string; headers: Array<{ Name: string; Value: string }> },
+    opts: { to: string[]; cc?: string[]; bcc?: string[]; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; threadId?: string; headers: Array<{ Name: string; Value: string }> },
   ): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
     const tags = buildOutboundTags("reply", {
       accountId: opts.accountId,
@@ -277,6 +281,8 @@ export class ReplySenderService implements ReplySender {
 
     const result = await this.emailService.send({
       to: opts.to,
+      ...(opts.cc?.length ? { cc: opts.cc } : {}),
+      ...(opts.bcc?.length ? { bcc: opts.bcc } : {}),
       fromSender: opts.from,
       subject: opts.subject,
       textBody: opts.body,

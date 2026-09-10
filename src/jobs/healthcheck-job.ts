@@ -48,7 +48,7 @@ export class HealthcheckJob {
 
     try {
       const result = await this.deps.emailService.send({
-        to: recipient,
+        to: [recipient],
         subject,
         textBody: text,
         htmlBody: html,

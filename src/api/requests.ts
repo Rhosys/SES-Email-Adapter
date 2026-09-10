@@ -86,6 +86,8 @@ export type UpdateSignalRequest = z.infer<typeof UpdateSignalRequest>;
 export const CreateDraftSignalRequest = z.object({
   from: EmailAddressSchema,
   to: z.array(EmailAddressSchema).min(1),
+  cc: z.array(EmailAddressSchema).optional(),
+  bcc: z.array(EmailAddressSchema).optional(),
   subject: z.string(),
   textBody: z.string().optional(),
   // The specific signal this draft is replying to, from the composer's "Reply" action — sourced
@@ -98,6 +100,8 @@ export type CreateDraftSignalRequest = z.infer<typeof CreateDraftSignalRequest>;
 export const ReplaceDraftSignalRequest = z.object({
   from: EmailAddressSchema,
   to: z.array(EmailAddressSchema).min(1),
+  cc: z.array(EmailAddressSchema).optional(),
+  bcc: z.array(EmailAddressSchema).optional(),
   subject: z.string(),
   textBody: z.string().optional(),
 });

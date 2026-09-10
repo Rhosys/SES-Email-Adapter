@@ -201,7 +201,7 @@ describe("handlePostApprovalCalendar — uses same construction rules as normal 
     const emailSend = emailService.sendRaw as ReturnType<typeof vi.fn>;
     expect(emailSend).toHaveBeenCalledOnce();
     const sendArgs = emailSend.mock.calls[0]![0];
-    expect(sendArgs.to).toBe("real-calendar@gmail.com");
+    expect(sendArgs.to).toEqual(["real-calendar@gmail.com"]);
   });
 
   it("applies system:calendar label to the arc", async () => {

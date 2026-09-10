@@ -157,7 +157,7 @@ describe("OnboardingTaskHandler.handleFollowup", () => {
       progress: { domainAdded: false, senderSetupComplete: false, emailsReceived: false },
     });
     expect((emailService.send as ReturnType<typeof vi.fn>)).toHaveBeenCalledWith(expect.objectContaining({
-      to: "user@example.com",
+      to: ["user@example.com"],
       subject: "The Next Step",
     }));
   });
