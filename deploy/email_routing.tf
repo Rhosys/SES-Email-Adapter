@@ -128,6 +128,23 @@ resource "aws_route53_record" "platform_mx" {
   records  = ["10 ${aws_route53_record.ses_mx_host.fqdn}"]
 }
 
+# Wildcard MX for per-account calendar-proxy subdomains — CalendarForwarder
+# masks the real organizer behind {threadId}@{accountId}.platform.{domain}
+# (see src/processor/calendar/calendar-forwarder.ts) so replies route back
+# through us instead of the real organizer. These subdomains are minted
+# dynamically per account, not registered individually, so a wildcard MX
+# is required for inbound REPLY messages to resolve at all. A subdomain
+# with its own explicit MX record (e.g. healthcheck.platform.{domain})
+# takes precedence over the wildcard per RFC 4592.
+resource "aws_route53_record" "platform_wildcard_mx" {
+  provider = aws.us_east_1
+  zone_id  = data.aws_route53_zone.main.zone_id
+  name     = "*.platform.${data.aws_route53_zone.main.name}"
+  type     = "MX"
+  ttl      = 300
+  records  = ["10 ${aws_route53_record.ses_mx_host.fqdn}"]
+}
+
 # ---------------------------------------------------------------------------
 # Bounce subdomain — SES custom MAIL FROM
 # SPF lives here; customers CNAME bounce.{their} → bounce.{ours}.

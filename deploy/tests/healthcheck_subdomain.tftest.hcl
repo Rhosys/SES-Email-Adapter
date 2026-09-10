@@ -228,6 +228,29 @@ run "healthcheck_ses_identity" {
   }
 }
 
+# Wildcard MX serves the per-account calendar-proxy subdomains
+# ({accountId}.platform.{domain}) minted dynamically by CalendarForwarder —
+# these are never registered individually, so inbound calendar REPLY
+# messages depend on this wildcard to resolve at all.
+run "platform_wildcard_mx_record" {
+  command = plan
+
+  assert {
+    condition     = aws_route53_record.platform_wildcard_mx.type == "MX"
+    error_message = "Platform wildcard subdomain must have an MX record"
+  }
+
+  assert {
+    condition     = aws_route53_record.platform_wildcard_mx.name == "*.platform.email.rhosys.cloud"
+    error_message = "Wildcard MX must be registered at *.platform.{domain} to cover per-account calendar-proxy subdomains"
+  }
+
+  assert {
+    condition     = anytrue([for r in aws_route53_record.platform_wildcard_mx.records : strcontains(r, "mx.platform.")])
+    error_message = "Platform wildcard MX must point to the branded MX host (mx.platform.email.rhosys.cloud)"
+  }
+}
+
 # SYSTEM tenant association exists for healthcheck identity
 run "healthcheck_system_tenant_association" {
   command = plan
