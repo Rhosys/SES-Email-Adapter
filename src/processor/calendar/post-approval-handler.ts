@@ -16,7 +16,7 @@ import type { ThreadDatabase } from "../../database/thread-database.js";
 import type { AccountDatabase } from "../../database/account-database.js";
 import type { Logger } from "../../logger.js";
 import { generateId } from "../../utils/id.js";
-import { findCalendarAttachment, parseIcs } from "./ics-parser.js";
+import { extractCalendarEvents } from "./calendar-event-extraction.js";
 import { buildCalendarSignalLookupId } from "./signal-lookup.js";
 import type { CalendarForwarder } from "./calendar-forwarder.js";
 
@@ -48,31 +48,12 @@ export async function handlePostApprovalCalendar(
 
   // Check for calendar attachments
   const attachments: Attachment[] = signal.data.attachments ?? [];
-  const calendarAttachment = findCalendarAttachment(attachments, logger);
-  if (!calendarAttachment) return;
+  const extraction = await extractCalendarEvents(attachments, contentStore, logger);
+  if (!extraction) return;
 
   logger.trackPoint("post_approval_calendar_start", { signalId: signal.id, threadId: thread.id });
 
-  // Fetch .ics bytes from content store
-  let icsBytes: Uint8Array;
-  try {
-    icsBytes = await contentStore.getContent(calendarAttachment.s3Key);
-  } catch (e) {
-    logger.warn("Post-approval calendar: failed to fetch .ics from content store.", {
-      code: "processor.post_approval_calendar.s3_fetch_failed",
-      accountId,
-      signalId: signal.id,
-      s3Key: calendarAttachment.s3Key,
-      error: e,
-    });
-    return;
-  }
-
-  // Parse .ics
-  const parseResult = parseIcs(new Uint8Array(icsBytes));
-
-  if (parseResult.isErr()) {
-    // Parse rejection — create calendar_invite_invalid signal
+  for (const invalid of extraction.invalidAttachments) {
     const invalidId = generateId("sgn-");
     const invalidTimestamp = DateTime.utc().toISO()!;
     const invalidSignal: Signal<CalendarInviteInvalidData> = {
@@ -86,7 +67,7 @@ export async function handlePostApprovalCalendar(
       labels: [],
       createdAt: invalidTimestamp,
       data: {
-        reason: parseResult.error.reason,
+        reason: invalid.reason,
         linkedSignalId: signal.id,
       },
     };
@@ -96,108 +77,109 @@ export async function handlePostApprovalCalendar(
       code: "processor.post_approval_calendar.parse_rejected",
       accountId,
       signalId: signal.id,
-      reason: parseResult.error.reason,
+      reason: invalid.reason,
+      filename: invalid.attachment.filename,
     });
-    return;
   }
 
-  // Valid parse — create calendar signal
-  const { calendarData, rawIcsContent } = parseResult.value;
-  const calendarSignalId = generateId("sgn-");
-  const calendarTimestamp = DateTime.utc().toISO()!;
-  const signalLookupId = buildCalendarSignalLookupId(calendarData.organizer, calendarData.veventUid);
-
-  // Store raw .ics as attachment on the calendar signal
-  const icsS3Key = `accounts/${accountId}/calendar/${calendarSignalId}/invite.ics`;
-  try {
-    await contentStore.saveIcsContentAsCalendar(icsS3Key, rawIcsContent);
-  } catch (e) {
-    logger.warn("Post-approval calendar: failed to store .ics in content store.", {
-      code: "processor.post_approval_calendar.s3_put_failed",
-      accountId,
-      signalId: signal.id,
-      error: e,
-    });
-    return;
-  }
-
-  // Build calendar signal with linkedSignalId pointing to the email signal
-  const calendarSignal: Signal<CalendarEventData> = {
-    id: calendarSignalId,
-    signalLookupId,
-    threadId: thread.id,
-    accountId,
-    source: "signal",
-    type: "calendar_event",
-    status: "active",
-    labels: [],
-    createdAt: calendarTimestamp,
-    data: {
-      ...calendarData,
-      linkedSignalId: signal.id,
-    },
-  };
-
-  // Forward first — external write before DB writes so a DDB failure never
-  // leaves a committed record pointing to a calendar invite that was never sent.
+  // Cache the account lookup across events — forwarding target doesn't change per event.
   const accountResult = await accountDb.getAccount(accountId);
   const calendarForwardingAddress = accountResult.isOk()
     ? accountResult.value?.defaultCalendarInviteForwardingTargetId ?? ""
     : "";
 
-  const forwardResult = await calendarForwarder.forwardInvite(
-    {
-      calendarSignal,
-      calendarForwardingAddress,
-      accountId,
-      threadId: thread.id,
-      aliasAddress: signal.data.recipientAddress,
-    },
-    logger,
-  );
+  for (const { data: calendarData, rawIcsContent } of extraction.validEvents) {
+    const calendarSignalId = generateId("sgn-");
+    const calendarTimestamp = DateTime.utc().toISO()!;
+    const signalLookupId = buildCalendarSignalLookupId(calendarData.organizer, calendarData.veventUid, calendarData.recurrenceId);
 
-  if (forwardResult.isErr()) {
-    logger.warn("Post-approval calendar: forwarding failed.", {
-      code: "processor.post_approval_calendar.forward_failed",
+    // Store raw .ics as attachment on the calendar signal
+    const icsS3Key = `accounts/${accountId}/calendar/${calendarSignalId}/invite.ics`;
+    try {
+      await contentStore.saveIcsContentAsCalendar(icsS3Key, rawIcsContent);
+    } catch (e) {
+      logger.warn("Post-approval calendar: failed to store .ics in content store.", {
+        code: "processor.post_approval_calendar.s3_put_failed",
+        accountId,
+        signalId: signal.id,
+        error: e,
+      });
+      continue;
+    }
+
+    // Build calendar signal with linkedSignalId pointing to the email signal
+    const calendarSignal: Signal<CalendarEventData> = {
+      id: calendarSignalId,
+      signalLookupId,
+      threadId: thread.id,
+      accountId,
+      source: "signal",
+      type: "calendar_event",
+      status: "active",
+      labels: [],
+      createdAt: calendarTimestamp,
+      data: {
+        ...calendarData,
+        linkedSignalId: signal.id,
+      },
+    };
+
+    // Forward first — external write before DB writes so a DDB failure never
+    // leaves a committed record pointing to a calendar invite that was never sent.
+    const forwardResult = await calendarForwarder.forwardInvite(
+      {
+        calendarSignal,
+        calendarForwardingAddress,
+        accountId,
+        threadId: thread.id,
+        aliasAddress: signal.data.recipientAddress,
+      },
+      logger,
+    );
+
+    if (forwardResult.isErr()) {
+      logger.warn("Post-approval calendar: forwarding failed.", {
+        code: "processor.post_approval_calendar.forward_failed",
+        accountId,
+        signalId: signal.id,
+        calendarSignalId,
+        error: forwardResult.error,
+      });
+      continue;
+    }
+
+    const saveCalResult = await threadDb.saveSignal(calendarSignal);
+    if (saveCalResult.isErr()) {
+      logger.warn("Post-approval calendar: failed to save calendar signal.", {
+        code: "processor.post_approval_calendar.save_failed",
+        accountId,
+        signalId: signal.id,
+        error: saveCalResult.error,
+      });
+      continue;
+    }
+
+    // Apply system:calendar label to the thread (idempotent across the loop)
+    if (!thread.labels.includes("system:calendar")) {
+      thread.labels = [...thread.labels, "system:calendar"];
+      const updateResult = await threadDb.updateThread(accountId, thread.id, thread.status, thread.lastSignalAt!, { labels: thread.labels });
+      if (updateResult.isErr()) {
+        logger.warn("Post-approval calendar: failed to apply system:calendar label.", {
+          code: "processor.post_approval_calendar.label_failed",
+          accountId,
+          threadId: thread.id,
+          error: updateResult.error,
+        });
+      }
+    }
+
+    logger.info("Post-approval calendar: processed and forwarded.", {
+      code: "processor.post_approval_calendar.complete",
       accountId,
       signalId: signal.id,
       calendarSignalId,
-      error: forwardResult.error,
+      threadId: thread.id,
+      method: calendarData.method,
     });
-    return;
   }
-
-  const saveCalResult = await threadDb.saveSignal(calendarSignal);
-  if (saveCalResult.isErr()) {
-    logger.warn("Post-approval calendar: failed to save calendar signal.", {
-      code: "processor.post_approval_calendar.save_failed",
-      accountId,
-      signalId: signal.id,
-      error: saveCalResult.error,
-    });
-    return;
-  }
-
-  // Apply system:calendar label to the thread
-  if (!thread.labels.includes("system:calendar")) {
-    thread.labels = [...thread.labels, "system:calendar"];
-    const updateResult = await threadDb.updateThread(accountId, thread.id, thread.status, thread.lastSignalAt!, { labels: thread.labels });
-    if (updateResult.isErr()) {
-      logger.warn("Post-approval calendar: failed to apply system:calendar label.", {
-        code: "processor.post_approval_calendar.label_failed",
-        accountId,
-        threadId: thread.id,
-        error: updateResult.error,
-      });
-    }
-  }
-
-  logger.info("Post-approval calendar: processed and forwarded.", {
-    code: "processor.post_approval_calendar.complete",
-    accountId,
-    signalId: signal.id,
-    calendarSignalId,
-    threadId: thread.id,
-    method: calendarData.method,
-  });
 }
