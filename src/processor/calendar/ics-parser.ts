@@ -337,17 +337,23 @@ export function findCalendarAttachment(attachments: Attachment[], logger: Logger
 
   if (calendarAttachments.length === 0) return null;
 
-  if (calendarAttachments.length > 1) {
-    logger.track("Multiple calendar attachments found on signal. Selecting by METHOD priority.", {
-      code: "ics_parser.multiple_calendar_attachments",
-      count: calendarAttachments.length,
-    });
-  }
-
   // Priority: first attachment with a METHOD parameter in its MIME type
   const withMethod = calendarAttachments.find(hasMethodParameter);
-  if (withMethod !== undefined) return withMethod;
+  const selected = withMethod ?? calendarAttachments[0] ?? null;
 
-  // Fallback: first calendar attachment (guaranteed to exist since length > 0)
-  return calendarAttachments[0] ?? null;
+  if (calendarAttachments.length > 1) {
+    logger.track(
+      `Multiple calendar attachments found on signal (${calendarAttachments.length}). Selected "${selected?.filename}" (${selected?.mimeType})${withMethod === undefined ? " via fallback; no METHOD parameter present" : " via METHOD priority"}.`,
+      {
+        code: "ics_parser.multiple_calendar_attachments",
+        count: calendarAttachments.length,
+        candidates: calendarAttachments.map((a) => ({ filename: a.filename, mimeType: a.mimeType })),
+        selectedFilename: selected?.filename,
+        selectedMimeType: selected?.mimeType,
+        selectionMethod: withMethod === undefined ? "fallback" : "method_priority",
+      },
+    );
+  }
+
+  return selected;
 }
