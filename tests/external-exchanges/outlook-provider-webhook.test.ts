@@ -5,6 +5,12 @@ import { OutlookProvider } from "../../src/external-exchanges/outlook-provider.j
 import { createMockLogger } from "../helpers/mock-logger.js";
 import type { ExternalMailExchange } from "../../src/types/index.js";
 
+// The provider mints its own token via the Authress client — stub it to return a fixed token so
+// tests exercise the handler, not Authress.
+vi.mock("../../src/api/authress-access.js", () => ({
+  getClient: () => ({ connections: { getConnectionCredentials: vi.fn().mockResolvedValue({ data: { accessToken: "token-abc" } }) } }),
+}));
+
 function makeEmx(overrides?: Partial<ExternalMailExchange>): ExternalMailExchange {
   return {
     id: "emx_outlook1",
@@ -45,7 +51,6 @@ describe("OutlookProvider webhook — lastSyncAt", () => {
       db: db as never,
       signalQueue: signalQueue as never,
       logger: createMockLogger(),
-      getProviderToken: vi.fn().mockResolvedValue("token-abc"),
     });
 
     const app = new Hono();
@@ -80,7 +85,6 @@ describe("OutlookProvider webhook — lastSyncAt", () => {
       db: db as never,
       signalQueue: signalQueue as never,
       logger: createMockLogger(),
-      getProviderToken: vi.fn().mockResolvedValue("token-abc"),
     });
 
     const app = new Hono();
@@ -112,7 +116,6 @@ describe("OutlookProvider webhook — lastSyncAt", () => {
       db: db as never,
       signalQueue: signalQueue as never,
       logger: createMockLogger(),
-      getProviderToken: vi.fn().mockResolvedValue("token-abc"),
     });
 
     const app = new Hono();

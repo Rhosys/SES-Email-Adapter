@@ -25,8 +25,8 @@ const CreateExternalExchangeRequest = z.object({
  * Connection id to use when a client did not send one.
  *
  * This is the one place a connection id is inferred, and only at connect time, where the
- * inference matches what the client would have sent anyway. Every later use reads the value
- * persisted on the exchange — see `exchangeCredentials`.
+ * inference matches what the client would have sent anyway. Every later use reads the identity
+ * coordinates persisted on the exchange — each OAuth adapter's private `getToken` does this.
  */
 const DEFAULT_CONNECTION_IDS: Record<string, string> = { gmail: "google", outlook: "microsoft" };
 

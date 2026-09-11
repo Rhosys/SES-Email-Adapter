@@ -113,7 +113,6 @@ export interface AppDeps {
   outlookProvider: OutlookProvider;
   adapters: Record<EmxPlatform, ProviderAdapter>;
   encryptionManager: EncryptionManager;
-  getProviderToken: (userId: string, connectionId: string, connectionUserId: string) => Promise<string>;
   signalQueue: SignalQueue;
   jmapAdapter: JmapAdapter;
 }

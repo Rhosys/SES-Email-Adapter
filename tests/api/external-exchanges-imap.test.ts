@@ -141,7 +141,6 @@ describe("External Exchanges IMAP API", () => {
       logger: createMockLogger(),
       adapters: makeMockAdapters({ imap: imapAdapter }),
       encryptionManager: encryptionManager as never,
-      getProviderToken: async () => "",
     }));
   });
 

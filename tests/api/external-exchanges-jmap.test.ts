@@ -139,7 +139,6 @@ describe("External Exchanges JMAP API", () => {
       logger: createMockLogger(),
       adapters: makeMockAdapters({ jmap: jmapAdapter }),
       encryptionManager: encryptionManager as never,
-      getProviderToken: async () => "",
     }));
   });
 

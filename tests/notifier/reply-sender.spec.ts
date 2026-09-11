@@ -311,23 +311,9 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     expect((adapter.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]![1]).toEqual(exchange);
   });
 
-  it("refuses to send when the exchange predates connection tracking", async () => {
-    const emailService = makeEmailService();
-    const legacy = { ...ACTIVE_GMAIL_EXCHANGE };
-    delete legacy.userId;
-    delete legacy.connectionId;
-    const handler = makeSender({
-      emailService,
-      // Unverified domain + REPLY forbids platform fallback → the unusable exchange refuses.
-      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, senderSetupComplete: false }), exchangesDb: makeExchangesDb({ exchange: legacy }),
-      adapters: { gmail: makeGmailAdapter(ok({ providerMessageId: "unused" })) },
-    });
-
-    const result = await handler.sendReply(REPLY);
-
-    expect(result.isErr()).toBe(true);
-    expect(emailService.send).not.toHaveBeenCalled();
-  });
+  // Note: whether an exchange can actually mint a token (e.g. one predating connection tracking)
+  // is the adapter's concern, verified in provider-send.test.ts — the router no longer inspects
+  // credentials, so there is no router-level "refuses on missing identity" case here.
 
   it("hands the provider a complete RFC 5322 message as the first argument", async () => {
     const adapter = makeGmailAdapter(ok({ providerMessageId: "gmail-msg-1" }));

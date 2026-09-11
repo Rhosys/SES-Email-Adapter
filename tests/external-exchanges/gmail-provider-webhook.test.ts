@@ -11,6 +11,12 @@ vi.mock("../../src/external-exchanges/jwks-verifier.js", () => ({
   createVerifier: () => ({ verify: vi.fn().mockResolvedValue(ok({})) }),
 }));
 
+// The provider mints its own token via the Authress client — stub it to return a fixed token so
+// tests exercise the handler, not Authress.
+vi.mock("../../src/api/authress-access.js", () => ({
+  getClient: () => ({ connections: { getConnectionCredentials: vi.fn().mockResolvedValue({ data: { accessToken: "token-abc" } }) } }),
+}));
+
 function makeEmx(overrides?: Partial<ExternalMailExchange>): ExternalMailExchange {
   return {
     id: "emx_gmail1",
@@ -54,7 +60,6 @@ describe("GmailProvider webhook — lastSyncAt", () => {
       db: db as never,
       signalQueue: signalQueue as never,
       logger: createMockLogger(),
-      getProviderToken: vi.fn().mockResolvedValue("token-abc"),
     });
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(

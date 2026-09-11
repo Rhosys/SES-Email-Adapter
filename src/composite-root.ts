@@ -72,7 +72,6 @@ import { EmxIdleWorker } from "./external-exchanges/emx-idle-worker.js";
 import type { ProviderAdapter } from "./external-exchanges/provider-adapter.js";
 import type { EmxPlatform } from "./types/index.js";
 import { EncryptionManager } from "./secrets/encryption-manager.js";
-import { getClient as getAuthressClient } from "./api/authress-access.js";
 import { RequestLogger } from "./logger.js";
 
 // ---------------------------------------------------------------------------
@@ -175,34 +174,16 @@ export class CompositeRoot {
     // mailbox has to go out through that provider, so ReplySenderService needs the adapters.
     // -----------------------------------------------------------------------
 
-    /**
-     * Fetches the provider access token Authress holds for a linked identity.
-     *
-     * `userId` is the Authress account user who linked the mailbox — the `userId` path
-     * parameter of GET /v1/connections/{connectionId}/users/{userId}/credentials.
-     * `connectionUserId` selects which of that user's (possibly several) identities linked
-     * under `connectionId` to fetch credentials for — without it Authress returns whichever
-     * identity logged in most recently, which is wrong when a user has linked more than one
-     * mailbox through the same connection.
-     */
-    const getProviderToken = async (userId: string, connectionId: string, connectionUserId: string): Promise<string> => {
-      const client = getAuthressClient();
-      const response = await client.connections.getConnectionCredentials(connectionId, userId, connectionUserId);
-      return response.data.accessToken;
-    };
-
     const gmailProvider = new GmailProvider({
       db: exchangesDb,
       signalQueue,
       logger,
-      getProviderToken,
     });
 
     const outlookProvider = new OutlookProvider({
       db: exchangesDb,
       signalQueue,
       logger,
-      getProviderToken,
     });
 
     const encryptionManager = new EncryptionManager(kms, logger);
@@ -473,7 +454,6 @@ export class CompositeRoot {
       outlookProvider,
       adapters: emxAdapters,
       encryptionManager,
-      getProviderToken,
       signalQueue,
       jmapAdapter,
     });

@@ -18,7 +18,6 @@ import type { EmailService } from "../email/email-service.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { ExchangesDatabase } from "../database/exchanges-database.js";
 import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js";
-import { exchangeCredentials } from "../external-exchanges/provider-adapter.js";
 import type { ExternalMailExchange, EmxPlatform } from "../types/index.js";
 import type { Result } from "../errors.js";
 import { ok, err } from "../errors.js";
@@ -196,9 +195,9 @@ export class ReplySenderService implements ReplySender {
     if (!emx || emx.status !== "active") {
       return this.sesOrFallback(accountId, fromAddress, decoratedFrom, allowFallbackToPlatformSending, emx ? `exchange status is ${emx.status}` : "exchange no longer exists");
     }
-    if (!exchangeCredentials(emx)) {
-      return this.sesOrFallback(accountId, fromAddress, decoratedFrom, allowFallbackToPlatformSending, "exchange has no linked identity recorded — it predates connection tracking and must be reconnected");
-    }
+    // Whether the exchange can actually mint a token is the adapter's concern, not the router's:
+    // sendViaProvider calls adapter.sendMessage, which resolves the token and returns a failure
+    // (e.g. a missing linked identity) if it can't. The router only decides the route.
     return ok({ kind: "provider", exchange: emx, from: decoratedFrom });
   }
 

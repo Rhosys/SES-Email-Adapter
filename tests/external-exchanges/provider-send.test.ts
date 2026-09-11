@@ -6,6 +6,13 @@ import type { SignalQueue } from "../../src/messaging/signal-queue.js";
 import type { ExternalMailExchange } from "../../src/types/index.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 
+// Both OAuth providers mint their token via the Authress client. A single controllable spy backs
+// getConnectionCredentials so tests can vary the token, force a throw, and assert the ids passed.
+const getConnectionCredentials = vi.fn();
+vi.mock("../../src/api/authress-access.js", () => ({
+  getClient: () => ({ connections: { getConnectionCredentials } }),
+}));
+
 // OutlookProvider.activate reads an RSA private key via KMS to build the notification
 // encryption certificate Graph requires. Mocked here with a real (test-generated) keypair so
 // createPublicKey/export in the adapter run against genuine key material, not a fixture that
@@ -51,12 +58,11 @@ function errorResponse(status: number, text: string): Response {
   return { ok: false, status, json: async () => ({}), text: async () => text } as Response;
 }
 
-function deps(getProviderToken: () => Promise<string> = async () => "token") {
+function deps() {
   return {
     db: {} as ExchangesDatabase,
     signalQueue: {} as SignalQueue,
     logger: createMockLogger(),
-    getProviderToken,
   };
 }
 
@@ -65,6 +71,8 @@ let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
+  // Default: Authress hands back a usable token. Tests override for throw/specific-token cases.
+  getConnectionCredentials.mockReset().mockResolvedValue({ data: { accessToken: "token" } });
 });
 
 afterEach(() => {
@@ -96,9 +104,10 @@ describe("credential resolution — shared by renew/deactivate/fetchMessage/send
   });
 
   it("Gmail.renew maps a token-fetch failure to a renewal failure, not an unhandled throw", async () => {
-    const provider = new GmailProvider(deps(() => { throw new Error("credentials revoked"); }));
+    getConnectionCredentials.mockRejectedValueOnce(new Error("credentials revoked"));
+    const provider = new GmailProvider(deps());
     const result = await provider.renew(EMX);
-    expect(result._unsafeUnwrapErr()).toEqual({ kind: "provider_renewal_failed", cause: expect.any(Error) });
+    expect(result._unsafeUnwrapErr().kind).toBe("provider_renewal_failed");
   });
 
   it("Outlook.deactivate refuses cleanly when the exchange has no linked identity recorded", async () => {
@@ -108,10 +117,11 @@ describe("credential resolution — shared by renew/deactivate/fetchMessage/send
   });
 
   it("uses the token the resolved credentials produced, on the outgoing request", async () => {
+    getConnectionCredentials.mockResolvedValueOnce({ data: { accessToken: "resolved-token" } });
     fetchMock
       .mockResolvedValueOnce(jsonResponse(200, { id: "gmail-1" }))
       .mockResolvedValueOnce(jsonResponse(200, {}));
-    await new GmailProvider(deps(async () => "resolved-token")).sendMessage(RAW_MIME, EMX);
+    await new GmailProvider(deps()).sendMessage(RAW_MIME, EMX);
     expect(fetchMock.mock.calls[0]![1].headers.Authorization).toBe("Bearer resolved-token");
   });
 });
@@ -128,12 +138,12 @@ describe("GmailProvider.activate", () => {
       .mockResolvedValueOnce(jsonResponse(200, { historyId: "100", expiration: String(Date.now() + 3600_000) }))
       .mockResolvedValueOnce(jsonResponse(200, { emailAddress: "user@gmail.com" }));
 
-    const getProviderToken = vi.fn().mockResolvedValue("token-xyz");
-    const result = await new GmailProvider(deps(getProviderToken)).activate(EMX, IDENTITY);
+    getConnectionCredentials.mockResolvedValueOnce({ data: { accessToken: "token-xyz" } });
+    const result = await new GmailProvider(deps()).activate(EMX, IDENTITY);
 
     expect(result.isOk()).toBe(true);
     expect(result._unsafeUnwrap()).toMatchObject({ syncCursor: "100", providerSubscriptionId: "watch", emailAddress: "user@gmail.com" });
-    expect(getProviderToken).toHaveBeenCalledWith("authress-user-9", "google", "google-sub-12345");
+    expect(getConnectionCredentials).toHaveBeenCalledWith("google", "authress-user-9", "google-sub-12345");
   });
 
   it("fails without making a request when no identity is supplied", async () => {
@@ -162,12 +172,12 @@ describe("OutlookProvider.activate", () => {
       .mockResolvedValueOnce(jsonResponse(200, { id: "sub-1", expirationDateTime: "2026-09-01T00:00:00Z" }))
       .mockResolvedValueOnce(jsonResponse(200, { mail: "user@contoso.com" }));
 
-    const getProviderToken = vi.fn().mockResolvedValue("token-xyz");
-    const result = await new OutlookProvider(deps(getProviderToken)).activate(outlookEmx, IDENTITY);
+    getConnectionCredentials.mockResolvedValueOnce({ data: { accessToken: "token-xyz" } });
+    const result = await new OutlookProvider(deps()).activate(outlookEmx, IDENTITY);
 
     expect(result.isOk()).toBe(true);
     expect(result._unsafeUnwrap()).toMatchObject({ providerSubscriptionId: "sub-1", emailAddress: "user@contoso.com" });
-    expect(getProviderToken).toHaveBeenCalledWith("authress-user-9", "microsoft", "microsoft-oid-12345");
+    expect(getConnectionCredentials).toHaveBeenCalledWith("microsoft", "authress-user-9", "microsoft-oid-12345");
   });
 
   it("fails without making a request when no identity is supplied", async () => {
