@@ -88,7 +88,16 @@ export interface Notifier {
  * Failure modes of an outbound send, across both routes: SES rejections, provider-side
  * rejections (Gmail/Graph), and the database reads that decide which route to take.
  */
-export type ReplySendError = EmailServiceError | ProviderSendError | DbError | { kind: "loop_guard_tripped"; hopCount: number };
+export type ReplySendError =
+  | EmailServiceError
+  | ProviderSendError
+  | DbError
+  | { kind: "loop_guard_tripped"; hopCount: number }
+  // The from-address has no DMARC-aligned way to leave: it is not backed by a capable exchange,
+  // its domain is not verified for SES, and platform fallback was not permitted for this send.
+  // This is a routing refusal decided before any provider or SES call — distinct from a provider
+  // rejecting a message it received. `reason` explains which routing precondition failed.
+  | { kind: "from_address_unsendable"; reason: string };
 
 export interface ReplySender {
   sendReply(opts: {

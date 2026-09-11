@@ -2,6 +2,7 @@ import { ok, err } from "../errors.js";
 import type { Result } from "../errors.js";
 import type { ProcessorError } from "../errors.js";
 import type { ProviderAdapter, ProviderFetchError } from "./provider-adapter.js";
+import type { EmxPlatform } from "../types/index.js";
 import type { InboundSignalMessage } from "../processor/processor.js";
 import type { Logger } from "../logger.js";
 import type { EmailContentStore } from "../content-store.js";
@@ -22,7 +23,7 @@ export interface EmxProcessor {
 interface EmxInboundWorkerDeps {
   logger: Logger;
   emailContentStore: EmailContentStore;
-  adapters: Record<string, ProviderAdapter>;
+  adapters: Record<EmxPlatform, ProviderAdapter>;
   accountDb: AccountDatabase;
   exchangesDb: ExchangesDatabase;
   processor: EmxProcessor;
@@ -31,7 +32,7 @@ interface EmxInboundWorkerDeps {
 export class EmxInboundWorker {
   private readonly logger: Logger;
   private readonly emailContentStore: EmailContentStore;
-  private readonly adapters: Record<string, ProviderAdapter>;
+  private readonly adapters: Record<EmxPlatform, ProviderAdapter>;
   private readonly accountDb: AccountDatabase;
   private readonly exchangesDb: ExchangesDatabase;
   private readonly processor: EmxProcessor;

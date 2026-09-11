@@ -9,7 +9,7 @@ import type { Logger } from "../logger.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 import type { SignalQueue } from "../messaging/signal-queue.js";
 import type { AccessService } from "./accountsApi.js";
-import { EMX_PLATFORMS, type ExternalMailExchange } from "../types/index.js";
+import { EMX_PLATFORMS, type ExternalMailExchange, type EmxPlatform } from "../types/index.js";
 
 const CreateExternalExchangeRequest = z.object({
   platform: z.enum(EMX_PLATFORMS),
@@ -116,7 +116,7 @@ export class ExternalExchangesApi {
   constructor(
     private readonly accountDb: AccountDatabase,
     private readonly exchangesDb: ExchangesDatabase,
-    private readonly adapters: Record<string, ProviderAdapter>,
+    private readonly adapters: Record<EmxPlatform, ProviderAdapter>,
     private readonly getLinkedIdentity: AccessService["getLinkedIdentity"],
     private readonly encryptionManager: EncryptionManager,
     private readonly signalQueue: SignalQueue,

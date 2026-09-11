@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok, err } from "neverthrow";
 import { EmxDispatchWorker } from "../../src/external-exchanges/emx-dispatch-worker.js";
 import type { ProviderAdapter } from "../../src/external-exchanges/provider-adapter.js";
+import { makeMockAdapter, makeMockAdapters } from "../helpers/provider-adapters.js";
 import type { ExternalMailExchange } from "../../src/types/index.js";
 import type { Logger } from "../../src/logger.js";
 
@@ -25,25 +26,14 @@ const mockDb = {
   getExternalExchange: vi.fn(),
 };
 
-const mockImapAdapter: ProviderAdapter = {
-  activate: vi.fn(),
-  renew: vi.fn(),
-  deactivate: vi.fn(),
-  fetchMessage: vi.fn(),
-};
-
-const mockGmailAdapter: ProviderAdapter = {
-  activate: vi.fn(),
-  renew: vi.fn(),
-  deactivate: vi.fn(),
-  fetchMessage: vi.fn(),
-};
+const mockImapAdapter: ProviderAdapter = makeMockAdapter();
+const mockGmailAdapter: ProviderAdapter = makeMockAdapter();
 
 function createWorker(): EmxDispatchWorker {
   return new EmxDispatchWorker({
     logger: mockLogger,
     db: mockDb as never,
-    adapters: { imap: mockImapAdapter, gmail: mockGmailAdapter },
+    adapters: makeMockAdapters({ imap: mockImapAdapter, gmail: mockGmailAdapter }),
   });
 }
 

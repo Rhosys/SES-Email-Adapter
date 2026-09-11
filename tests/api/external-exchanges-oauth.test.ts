@@ -13,6 +13,7 @@ import { createApp } from "../../src/api/app.js";
 import { ok, err } from "../../src/errors.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
+import { makeMockAdapters } from "../helpers/provider-adapters.js";
 import type { MockLogger } from "../helpers/mock-logger.js";
 
 async function req(
@@ -79,7 +80,7 @@ function build(overrides: { linkedIdentity?: unknown; activateResult?: unknown }
     auth: { verify: vi.fn().mockResolvedValue(ok({ userId: CALLER_USER_ID })) },
     access: { checkAccess: async () => {}, getLinkedIdentity } as never,
     logger,
-    adapters: { gmail: adapter },
+    adapters: makeMockAdapters({ gmail: adapter }),
   }));
   return { app, accountDb, exchangesDb, adapter, logger: logger as MockLogger, getLinkedIdentity };
 }

@@ -1,6 +1,7 @@
 import { ok } from "../../src/errors.js";
 import { BillingHandler } from "../../src/billing/billing-handler.js";
 import type { AppDeps } from "../../src/api/app.js";
+import { makeMockAdapters } from "./provider-adapters.js";
 
 /** Provides sensible no-op defaults for all AppDeps fields that tests don't exercise. */
 export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
@@ -31,7 +32,7 @@ export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
     embeddingGenerator: {} as never,
     threadMatcher: {} as never,
     unsubscribeTokenGenerator: { generate: async () => "tok", verify: async () => ok({ accountId: "acct", emailType: "digest" as const }) } as never,
-    adapters: {},
+    adapters: makeMockAdapters(),
     encryptionManager: { encrypt: () => "encrypted", decrypt: () => "decrypted" } as never,
     getProviderToken: async () => "",
     signalQueue: { send: async () => ok(undefined), sendBatch: async () => ok(undefined) } as never,

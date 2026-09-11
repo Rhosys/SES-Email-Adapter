@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import stringify from "json-stringify-safe";
 import { DateTime } from "luxon";
+import { errorMessage } from "./errors.js";
 
 // TRACK sits between WARN and ERROR: it always means "investigate," but never urgently.
 // WARN = system compensated, alert only if volume crosses a threshold.
@@ -36,10 +37,14 @@ export interface Logger {
   // resulting timeline is what makes debugging a slow or failed invocation tractable.
   trackPoint(name: string, data?: Record<string, unknown>): void;
   info(message: string, context?: Record<string, unknown>): void;
-  track(message: string, context?: Record<string, unknown>): void;
-  warn(message: string, context?: Record<string, unknown>): void;
-  error(message: string, context?: Record<string, unknown>): void;
-  critical(message: string, context?: Record<string, unknown>): void;
+  // `error` accepts a raw Error, one of our discriminated error kinds, or a neverthrow Result
+  // (its `.error` is unwrapped). When supplied, its readable message is appended to the title,
+  // its `kind` fills `code` (unless context already has one), and the full error is attached as
+  // structured context under `error` — so a call site never has to hand-inline the reason.
+  track(message: string, context?: Record<string, unknown>, error?: unknown): void;
+  warn(message: string, context?: Record<string, unknown>, error?: unknown): void;
+  error(message: string, context?: Record<string, unknown>, error?: unknown): void;
+  critical(message: string, context?: Record<string, unknown>, error?: unknown): void;
 }
 
 const PAYLOAD_LIMIT = 262_144; // 256KB in bytes
@@ -152,6 +157,17 @@ export function redactReplacer(key: string, value: unknown): unknown {
   return redactValue(key, value);
 }
 
+// Normalizes the optional error argument to the value worth logging. A neverthrow Result is
+// unwrapped: an `err` yields its `.error`, an `ok` yields undefined (nothing to log). Anything
+// else (a raw Error or one of our error kinds) is returned as-is.
+function unwrapResultError(error: unknown): unknown {
+  if (error && typeof error === "object" && typeof (error as { isErr?: unknown }).isErr === "function") {
+    const result = error as { isErr(): boolean; error?: unknown };
+    return result.isErr() ? result.error : undefined;
+  }
+  return error;
+}
+
 function serializeErrors(obj: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(obj)) {
@@ -208,25 +224,52 @@ export class RequestLogger implements Logger {
     this.emit("info", message, context);
   }
 
-  track(message: string, context?: Record<string, unknown>): void {
-    this.emit("track", message, context);
+  track(message: string, context?: Record<string, unknown>, error?: unknown): void {
+    this.emit("track", message, context, error);
   }
 
-  warn(message: string, context?: Record<string, unknown>): void {
-    this.emit("warn", message, context);
+  warn(message: string, context?: Record<string, unknown>, error?: unknown): void {
+    this.emit("warn", message, context, error);
   }
 
-  error(message: string, context?: Record<string, unknown>): void {
-    this.emit("error", message, context);
+  error(message: string, context?: Record<string, unknown>, error?: unknown): void {
+    this.emit("error", message, context, error);
   }
 
-  critical(message: string, context?: Record<string, unknown>): void {
-    this.emit("critical", message, context);
+  critical(message: string, context?: Record<string, unknown>, error?: unknown): void {
+    this.emit("critical", message, context, error);
   }
 
-  private emit(level: LogLevel, title: string, context?: Record<string, unknown>): void {
+  private emit(level: LogLevel, title: string, context?: Record<string, unknown>, error?: unknown): void {
     const includeTrackPoints = level === "track" || level === "error" || level === "critical";
     const includeStack = level === "error" || level === "critical";
+
+    // When the caller supplies an error (raw Error, one of our error kinds, or a neverthrow
+    // Result), derive the pieces a log needs from it exactly once — so no call site has to
+    // remember to inline the reason into the message or copy the kind into `code`. A Result is
+    // unwrapped to its `.error`; an `ok` Result carries no error and is ignored.
+    let effectiveTitle = title;
+    let mergedContext: Record<string, unknown> | undefined = context;
+    let derivedCode: string | undefined;
+    if (error !== undefined) {
+      const unwrapped = unwrapResultError(error);
+      if (unwrapped !== undefined) {
+        const reason = errorMessage(unwrapped);
+        // Append the reason unless the caller already wrote it into the message.
+        if (reason && reason !== "unknown error" && !title.includes(reason)) {
+          effectiveTitle = `${title}: ${reason}`;
+        }
+        if (unwrapped && typeof unwrapped === "object" && "kind" in unwrapped && typeof (unwrapped as { kind: unknown }).kind === "string") {
+          derivedCode = (unwrapped as { kind: string }).kind;
+        }
+        // Attach the full structured error unless the caller already provided one.
+        if (!mergedContext || !("error" in mergedContext)) {
+          mergedContext = { ...(mergedContext ?? {}), error: unwrapped };
+        }
+      }
+    }
+    title = effectiveTitle;
+    context = mergedContext;
 
     // Extract code and levelThreshold from context if present. levelThreshold controls how
     // frequently a message is expected — lower means rarer, so alerting can be tuned per site.
@@ -239,6 +282,8 @@ export class RequestLogger implements Logger {
       code = extractedCode;
       restContext = rest;
     }
+    // Fall back to the error's kind when the call site didn't pass an explicit code.
+    if (code === undefined && derivedCode !== undefined) code = derivedCode;
     if (restContext && "levelThreshold" in restContext && typeof restContext.levelThreshold === "number") {
       const { levelThreshold: extractedThreshold, ...rest } = restContext;
       levelThreshold = extractedThreshold;

@@ -3,12 +3,13 @@ import { ok } from "../errors.js";
 import type { Result } from "../errors.js";
 import type { ProviderAdapter } from "./provider-adapter.js";
 import type { ExchangesDatabase } from "../database/exchanges-database.js";
+import type { EmxPlatform } from "../types/index.js";
 import type { Logger } from "../logger.js";
 
 interface EmxDispatchWorkerDeps {
   logger: Logger;
   db: ExchangesDatabase;
-  adapters: Record<string, ProviderAdapter>;
+  adapters: Record<EmxPlatform, ProviderAdapter>;
 }
 
 export interface EmxDispatchPayload {
@@ -19,7 +20,7 @@ export interface EmxDispatchPayload {
 export class EmxDispatchWorker {
   private readonly logger: Logger;
   private readonly db: ExchangesDatabase;
-  private readonly adapters: Record<string, ProviderAdapter>;
+  private readonly adapters: Record<EmxPlatform, ProviderAdapter>;
 
   constructor(deps: EmxDispatchWorkerDeps) {
     this.logger = deps.logger;

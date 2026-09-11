@@ -70,6 +70,7 @@ import { EmxDispatchWorker } from "./external-exchanges/emx-dispatch-worker.js";
 import { ExchangesDatabase } from "./database/exchanges-database.js";
 import { EmxIdleWorker } from "./external-exchanges/emx-idle-worker.js";
 import type { ProviderAdapter } from "./external-exchanges/provider-adapter.js";
+import type { EmxPlatform } from "./types/index.js";
 import { EncryptionManager } from "./secrets/encryption-manager.js";
 import { getClient as getAuthressClient } from "./api/authress-access.js";
 import { RequestLogger } from "./logger.js";
@@ -222,7 +223,7 @@ export class CompositeRoot {
       logger,
     });
 
-    const emxAdapters: Record<string, ProviderAdapter> = {
+    const emxAdapters: Record<EmxPlatform, ProviderAdapter> = {
       gmail: gmailProvider,
       outlook: outlookProvider,
       imap: imapAdapter,

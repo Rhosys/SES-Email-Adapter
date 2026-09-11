@@ -26,6 +26,7 @@ import type { ThreadMatcher } from "../database/thread-matcher.js";
 import type { GmailProvider } from "../external-exchanges/gmail-provider.js";
 import type { OutlookProvider } from "../external-exchanges/outlook-provider.js";
 import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js";
+import type { EmxPlatform } from "../types/index.js";
 import type { EncryptionManager } from "../secrets/encryption-manager.js";
 import type { SignalQueue } from "../messaging/signal-queue.js";
 
@@ -110,7 +111,7 @@ export interface AppDeps {
   unsubscribeTokenGenerator: UnsubscribeTokenGenerator;
   gmailProvider: GmailProvider;
   outlookProvider: OutlookProvider;
-  adapters: Record<string, ProviderAdapter>;
+  adapters: Record<EmxPlatform, ProviderAdapter>;
   encryptionManager: EncryptionManager;
   getProviderToken: (userId: string, connectionId: string, connectionUserId: string) => Promise<string>;
   signalQueue: SignalQueue;

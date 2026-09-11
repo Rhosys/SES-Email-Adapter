@@ -3,6 +3,7 @@ import { ok, err } from "neverthrow";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
+import { makeMockAdapters } from "../helpers/provider-adapters.js";
 import type { ExternalMailExchange } from "../../src/types/index.js";
 import type { ProviderAdapter } from "../../src/external-exchanges/provider-adapter.js";
 
@@ -58,6 +59,7 @@ function makeJmapAdapter(): ProviderAdapter {
     renew: vi.fn().mockResolvedValue(ok({ expiresAt: "2025-06-15T12:00:00Z" })),
     deactivate: vi.fn().mockResolvedValue(ok(undefined)),
     fetchMessage: vi.fn().mockResolvedValue(ok({ rawMime: new Uint8Array(), receivedAt: "2025-01-01T00:00:00Z" })),
+    sendMessage: vi.fn(),
   };
 }
 
@@ -135,7 +137,7 @@ describe("External Exchanges JMAP API", () => {
       auth: { verify: vi.fn().mockResolvedValue(ok({ userId: "user-1" })) },
       access: { checkAccess: async () => {} } as never,
       logger: createMockLogger(),
-      adapters: { jmap: jmapAdapter },
+      adapters: makeMockAdapters({ jmap: jmapAdapter }),
       encryptionManager: encryptionManager as never,
       getProviderToken: async () => "",
     }));
