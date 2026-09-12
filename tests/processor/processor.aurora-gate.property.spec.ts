@@ -1,8 +1,8 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ok, err } from "../../src/errors.js";
-import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ThreadMatcherPort, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
+import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage, SqsDispatcher } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
@@ -199,7 +199,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
-    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+    const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never,
       classifier: makeClassifier(),
@@ -256,7 +256,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
-    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+    const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never,
       classifier: makeClassifier(),
@@ -431,7 +431,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
-    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+    const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never,
       classifier: makeClassifier(),
@@ -484,7 +484,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
-    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+    const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never,
       classifier: makeClassifier(),
@@ -537,7 +537,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
-    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+    const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never,
       classifier: makeClassifier(),
@@ -700,7 +700,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
-    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+    const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never,
       classifier: makeClassifier(),
@@ -747,7 +747,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
-    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+    const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never,
       classifier: makeClassifier(),
@@ -785,7 +785,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       findMatch: vi.fn().mockResolvedValue(ok(null)),
     };
 
-    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+    const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never,
       classifier: makeClassifier(),
@@ -827,7 +827,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       sendMessage: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("SQS SendMessage failed"))))),
     };
 
-    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+    const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never,
       classifier: makeClassifier(),
@@ -998,7 +998,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
       sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     };
 
-    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+    const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never,
       classifier: makeClassifier(),

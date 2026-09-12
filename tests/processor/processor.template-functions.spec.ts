@@ -3,7 +3,7 @@ import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 import { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok, err } from "neverthrow";
-import { SignalProcessor } from "../../src/processor/processor.js";
+import { IncomingEmailProcessor } from "../../src/processor/incoming-email-processor.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
 import type { CtxLike } from "./_helpers.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
@@ -119,9 +119,9 @@ function makeProcessor(opts: {
   store: ReturnType<typeof makeStore>;
   userCodeExecutor: UserCodeExecutorClient;
   logger: MockLogger;
-}): SignalProcessor {
+}): IncomingEmailProcessor {
   const { store, userCodeExecutor, logger } = opts;
-  return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+  return new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
     ...store,
     userCodeExecutor,
     contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
@@ -151,7 +151,7 @@ describe("Template function resolution via User Code Executor", () => {
   let mockLogger: MockLogger;
   let mockExecutor: UserCodeExecutorClient;
   let store: ReturnType<typeof makeStore>;
-  let processor: SignalProcessor;
+  let processor: IncomingEmailProcessor;
 
   beforeEach(() => {
     mockLogger = createMockLogger();

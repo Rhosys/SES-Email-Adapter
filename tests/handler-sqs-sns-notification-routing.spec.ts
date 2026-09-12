@@ -78,8 +78,8 @@ vi.mock("../src/classifier/classifier.js", () => ({
 }));
 
 const mockProcessRecord = vi.fn().mockResolvedValue({ isOk: () => true, isErr: () => false, value: undefined });
-vi.mock("../src/processor/processor.js", () => ({
-  SignalProcessor: vi.fn().mockImplementation(() => ({
+vi.mock("../src/processor/incoming-email-processor.js", () => ({
+  IncomingEmailProcessor: vi.fn().mockImplementation(() => ({
     processInbound: mockProcessRecord,
   })),
 }));

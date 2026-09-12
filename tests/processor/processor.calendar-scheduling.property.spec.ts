@@ -1,8 +1,8 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ok, err } from "../../src/errors.js";
-import { SignalProcessor } from "../../src/processor/processor.js";
-import type { ThreadMatcherPort, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
+import { IncomingEmailProcessor } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage, SqsDispatcher } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
@@ -157,7 +157,7 @@ function buildProcessor(opts: {
   contentSanitizer?: ContentSanitizerClient;
   threadMatcher?: ThreadMatcherPort;
   icsContent?: string;
-}): SignalProcessor {
+}): IncomingEmailProcessor {
   const { mockLogger, threadDb, schedulerClient, contentSanitizer, threadMatcher, icsContent } = opts;
 
   // When ICS content is provided, mock ContentStore.getObject to return the bytes
@@ -177,7 +177,7 @@ function buildProcessor(opts: {
   const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
   applyCtx(accountDb, DEFAULT_CTX);
 
-  return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+  return new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
     threadDb: threadDb ?? makeThreadDbMock(),
     accountDb,
     processingDb: makeProcessingDbMock(),

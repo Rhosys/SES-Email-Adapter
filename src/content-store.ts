@@ -33,6 +33,11 @@ export class EmailContentStore {
     await this.storage.putObject(s3Key, rawMime, "message/rfc822");
   }
 
+  /** Read a raw MIME message back by its storage key (symmetric with saveRawEmail). */
+  async getRawEmail(s3Key: string): Promise<Uint8Array> {
+    return this.storage.getObject(s3Key);
+  }
+
   /** Short-lived read URL for an already-resolved storage key. */
   async createReadUrl(s3Key: string): Promise<string> {
     return this.storage.createReadUrl(s3Key);

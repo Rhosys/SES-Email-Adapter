@@ -1,7 +1,7 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 // Processor integration harness.
 //
-// Extends the base harness with real S3, SQS, and SignalProcessor wired to
+// Extends the base harness with real S3, SQS, and IncomingEmailProcessor wired to
 // MiniStack. Provides helpers to upload a raw MIME email, send an SNS-wrapped
 // SQS message, poll the queue, and call processInbound().
 //
@@ -19,8 +19,8 @@ import { AccountDatabase } from '../../src/database/account-database.js';
 import { ThreadDatabase } from '../../src/database/thread-database.js';
 import { AuditDatabase } from '../../src/database/audit-database.js';
 import { ProcessingDatabase } from '../../src/database/processing-database.js';
-import { SignalProcessor } from '../../src/processor/processor.js';
-import type { InboundSignalMessage, SideEffectPayload, SesVerdictStatus } from '../../src/processor/processor.js';
+import { IncomingEmailProcessor } from '../../src/processor/incoming-email-processor.js';
+import type { InboundSignalMessage, SideEffectPayload, SesVerdictStatus } from '../../src/processor/incoming-email-processor.js';
 import { JsonLogicRuleEvaluator } from '../../src/processor/rule-evaluator.js';
 import { createApp } from '../../src/api/app.js';
 import { makeAppDeps } from '../helpers/app-deps.js';
@@ -113,7 +113,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
 
   const sideEffects: SideEffectPayload[] = [];
 
-  const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
+  const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
     threadDb,
     accountDb,
     processingDb,

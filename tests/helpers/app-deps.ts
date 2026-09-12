@@ -1,7 +1,24 @@
 import { ok } from "../../src/errors.js";
 import { BillingHandler } from "../../src/billing/billing-handler.js";
 import type { AppDeps } from "../../src/api/app.js";
-import { makeMockAdapters } from "./provider-adapters.js";
+import type { ProviderAdapter } from "../../src/external-exchanges/provider-adapter.js";
+import { EMX_PLATFORMS, type EmxPlatform } from "../../src/types/index.js";
+
+// Vitest-free default adapters. `app-deps.ts` is imported by the tsx-executed integration
+// harness (tests/integration/harness.ts), which runs outside the vitest runner — so this file
+// must never pull in `vitest`. Tests that assert on adapter calls pass their own spy-backed
+// adapters via `makeMockAdapters` (see provider-adapters.ts); these no-op stubs only fill the
+// slots those tests don't exercise.
+function makeNoopAdapters(): Record<EmxPlatform, ProviderAdapter> {
+  const noop = (): ProviderAdapter => ({
+    activate: async () => ok({}) as never,
+    renew: async () => ok(undefined) as never,
+    deactivate: async () => ok(undefined) as never,
+    fetchMessage: async () => ok({}) as never,
+    sendMessage: async () => ok({}) as never,
+  });
+  return Object.fromEntries(EMX_PLATFORMS.map((platform) => [platform, noop()])) as Record<EmxPlatform, ProviderAdapter>;
+}
 
 /** Provides sensible no-op defaults for all AppDeps fields that tests don't exercise. */
 export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
@@ -32,7 +49,7 @@ export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
     embeddingGenerator: {} as never,
     threadMatcher: {} as never,
     unsubscribeTokenGenerator: { generate: async () => "tok", verify: async () => ok({ accountId: "acct", emailType: "digest" as const }) } as never,
-    adapters: makeMockAdapters(),
+    adapters: makeNoopAdapters(),
     encryptionManager: { encrypt: () => "encrypted", decrypt: () => "decrypted" } as never,
     signalQueue: { send: async () => ok(undefined), sendBatch: async () => ok(undefined) } as never,
     gmailProvider: { handle: async () => new Response("{}", { status: 200 }) } as never,

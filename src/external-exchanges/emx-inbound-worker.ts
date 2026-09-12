@@ -3,7 +3,7 @@ import type { Result } from "../errors.js";
 import type { ProcessorError } from "../errors.js";
 import type { ProviderAdapter, ProviderFetchError } from "./provider-adapter.js";
 import type { EmxPlatform } from "../types/index.js";
-import type { InboundSignalMessage } from "../processor/processor.js";
+import type { InboundSignalMessage } from "../processor/incoming-email-processor.js";
 import type { Logger } from "../logger.js";
 import type { EmailContentStore } from "../content-store.js";
 import type { AccountDatabase } from "../database/account-database.js";

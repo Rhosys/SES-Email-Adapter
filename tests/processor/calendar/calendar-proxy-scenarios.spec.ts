@@ -12,15 +12,16 @@ import type { IForwardingService } from "../../../src/forwarding/forwarding-serv
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { CalendarForwarder } from "../../../src/processor/calendar/calendar-forwarder.js";
 import type { ForwardInviteOpts } from "../../../src/processor/calendar/calendar-forwarder.js";
-import { handleCalendarResponse } from "../../../src/processor/calendar/calendar-response-handler.js";
-import type { CalendarResponseHandlerDeps } from "../../../src/processor/calendar/calendar-response-handler.js";
+import { IncomingCalendarRsvpProcessor } from "../../../src/processor/incoming-calendar-rsvp-processor.js";
+import type { RsvpThreadStore } from "../../../src/processor/incoming-calendar-rsvp-processor.js";
 import { handlePostApprovalCalendar } from "../../../src/processor/calendar/post-approval-handler.js";
 import type { PostApprovalCalendarHandlerDeps } from "../../../src/processor/calendar/post-approval-handler.js";
 import { buildProxyUid as buildProxyUidRaw } from "../../../src/processor/calendar/proxy-uid.js";
 import { buildCalendarSignalLookupId } from "../../../src/processor/calendar/signal-lookup.js";
 import type { CalendarEventData, CalendarResponseData } from "../../../src/types/calendar.js";
 import type { Signal, Thread, Attachment } from "../../../src/types/index.js";
-import type { InboundSignalMessage } from "../../../src/processor/processor.js";
+import type { InboundSignalMessage } from "../../../src/processor/incoming-email-processor.js";
+import type { EmailContentStore } from "../../../src/content-store.js";
 import type { EmailService } from "../../../src/email/email-service.js";
 import { ok } from "../../../src/errors.js";
 import { generateId, generateAccountId } from "../../../src/utils/id.js";
@@ -141,30 +142,73 @@ function buildReplyIcsString(proxyUid: string, partstat = "ACCEPTED"): string {
   ].join("\r\n");
 }
 
-function makeResponseHandlerDeps(overrides: Partial<CalendarResponseHandlerDeps> = {}): CalendarResponseHandlerDeps {
+/** Wrap a REPLY .ics in a real multipart/mixed email so simpleParser sees it as an attachment. */
+function rawRsvpEmailFrom(icsContent: string): Uint8Array {
+  const boundary = "mixed_boundary_scn";
+  const message = [
+    `From: ${ORGANIZER_EMAIL}`,
+    `To: ${VALID_ARC_ID}@${VALID_ACC_ID}.${SERVICE_DOMAIN}`,
+    "Subject: Re: Quarterly Planning",
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "",
+    "RSVP",
+    "",
+    `--${boundary}`,
+    'Content-Type: text/calendar; method=REPLY; charset=UTF-8; name="invite.ics"',
+    "Content-Transfer-Encoding: 7bit",
+    'Content-Disposition: attachment; filename="invite.ics"',
+    "",
+    icsContent,
+    "",
+    `--${boundary}--`,
+    "",
+  ].join("\r\n");
+  return new Uint8Array(Buffer.from(message, "utf8"));
+}
+
+function makeRsvpThreadStore(): RsvpThreadStore {
   return {
-    serviceDomain: SERVICE_DOMAIN,
-    threadDatabase: {
-      getThread: vi.fn().mockResolvedValue(ok({
-        id: VALID_ARC_ID,
-        accountId: VALID_ACC_ID,
-        status: "active",
-        labels: ["system:calendar"],
-        summary: "Quarterly Planning",
-        workflow: "job",
-        lastSignalAt: "2025-03-15T09:00:00Z",
-        createdAt: "2025-03-15T09:00:00Z",
-      })),
-    } as unknown as CalendarResponseHandlerDeps["threadDatabase"],
-    calendarForwarder: {
-      forwardInvite: vi.fn().mockResolvedValue(ok(undefined)),
-      sendReply: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })),
-    } as unknown as CalendarResponseHandlerDeps["calendarForwarder"],
-    signalStore: {
-      saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
-    },
-    hmac,
-    ...overrides,
+    getThread: vi.fn().mockResolvedValue(ok({
+      id: VALID_ARC_ID,
+      accountId: VALID_ACC_ID,
+      status: "active",
+      labels: ["system:calendar"],
+      summary: "Quarterly Planning",
+      workflow: "job",
+      lastSignalAt: "2025-03-15T09:00:00Z",
+      createdAt: "2025-03-15T09:00:00Z",
+    })),
+    saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
+  };
+}
+
+/** Build the RSVP processor over a real CalendarForwarder, driven by the raw email bytes. */
+function makeRsvpHarness(icsContent: string, threadStore: RsvpThreadStore = makeRsvpThreadStore()) {
+  const logger = createMockLogger();
+  const emailService = makeEmailService();
+  const calendarForwarder = new CalendarForwarder({ emailService, serviceDomain: SERVICE_DOMAIN, hmac });
+  const processor = new IncomingCalendarRsvpProcessor({
+    emailContentStore: { getRawEmail: vi.fn().mockResolvedValue(rawRsvpEmailFrom(icsContent)) } as unknown as EmailContentStore,
+    calendarForwarder,
+    threadStore,
+    logger,
+  });
+  return { processor, logger, threadStore, emailService };
+}
+
+function makeRsvpMessage(): InboundSignalMessage {
+  return {
+    s3Key: "emails/native-reply.eml",
+    compositeMailMessageId: "ses-native-001",
+    idempotencyKey: "idem-001",
+    timestamp: "2025-03-15T15:30:00Z",
+    destination: [`${VALID_ARC_ID}@${VALID_ACC_ID}.${SERVICE_DOMAIN}`],
+    dkimVerdict: "PASS",
+    dmarcVerdict: "PASS",
   };
 }
 
@@ -362,10 +406,6 @@ describe("Scenario: native calendar REPLY is validated and forwarded to organize
   // organizer. Without this flow, native calendar RSVPs are silently lost.
 
   it("valid native REPLY creates calendar_response signal and sends masked REPLY", async () => {
-    const deps = makeResponseHandlerDeps();
-    const logger = createMockLogger();
-
-    // Build a valid proxy UID for the .ics
     const proxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
       threadId: VALID_ARC_ID,
@@ -373,35 +413,18 @@ describe("Scenario: native calendar REPLY is validated and forwarded to organize
       serviceDomain: SERVICE_DOMAIN,
     });
 
-    const icsContent = buildReplyIcsString(proxyUid, "ACCEPTED");
-    const icsBytes = new TextEncoder().encode(icsContent);
+    const { processor, threadStore, emailService } = makeRsvpHarness(buildReplyIcsString(proxyUid, "ACCEPTED"));
 
-    const recipient = `${VALID_ARC_ID}@${VALID_ACC_ID}.${SERVICE_DOMAIN}`;
-    const message: InboundSignalMessage = {
-      s3Key: "emails/native-reply.eml",
-      compositeMailMessageId: "ses-ses-native-001",
-      idempotencyKey: "test-idempotency-key",
-      timestamp: "2025-03-15T15:30:00Z",
-      destination: [recipient],
-      dkimVerdict: "PASS",
-      dmarcVerdict: "PASS",
-    };
-
-    const result = await handleCalendarResponse(message, deps, logger, icsBytes);
+    const result = await processor.process(makeRsvpMessage());
 
     expect(result.isOk()).toBe(true);
 
-    // sendReply was called with the correct decision
-    expect(deps.calendarForwarder.sendReply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        decision: "accepted",
-        organizerAddress: ORGANIZER_EMAIL,
-      }),
-      expect.anything(),
-    );
+    // Reply relayed to the organizer with the accepted decision.
+    const sendCall = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(sendCall.to).toEqual([ORGANIZER_EMAIL]);
 
-    // calendar_response signal was saved
-    const savedSignal = (deps.signalStore.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    // calendar_response signal was saved with the original UID and decision.
+    const savedSignal = (threadStore.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(savedSignal.type).toBe("calendar_response");
     expect(savedSignal.data.decision).toBe("accepted");
     expect(savedSignal.data.veventUid).toBe(VEVENT_UID);
@@ -419,100 +442,39 @@ describe("Scenario: invalid HMAC REPLY is silently dropped to prevent spoofing",
   // signal creation, no response) to prevent information leakage and resource abuse.
 
   it("does not create signal or call DB when HMAC is invalid", async () => {
-    const deps = makeResponseHandlerDeps();
-    const logger = createMockLogger();
+    // A proxy UID with a forged HMAC suffix (attacker who knows the format, not the secret).
+    const tamperedProxyUid = `${VALID_ACC_ID}.${VALID_ARC_ID}.${VEVENT_UID}.AAAAAAAAAAAAAAAA@${SERVICE_DOMAIN}`;
+    const { processor, logger, threadStore, emailService } = makeRsvpHarness(buildReplyIcsString(tamperedProxyUid, "ACCEPTED"));
 
-    // Build a proxy UID with a WRONG secret (simulates attacker guessing)
-    // Manually construct a UID with an invalid HMAC suffix
-    const payload = `${VALID_ACC_ID}.${VALID_ARC_ID}.${VEVENT_UID}`;
-    const tamperedProxyUid = `${payload}.AAAAAAAAAAAAAAAA@${SERVICE_DOMAIN}`;
+    const result = await processor.process(makeRsvpMessage());
 
-    const icsContent = buildReplyIcsString(tamperedProxyUid, "ACCEPTED");
-    const icsBytes = new TextEncoder().encode(icsContent);
-
-    const recipient = `${VALID_ARC_ID}@${VALID_ACC_ID}.${SERVICE_DOMAIN}`;
-    const message: InboundSignalMessage = {
-      s3Key: "emails/forged-reply.eml",
-      compositeMailMessageId: "ses-ses-forged-001",
-      idempotencyKey: "test-idempotency-key",
-      timestamp: "2025-03-15T16:00:00Z",
-      destination: [recipient],
-      dkimVerdict: "PASS",
-      dmarcVerdict: "PASS",
-    };
-
-    await handleCalendarResponse(message, deps, logger, icsBytes);
-
-    // No DB lookup occurred
-    expect(deps.threadDatabase.getThread).not.toHaveBeenCalled();
-
-    // No signal was created
-    expect(deps.signalStore.saveSignal).not.toHaveBeenCalled();
-
-    // No RSVP was sent
-    expect(deps.calendarForwarder.sendReply).not.toHaveBeenCalled();
-
-    // WARN was logged with hmac_failed
-    const warnCalls = logger.calls.filter(c => c.method === "warn");
-    expect(warnCalls.some(c => c.context?.validationType === "hmac_failed")).toBe(true);
+    expect(result.isOk()).toBe(true);
+    expect(threadStore.getThread).not.toHaveBeenCalled();
+    expect(threadStore.saveSignal).not.toHaveBeenCalled();
+    expect(emailService.sendRaw).not.toHaveBeenCalled();
+    expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "processor.calendar_response.hmac_failed")).toBe(true);
   });
 });
 
 // ===========================================================================
-// Scenario 7: Inbound REPLY with invalid accountId checksum → silently dropped
+// Scenario 7: Inbound to a bad-checksum account subdomain → not routed as RSVP
 // ===========================================================================
 
-describe("Scenario: invalid accountId checksum REPLY is dropped before HMAC check", () => {
-  // WHY: The checksum on accountId is the FIRST validation gate — it runs before
-  // HMAC computation. This prevents attackers from using the proxy endpoint to
-  // probe which account IDs exist (timing attacks). If the checksum fails, no
-  // further processing occurs — not even HMAC validation.
+describe("Scenario: invalid accountId checksum is not routed to the RSVP processor", () => {
+  // WHY: The address checksum is the router's cheap self-consistency gate (it runs
+  // in the SES handler before any processor is chosen). A recipient whose accountId
+  // fails its checksum is not a well-formed RSVP address, so it must not be routed
+  // to the RSVP processor at all — it falls through to the email path, which drops
+  // it as belonging to no alias. The cryptographic gate is the HMAC, checked later.
 
-  it("does not create signal, call DB, or check HMAC when accountId checksum fails", async () => {
-    const deps = makeResponseHandlerDeps();
-    const logger = createMockLogger();
+  it("isRsvpReplyAddress rejects a recipient whose accountId checksum fails", async () => {
+    const { isRsvpReplyAddress } = await import("../../../src/processor/inbound-router.js");
 
-    // Use a valid proxy UID (would pass HMAC if it got that far)
-    const proxyUid = await buildProxyUid({
-      accountId: VALID_ACC_ID,
-      threadId: VALID_ARC_ID,
-      originalVeventUid: VEVENT_UID,
-      serviceDomain: SERVICE_DOMAIN,
-    });
-
-    const icsContent = buildReplyIcsString(proxyUid, "DECLINED");
-    const icsBytes = new TextEncoder().encode(icsContent);
-
-    // Invalid accountId — checksum will fail
     const badAccountId = "acc-xxxxxxxxxx000";
-    const recipient = `${VALID_ARC_ID}@${badAccountId}.${SERVICE_DOMAIN}`;
-    const message: InboundSignalMessage = {
-      s3Key: "emails/bad-checksum.eml",
-      compositeMailMessageId: "ses-ses-bad-001",
-      idempotencyKey: "test-idempotency-key",
-      timestamp: "2025-03-15T16:30:00Z",
-      destination: [recipient],
-      dkimVerdict: "PASS",
-      dmarcVerdict: "PASS",
-    };
+    expect(isRsvpReplyAddress(`${VALID_ARC_ID}@${badAccountId}.${SERVICE_DOMAIN}`, SERVICE_DOMAIN)).toBe(false);
 
-    await handleCalendarResponse(message, deps, logger, icsBytes);
-
-    // No DB lookup
-    expect(deps.threadDatabase.getThread).not.toHaveBeenCalled();
-
-    // No signal created
-    expect(deps.signalStore.saveSignal).not.toHaveBeenCalled();
-
-    // No RSVP sent
-    expect(deps.calendarForwarder.sendReply).not.toHaveBeenCalled();
-
-    // WARN logged with checksum failure
-    const warnCalls = logger.calls.filter(c => c.method === "warn");
-    expect(warnCalls.some(c =>
-      c.context?.validationType === "accountId_checksum" ||
-      c.context?.validationType === "domain_mismatch",
-    )).toBe(true);
+    // A well-formed RSVP address is routed.
+    expect(isRsvpReplyAddress(`${VALID_ARC_ID}@${VALID_ACC_ID}.${SERVICE_DOMAIN}`, SERVICE_DOMAIN)).toBe(true);
   });
 });
 
@@ -692,9 +654,6 @@ describe("Scenario: most recent RSVP decision is recorded as calendar_response s
   // immutable calendar signal.
 
   it("calendar_response signal records decision, veventUid, and linkedSignalId", async () => {
-    const deps = makeResponseHandlerDeps();
-    const logger = createMockLogger();
-
     const proxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
       threadId: VALID_ARC_ID,
@@ -702,24 +661,12 @@ describe("Scenario: most recent RSVP decision is recorded as calendar_response s
       serviceDomain: SERVICE_DOMAIN,
     });
 
-    const icsContent = buildReplyIcsString(proxyUid, "TENTATIVE");
-    const icsBytes = new TextEncoder().encode(icsContent);
+    const { processor, threadStore } = makeRsvpHarness(buildReplyIcsString(proxyUid, "TENTATIVE"));
 
-    const recipient = `${VALID_ARC_ID}@${VALID_ACC_ID}.${SERVICE_DOMAIN}`;
-    const message: InboundSignalMessage = {
-      s3Key: "emails/tentative-reply.eml",
-      compositeMailMessageId: "ses-ses-tentative-001",
-      idempotencyKey: "test-idempotency-key",
-      timestamp: "2025-03-15T17:00:00Z",
-      destination: [recipient],
-      dkimVerdict: "PASS",
-      dmarcVerdict: "PASS",
-    };
-
-    await handleCalendarResponse(message, deps, logger, icsBytes);
+    await processor.process(makeRsvpMessage());
 
     // calendar_response signal was saved
-    const savedSignal = (deps.signalStore.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Signal<CalendarResponseData>;
+    const savedSignal = (threadStore.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Signal<CalendarResponseData>;
 
     // Type and source identify it as a user RSVP decision
     expect(savedSignal.type).toBe("calendar_response");

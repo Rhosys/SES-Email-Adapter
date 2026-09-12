@@ -3,7 +3,7 @@ import type { Signal } from "../types/index.js";
 import type { DbError, Result } from "../errors.js";
 import { ok, err } from "../errors.js";
 import type { Logger } from "../logger.js";
-import type { ReplySender, ReplySendError } from "./processor.js";
+import type { ReplySender, ReplySendError } from "./incoming-email-processor.js";
 import type { DraftSendPayload } from "./draft-send-dispatcher.js";
 import { buildSignalGsi3pk } from "./message-id.js";
 import { parseHopCount } from "../email/ses-tags.js";

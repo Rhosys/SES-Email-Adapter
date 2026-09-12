@@ -331,7 +331,7 @@ export { SYSTEM_RULES } from "./system-rules.js";
 // Processor
 // ---------------------------------------------------------------------------
 
-interface SignalProcessorOptions {
+interface IncomingEmailProcessorOptions {
   threadDb: ThreadDatabase;
   accountDb: AccountDatabase;
   processingDb: ProcessingDatabase;
@@ -360,7 +360,7 @@ interface SignalProcessorOptions {
   platformTenantName: string;
 }
 
-export class SignalProcessor {
+export class IncomingEmailProcessor {
   private readonly threadDb: ThreadDatabase;
   private readonly accountDb: AccountDatabase;
   private readonly processingDb: ProcessingDatabase;
@@ -388,7 +388,7 @@ export class SignalProcessor {
   private readonly accessService: Pick<AccessService, "listUsers" | "getUserProfile">;
   private readonly platformTenantName: string;
 
-  constructor(opts: SignalProcessorOptions) {
+  constructor(opts: IncomingEmailProcessorOptions) {
     this.threadDb = opts.threadDb;
     this.accountDb = opts.accountDb;
     this.processingDb = opts.processingDb;
@@ -923,7 +923,7 @@ export class SignalProcessor {
     const resolved = await this.resolveAccountIdAndAlias(recipientAddress);
     if (resolved.isErr()) return err(resolved.error);
     if (!resolved.value) {
-      this.logger.track("No account owns this recipient address — dropping message.", { code: "processor.no_account_for_recipient", recipientAddress, compositeMailMessageId: msg.compositeMailMessageId, destination });
+      this.logger.track(`No account owns the recipient address ${recipientAddress || destination.join(", ") || "(none)"} — dropping message.`, { code: "processor.no_account_for_recipient", recipientAddress, compositeMailMessageId: msg.compositeMailMessageId, destination });
       return err(noAccountError(recipientAddress, destination, msg.compositeMailMessageId, msg.expectedAccountId));
     }
     const { accountId, aliasConfig } = resolved.value;

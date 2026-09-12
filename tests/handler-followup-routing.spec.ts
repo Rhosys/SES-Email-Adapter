@@ -60,8 +60,8 @@ vi.mock("../src/classifier/classifier.js", () => ({
   SignalClassifier: vi.fn().mockImplementation(() => ({})),
 }));
 
-vi.mock("../src/processor/processor.js", () => ({
-  SignalProcessor: vi.fn().mockImplementation(() => ({})),
+vi.mock("../src/processor/incoming-email-processor.js", () => ({
+  IncomingEmailProcessor: vi.fn().mockImplementation(() => ({})),
 }));
 
 vi.mock("../src/processor/sqs-dispatcher.js", () => ({

@@ -8,7 +8,7 @@ import { OnboardingTaskHandler } from "./onboarding/onboarding-task-handler.js";
 import { SfnAccountCreationStarter } from "./onboarding/account-creation-starter.js";
 import type { AccountCreationStarter } from "./onboarding/account-creation-starter.js";
 import { SignalClassifier } from "./classifier/classifier.js";
-import { SignalProcessor } from "./processor/processor.js";
+import { IncomingEmailProcessor } from "./processor/incoming-email-processor.js";
 import { SqsDispatcherImpl } from "./processor/sqs-dispatcher.js";
 import { LambdaContentSanitizer } from "./processor/content-sanitizer-client.js";
 import { JsonLogicRuleEvaluator } from "./processor/rule-evaluator.js";
@@ -58,6 +58,7 @@ import { ReindexDispatcher } from "./jobs/reindex/reindex-dispatcher.js";
 import { DraftSendDispatcher } from "./processor/draft-send-dispatcher.js";
 import { DraftSendWorker } from "./processor/draft-send-worker.js";
 import { CalendarForwarder } from "./processor/calendar/calendar-forwarder.js";
+import { IncomingCalendarRsvpProcessor } from "./processor/incoming-calendar-rsvp-processor.js";
 import type { PostApprovalCalendarHandlerDeps } from "./processor/calendar/post-approval-handler.js";
 import { HmacSecretGenerator } from "./processor/calendar/hmac-secret-generator.js";
 import { SignalQueue } from "./messaging/signal-queue.js";
@@ -85,7 +86,9 @@ import { RequestLogger } from "./logger.js";
 
 export class CompositeRoot {
   public readonly logger: RequestLogger;
-  public readonly processor: SignalProcessor;
+  public readonly processor: IncomingEmailProcessor;
+  public readonly rsvpProcessor: IncomingCalendarRsvpProcessor;
+  public readonly mailDomain: string;
   public readonly onboardingHandler: OnboardingTaskHandler;
   public readonly domainHealthJob: DomainHealthJob;
   public readonly healthcheckJob: HealthcheckJob;
@@ -247,7 +250,7 @@ export class CompositeRoot {
 
     const searchDatabase = createSearchDatabase(logger);
 
-    const processor = new SignalProcessor({
+    const processor = new IncomingEmailProcessor({
       threadDb,
       resourceDb,
       accountDb,
@@ -285,6 +288,16 @@ export class CompositeRoot {
     });
 
     const sesFeedbackProcessor = new SesFeedbackProcessor(processingDb, accountDb, logger, threadDb);
+
+    // The inbound half of the calendar loop: RSVP replies to forwarded invites.
+    // Shares the forwarder (which owns the stateless validation) and the same
+    // email content store + thread DB the email processor uses.
+    const rsvpProcessor = new IncomingCalendarRsvpProcessor({
+      emailContentStore: new EmailContentStore(s3),
+      calendarForwarder,
+      threadStore: threadDb,
+      logger,
+    });
 
     const reindexWorker = new ReindexWorker(logger);
 
@@ -464,6 +477,8 @@ export class CompositeRoot {
 
     this.logger = logger;
     this.processor = processor;
+    this.rsvpProcessor = rsvpProcessor;
+    this.mailDomain = MAIL_DOMAIN;
     this.onboardingHandler = onboardingHandler;
     this.domainHealthJob = domainHealthJob;
     this.healthcheckJob = healthcheckJob;

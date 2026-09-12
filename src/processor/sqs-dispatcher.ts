@@ -1,6 +1,6 @@
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
-import type { SqsDispatcher, SideEffectPayload } from "./processor.js";
+import type { SqsDispatcher, SideEffectPayload } from "./incoming-email-processor.js";
 import type { SignalQueue } from "../messaging/signal-queue.js";
 
 export class SqsDispatcherImpl implements SqsDispatcher {

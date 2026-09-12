@@ -1,10 +1,10 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 import { describe, it, expect, vi } from "vitest";
 import { ok } from "../../src/errors.js";
-import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
+import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
-import type { InboundSignalMessage, ThreadMatcherPort } from "../../src/processor/processor.js";
+import type { InboundSignalMessage, ThreadMatcherPort } from "../../src/processor/incoming-email-processor.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
@@ -208,7 +208,7 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
     (accountDb.getSender as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok(strategy.aliasSenderConfig)));
     (accountDb.listEnabledRules as ReturnType<typeof vi.fn>).mockReturnValue(Promise.resolve(ok(strategy.rules)));
 
-    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+    const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb,
       accountDb,
       processingDb,

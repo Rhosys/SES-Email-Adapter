@@ -13,7 +13,7 @@
 // fails DMARC at the recipient and burns our sending reputation on the way.
 // ---------------------------------------------------------------------------
 
-import type { ReplySender, ReplySendError } from "../processor/processor.js";
+import type { ReplySender, ReplySendError } from "../processor/incoming-email-processor.js";
 import type { EmailService } from "../email/email-service.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { ExchangesDatabase } from "../database/exchanges-database.js";

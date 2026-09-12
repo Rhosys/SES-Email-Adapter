@@ -3,8 +3,8 @@ import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 import { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok } from "../../src/errors.js";
-import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/processor.js";
+import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
@@ -131,18 +131,18 @@ function makeMessage(): InboundSignalMessage {
 // Validates: Requirement 4.1
 // ---------------------------------------------------------------------------
 
-describe("SignalProcessor message routing", () => {
+describe("IncomingEmailProcessor message routing", () => {
   let threadDb: ReturnType<typeof makeThreadDbMock>;
   let accountDb: ReturnType<typeof makeAccountDbMock>;
   let processingDb: ReturnType<typeof makeProcessingDbMock>;
-  let processor: SignalProcessor;
+  let processor: IncomingEmailProcessor;
   let mockLogger: MockLogger;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockLogger = createMockLogger();
     ({ threadDb, accountDb, processingDb } = makeStore());
-    processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+    processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
       contentSanitizer: makeContentSanitizer(), emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never,
       classifier: makeClassifier(),

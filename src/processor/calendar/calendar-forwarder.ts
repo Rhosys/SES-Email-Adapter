@@ -23,7 +23,7 @@ import type { Signal, CalendarEventData } from "../../types/index.js";
 import type { DbError, Result } from "../../errors.js";
 import { ok, err, dbError } from "../../errors.js";
 import type { Logger } from "../../logger.js";
-import { buildProxyUid } from "./proxy-uid.js";
+import { buildProxyUid, validateProxyUid } from "./proxy-uid.js";
 import { buildForwardIcs, buildReplyIcs } from "./ics-builder.js";
 import { buildMimeMessage } from "../../email/mime-builder.js";
 import type { HmacSecretGenerator } from "./hmac-secret-generator.js";
@@ -58,6 +58,44 @@ const PARTSTAT_MAP = {
   declined: "DECLINED",
   tentative: "TENTATIVE",
 } as const;
+
+const PARTSTAT_TO_DECISION: Record<string, "accepted" | "declined" | "tentative"> = {
+  ACCEPTED: "accepted",
+  DECLINED: "declined",
+  TENTATIVE: "tentative",
+};
+
+// ---------------------------------------------------------------------------
+// Inbound RSVP validation — the stateless half of the calendar loop.
+//
+// Given a parsed inbound .ics, decide whether it is a genuine RSVP to an invite
+// WE forwarded. Every check is pure computation over the .ics plus the HMAC
+// secret — no I/O, no database. The only trust anchor is the proxy UID's HMAC:
+// an attacker can address a message to the public {threadId}@{accountId}.domain
+// reply address, but cannot forge a UID that validates without the secret, so
+// the accountId/threadId/originalVeventUid returned here are authoritative and
+// the untrusted recipient address is never consulted for identity.
+// ---------------------------------------------------------------------------
+
+/** A validated RSVP, with identity taken from the HMAC-authenticated proxy UID. */
+export interface ValidatedRsvp {
+  decision: "accepted" | "declined" | "tentative";
+  accountId: string;
+  threadId: string;
+  originalVeventUid: string;
+  organizerAddress: string;
+}
+
+/**
+ * Why an inbound message that reached the RSVP reply address is not a processable
+ * RSVP. Each variant carries the log `code` the caller emits before dropping.
+ * `not_reply_method` and `no_partstat` are malformed-but-benign; `hmac_failed` is
+ * the security-relevant one (forged or misrouted proxy UID).
+ */
+export type RsvpRejection =
+  | { kind: "not_reply_method"; code: "processor.calendar_response.no_reply_method"; method: string }
+  | { kind: "no_partstat"; code: "processor.calendar_response.no_partstat" }
+  | { kind: "hmac_failed"; code: "processor.calendar_response.hmac_failed"; reason: string };
 
 // ---------------------------------------------------------------------------
 // Internal shape describing one calendar send — the identity + payload that
@@ -144,7 +182,7 @@ export class CalendarForwarder {
     if (sendResult.isErr()) return err(sendResult.error);
     // A permanent rejection resolves to ok with an empty messageId — nothing more to do.
     if (sendResult.value.messageId) {
-      logger.track("Calendar invite forwarded successfully.", {
+      logger.info("Calendar invite forwarded successfully.", {
         code: "processor.calendar_forwarder.sent",
         accountId,
         signalId: calendarSignal.id,
@@ -181,6 +219,46 @@ export class CalendarForwarder {
       permanentLogCode: "rsvp.send_permanent",
       logContext: { accountId },
     }, logger);
+  }
+
+  /**
+   * Validate an inbound .ics as an RSVP to an invite we forwarded. Stateless: no
+   * I/O. On success returns the decision plus the identity decoded from the
+   * HMAC-authenticated proxy UID (the .ics VEVENT UID is the proxy UID we stamped
+   * on the forwarded invite). Any rejection is returned typed, with its log code,
+   * for the caller to log-and-drop — nothing here writes or sends.
+   */
+  async validateRsvp(calendarData: CalendarEventData): Promise<Result<ValidatedRsvp, RsvpRejection>> {
+    // Must be a REPLY. REQUEST/CANCEL/PUBLISH at this address are not RSVPs.
+    if (calendarData.method.toUpperCase() !== "REPLY") {
+      return err({ kind: "not_reply_method", code: "processor.calendar_response.no_reply_method", method: calendarData.method });
+    }
+
+    // Decision from the first attendee bearing a recognised PARTSTAT.
+    let decision: "accepted" | "declined" | "tentative" | undefined;
+    for (const attendee of calendarData.attendees) {
+      if (attendee.partstat) {
+        const mapped = PARTSTAT_TO_DECISION[attendee.partstat.toUpperCase()];
+        if (mapped) { decision = mapped; break; }
+      }
+    }
+    if (!decision) {
+      return err({ kind: "no_partstat", code: "processor.calendar_response.no_partstat" });
+    }
+
+    // The proxy UID (the VEVENT UID) is the only trust anchor. Its HMAC binds
+    // accountId + threadId + originalVeventUid; a valid one is authoritative.
+    const uidResult = await validateProxyUid({
+      proxyUid: calendarData.veventUid,
+      serviceDomain: this.serviceDomain,
+      hmac: this.hmac,
+    });
+    if (uidResult.isErr()) {
+      return err({ kind: "hmac_failed", code: "processor.calendar_response.hmac_failed", reason: uidResult.error });
+    }
+
+    const { accountId, threadId, originalVeventUid } = uidResult.value;
+    return ok({ decision, accountId, threadId, originalVeventUid, organizerAddress: calendarData.organizer });
   }
 
   /**

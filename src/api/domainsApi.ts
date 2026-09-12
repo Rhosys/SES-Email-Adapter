@@ -132,7 +132,7 @@ export class DomainsApi {
       // This prevents "deleted domain takeover": if a different account could claim a domain
       // the original account merely soft-deleted, the original owner would be permanently
       // locked out of ever reviving it via POST. Ownership persists across soft-delete;
-      // only routability (see SignalProcessor.resolveAccountIdAndAlias) is affected by status.
+      // only routability (see IncomingEmailProcessor.resolveAccountIdAndAlias) is affected by status.
       const ownerResult = await accountDb.resolveAccountForDomain(body.domain);
       if (ownerResult.isErr()) { logger.error("Failed to resolve account for domain.", { code: "api.domains.create.resolve_owner_failed", accountId, error: ownerResult.error }); return err(c, 500, "Internal Server Error"); }
       if (ownerResult.value && ownerResult.value !== accountId) {

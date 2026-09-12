@@ -11,8 +11,8 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ok } from "../../src/errors.js";
-import { SignalProcessor } from "../../src/processor/processor.js";
-import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/processor.js";
+import { IncomingEmailProcessor } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "../processor/_shared-new-deps.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "../processor/_helpers.js";
@@ -137,7 +137,7 @@ function buildProcessor(opts: {
   mockLogger: MockLogger;
   schedulerClient: ReturnType<typeof makeSchedulerClientMock>;
   icsContent: string;
-}): SignalProcessor {
+}): IncomingEmailProcessor {
   const { mockLogger, schedulerClient, icsContent } = opts;
 
   const contentStoreMock = {
@@ -161,7 +161,7 @@ function buildProcessor(opts: {
     billingPlan: "Paid" as const,
   });
 
-  return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
+  return new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
     ...makeSharedNewDeps(),
     threadDb,
     accountDb,
