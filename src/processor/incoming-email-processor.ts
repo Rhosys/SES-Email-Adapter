@@ -1827,6 +1827,16 @@ export class IncomingEmailProcessor {
     const calendarTimestamp = DateTime.utc().toISO()!;
     const signalLookupId = buildCalendarSignalLookupId(calendarData.organizer, calendarData.veventUid);
 
+    // The .ics ORGANIZER is optional and many transactional invites (reservations,
+    // ticket confirmations) omit it, leaving both organizer and organizerCn blank so
+    // the card has no name to show. When the email was classified as an event, fall
+    // back to the extracted event name as the display organizer. This is display-only:
+    // signalLookupId above still keys on the real (possibly empty) .ics organizer, so
+    // event-group keying stays stable across invite/update/cancel snapshots.
+    const eventNameFallback =
+      signal.data.workflowData.workflow === "events" ? signal.data.workflowData.eventName : undefined;
+    const organizerCn = calendarData.organizerCn ?? (calendarData.organizer ? undefined : eventNameFallback);
+
     // Store raw .ics as S3 attachment on the calendar signal
     const icsS3Key = `content/accounts/${accountId}/calendar/${calendarSignalId}/invite.ics`;
     await this.contentStore.saveIcsContentAsCalendar(icsS3Key, rawIcsContent);
@@ -1845,6 +1855,7 @@ export class IncomingEmailProcessor {
       ...(ttl !== undefined ? { ttl } : {}),
       data: {
         ...calendarData,
+        ...(organizerCn !== undefined ? { organizerCn } : {}),
         linkedSignalId: signal.id,
       },
     };
