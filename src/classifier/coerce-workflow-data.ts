@@ -325,7 +325,21 @@ function withAbbrevMonthPeriod(formats: string[]): string[] {
 const DATE_FORMATS_WITH_YEAR = withWeekdayPrefix(withAbbrevMonthPeriod(BASE_DATE_FORMATS_WITH_YEAR));
 const DATE_FORMATS_YEARFREE = withWeekdayPrefix(withAbbrevMonthPeriod(BASE_DATE_FORMATS_YEARFREE));
 
-const TIME_SUFFIXES = ["", " HH:mm", " h:mm a", " 'at' HH:mm", " 'at' h:mm a"];
+const TIME_SUFFIXES = [
+  "",
+  " HH:mm",
+  " h:mm a",
+  " 'at' HH:mm",
+  " 'at' h:mm a",
+  // Comma before the time, and a dot instead of a colon (e.g. "Oct 27, 2026, 18.30").
+  ", HH.mm",
+];
+
+/** Ordinal day suffixes ("1st", "2nd", "3rd", "10th") — luxon's `d` token needs a bare number. */
+const ORDINAL_DAY_SUFFIX = /(\d)(?:st|nd|rd|th)\b/gi;
+
+/** A trailing parenthesized timezone abbreviation, e.g. "(CEST)", "(GMT)". */
+const TRAILING_ZONE_ABBREVIATION = /\s*\([A-Za-z]{2,5}\)\s*$/;
 
 /** Pattern to detect slash-separated numeric dates (e.g. 01/02/2025, 1/2/25). */
 const SLASH_DATE_PATTERN = /\d+\/\d+/;
@@ -577,10 +591,18 @@ export function coerceDate(
 
   // Reorder time-first phrasings ("9:30 a.m. on February 1") into date-first,
   // then normalize dotted meridiem (a.m. → am) so luxon's `a` token matches, then
-  // strip locale time noise (e.g. "Uhr", "o'clock") for format-based parsing.
+  // strip locale time noise (e.g. "Uhr", "o'clock") and a trailing zone abbreviation
+  // (e.g. "(CEST)") for format-based parsing. Ordinal day suffixes ("3rd", "10th")
+  // and the non-standard "Sept" abbreviation are normalized to forms luxon's `d`/`MMM`
+  // tokens accept.
   const reordered = reorderTimeFirst(trimmed, localeHints);
   const normalized = reordered.replace(DOTTED_MERIDIEM, " $1m");
-  const cleaned = normalized.replace(LOCALE_TIME_NOISE, "").trim();
+  const cleaned = normalized
+    .replace(LOCALE_TIME_NOISE, "")
+    .replace(TRAILING_ZONE_ABBREVIATION, "")
+    .replace(ORDINAL_DAY_SUFFIX, "$1")
+    .replace(/\bSept\b/gi, "Sep")
+    .trim();
   const input = cleaned || trimmed;
 
   // 2. Try human-readable formats with year + time variants
