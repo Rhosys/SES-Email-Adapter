@@ -325,18 +325,38 @@ function withAbbrevMonthPeriod(formats: string[]): string[] {
 const DATE_FORMATS_WITH_YEAR = withWeekdayPrefix(withAbbrevMonthPeriod(BASE_DATE_FORMATS_WITH_YEAR));
 const DATE_FORMATS_YEARFREE = withWeekdayPrefix(withAbbrevMonthPeriod(BASE_DATE_FORMATS_YEARFREE));
 
+/**
+ * Trailing time connectors by base language subtag — the mirror image of
+ * `DATE_CONNECTORS_BY_LANG` below (which handles a connector introducing the
+ * DATE portion when time comes first). These introduce the TIME portion when
+ * the date comes first, e.g. German "3 Januar 2027 um 18:00", French "1
+ * février 2027 à 18:00". Same words as `LEADING_TIME_CONNECTOR` since a
+ * connector reads the same whichever side it falls on.
+ */
+const TRAILING_TIME_CONNECTOR_WORDS = ["at", "um", "à", "a las", "alle", "om"];
+
 const TIME_SUFFIXES = [
   "",
   " HH:mm",
   " h:mm a",
-  " 'at' HH:mm",
-  " 'at' h:mm a",
+  ...TRAILING_TIME_CONNECTOR_WORDS.flatMap(word => [` '${word}' HH:mm`, ` '${word}' h:mm a`]),
   // Comma before the time, and a dot instead of a colon (e.g. "Oct 27, 2026, 18.30").
   ", HH.mm",
 ];
 
 /** Ordinal day suffixes ("1st", "2nd", "3rd", "10th") — luxon's `d` token needs a bare number. */
 const ORDINAL_DAY_SUFFIX = /(\d)(?:st|nd|rd|th)\b/gi;
+
+/**
+ * Non-English ordinal day markers, tried unconditionally like `ORDINAL_DAY_SUFFIX`
+ * above — same safety property: each pattern only matches its own language's
+ * literal marker, so it's a no-op everywhere else. French "1er"/"2ème", Spanish/
+ * Italian "1º"/"2ª"/"3°", and German's ordinal period ("3. Januar" → "3 Januar",
+ * only stripped when followed by whitespace so "03.02.2027" is untouched).
+ */
+const FR_ORDINAL_SUFFIX = /(\d)(?:er|re|ème)\b/gi;
+const ES_IT_ORDINAL_SUFFIX = /(\d)[ºª°]/g;
+const DE_ORDINAL_PERIOD = /(\d)\.(?=\s)/g;
 
 /** A trailing parenthesized timezone abbreviation, e.g. "(CEST)", "(GMT)". */
 const TRAILING_ZONE_ABBREVIATION = /\s*\([A-Za-z]{2,5}\)\s*$/;
@@ -601,6 +621,9 @@ export function coerceDate(
     .replace(LOCALE_TIME_NOISE, "")
     .replace(TRAILING_ZONE_ABBREVIATION, "")
     .replace(ORDINAL_DAY_SUFFIX, "$1")
+    .replace(FR_ORDINAL_SUFFIX, "$1")
+    .replace(ES_IT_ORDINAL_SUFFIX, "$1")
+    .replace(DE_ORDINAL_PERIOD, "$1")
     .replace(/\bSept\b/gi, "Sep")
     .trim();
   const input = cleaned || trimmed;

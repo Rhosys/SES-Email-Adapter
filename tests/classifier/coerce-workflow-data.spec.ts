@@ -586,6 +586,44 @@ describe("coerceWorkflowData", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Date fields — non-English ordinal suffixes and trailing time connectors,
+  // closing the locale coverage gap flagged in review on PR #109.
+  // -------------------------------------------------------------------------
+
+  describe("date fields — non-English ordinal suffixes and time connectors", () => {
+    const travelCtx = { ...ctx, workflow: "travel" };
+    const base = { workflow: "travel", travelType: "flight", provider: "Swiss" };
+
+    it("parses a French ordinal day: '1er février 2027'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "1er février 2027" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["fr"], "skip");
+      expect(result.departureDate).toBe("2027-02-01");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses a French trailing time connector 'à': '1 février 2027 à 18:00'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "1 février 2027 à 18:00" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["fr"], "skip");
+      expect(result.departureDate).toBe("2027-02-01T18:00");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses a German ordinal-period day: '3. Januar 2027'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "3. Januar 2027" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["de"], "skip");
+      expect(result.departureDate).toBe("2027-01-03");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses a German trailing time connector 'um': '3 Januar 2027 um 18:00'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "3 Januar 2027 um 18:00" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["de"], "skip");
+      expect(result.departureDate).toBe("2027-01-03T18:00");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // isAmbiguousSlashSkip predicate
   // -------------------------------------------------------------------------
 
