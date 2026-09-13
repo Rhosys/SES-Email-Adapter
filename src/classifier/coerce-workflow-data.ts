@@ -358,6 +358,14 @@ const FR_ORDINAL_SUFFIX = /(\d)(?:er|re|ème)\b/gi;
 const ES_IT_ORDINAL_SUFFIX = /(\d)[ºª°]/g;
 const DE_ORDINAL_PERIOD = /(\d)\.(?=\s)/g;
 
+/**
+ * Dutch ordinal suffix ("3e januari" → "3 januari"). Unlike the markers above,
+ * a bare "e" straight after a digit is not safely a no-op elsewhere (e.g.
+ * scientific notation "3e10"), so this is only applied when "nl" is an actual
+ * locale hint rather than tried unconditionally.
+ */
+const NL_ORDINAL_SUFFIX = /(\d)e\b/gi;
+
 /** A trailing parenthesized timezone abbreviation, e.g. "(CEST)", "(GMT)". */
 const TRAILING_ZONE_ABBREVIATION = /\s*\([A-Za-z]{2,5}\)\s*$/;
 
@@ -617,15 +625,17 @@ export function coerceDate(
   // tokens accept.
   const reordered = reorderTimeFirst(trimmed, localeHints);
   const normalized = reordered.replace(DOTTED_MERIDIEM, " $1m");
-  const cleaned = normalized
+  const hintedLangs = new Set(localeHints.map(h => h.split("-")[0]!.toLowerCase()));
+  let cleaned = normalized
     .replace(LOCALE_TIME_NOISE, "")
     .replace(TRAILING_ZONE_ABBREVIATION, "")
     .replace(ORDINAL_DAY_SUFFIX, "$1")
     .replace(FR_ORDINAL_SUFFIX, "$1")
     .replace(ES_IT_ORDINAL_SUFFIX, "$1")
     .replace(DE_ORDINAL_PERIOD, "$1")
-    .replace(/\bSept\b/gi, "Sep")
-    .trim();
+    .replace(/\bSept\b/gi, "Sep");
+  if (hintedLangs.has("nl")) cleaned = cleaned.replace(NL_ORDINAL_SUFFIX, "$1");
+  cleaned = cleaned.trim();
   const input = cleaned || trimmed;
 
   // 2. Try human-readable formats with year + time variants

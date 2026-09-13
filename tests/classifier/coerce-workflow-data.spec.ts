@@ -621,6 +621,20 @@ describe("coerceWorkflowData", () => {
       expect(result.departureDate).toBe("2027-01-03T18:00");
       expect(logger.calls.some(c => c.method === "track")).toBe(false);
     });
+
+    it("parses a Dutch ordinal day: '3e januari 2027' (only stripped when 'nl' is hinted)", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "3e januari 2027" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["nl"], "skip");
+      expect(result.departureDate).toBe("2027-01-03");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses a Dutch trailing time connector 'om': '3 januari 2027 om 18:00'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "3 januari 2027 om 18:00" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["nl"], "skip");
+      expect(result.departureDate).toBe("2027-01-03T18:00");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
   });
 
   // -------------------------------------------------------------------------
