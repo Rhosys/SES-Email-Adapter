@@ -260,15 +260,15 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
 
     const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
     expect(res.status).toBe(200);
-    const body = await res.json() as { signals: Array<Signal<CalendarEventData> & { latestResponse?: { decision: string; respondedAt: string } }> };
+    const body = await res.json() as { signals: Array<{ data: { rsvpResponse?: { decision: string; respondedAt: string } } }> };
     expect(body.signals).toHaveLength(1);
-    expect(body.signals[0]!.latestResponse).toEqual({
+    expect(body.signals[0]!.data.rsvpResponse).toEqual({
       decision: "accepted",
       respondedAt: "2025-03-15T11:00:00Z",
     });
   });
 
-  it("does not include latestResponse when no calendar_response exists", async () => {
+  it("does not include rsvpResponse when no calendar_response exists", async () => {
     const calSignal = makeCalendarEventSignal();
     threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-15T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-15T09:00:00Z" }));
     threadDb.listSignals.mockResolvedValueOnce(ok({ items: [calSignal] }));
@@ -276,8 +276,8 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
 
     const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
     expect(res.status).toBe(200);
-    const body = await res.json() as { signals: Array<Signal<CalendarEventData> & { latestResponse?: unknown }> };
-    expect(body.signals[0]!.latestResponse).toBeUndefined();
+    const body = await res.json() as { signals: Array<{ data: { rsvpResponse?: unknown } }> };
+    expect(body.signals[0]!.data.rsvpResponse).toBeUndefined();
   });
 
   it("renders calendar card from calendar signal (source: system), not email signal", async () => {

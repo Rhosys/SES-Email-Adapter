@@ -342,7 +342,7 @@ export class ThreadsApi {
         });
       }
 
-      const enrichedSignals: Array<Api.Signal & { latestResponse?: { decision: CalendarResponseData["decision"]; respondedAt: string } }> = [];
+      const enrichedSignals: Api.Signal[] = [];
       for (const signal of signals) {
         const withUrls = withResolvedContentUrls(signal, contentCdnBaseUrl);
         if (isCalendarEventSignal(withUrls)) {
@@ -350,11 +350,13 @@ export class ThreadsApi {
           if (collapse.superseded.has(withUrls.id)) continue;
           const apiSignal = toApiSignal(withUrls) as Extract<Api.Signal, { type: "calendar_event" }>;
           const calendarEnrichment = collapse.winners.get(withUrls.id) ?? {};
-          const latestResponse = enrichments.get(withUrls.data.veventUid);
+          // The account's latest RSVP for this event (decision + when), resolved across the whole
+          // response history by respondedAt. Lives on the calendar_event data so the client renders
+          // "you responded" from one payload without a second query or reconstructing from cards.
+          const rsvpResponse = enrichments.get(withUrls.data.veventUid);
           enrichedSignals.push({
             ...apiSignal,
-            data: { ...apiSignal.data, ...calendarEnrichment },
-            ...(latestResponse ? { latestResponse } : {}),
+            data: { ...apiSignal.data, ...calendarEnrichment, ...(rsvpResponse ? { rsvpResponse } : {}) },
           });
           continue;
         }

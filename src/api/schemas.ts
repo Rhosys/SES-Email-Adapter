@@ -429,6 +429,14 @@ export const CalendarEventData = z.object({
   // Present only when a later invite changed one or more fields; carries the
   // pre-update values of just the changed fields. Absent for a first invite.
   previousValues: CalendarPreviousValues.optional(),
+  // The account's latest RSVP for this event, resolved across the response history by
+  // respondedAt. Absent when the user has not responded. Lets the client show "you responded"
+  // regardless of which path recorded it (dashboard or native calendar reply) without a second
+  // query. respondedAt is an ISO 8601 timestamp.
+  rsvpResponse: z.object({
+    decision: z.enum(["accepted", "declined", "tentative"]),
+    respondedAt: z.string(),
+  }).optional(),
 }).openapi("CalendarEventData");
 
 export const CalendarResponseData = z.object({
