@@ -26,6 +26,7 @@ import { MailparserMimeParser } from "../mime-parser.js";
 import type { CalendarForwarder } from "./calendar/calendar-forwarder.js";
 import { parseIcs } from "./calendar/ics-parser.js";
 import { collapseCalendarSignals } from "../api/calendar-collapse.js";
+import { recordRsvpResponse } from "./calendar/rsvp-response-recorder.js";
 import { isCalendarEventSignal } from "../types/calendar.js";
 import type { Logger } from "../logger.js";
 import type { Thread, Signal, AnySignal, CalendarResponseData } from "../types/index.js";
@@ -158,30 +159,18 @@ export class IncomingCalendarRsvpProcessor {
     );
     if (replyResult.isErr()) return err(replyResult.error);
 
-    // --- 7. Record the calendar_response signal ---
-    const now = DateTime.utc().toISO()!;
-    const signalId = generateId("sgn-");
-    const responseSignal: Signal<CalendarResponseData> = {
-      id: signalId,
-      signalLookupId: signalId,
-      threadId,
+    // --- 7. Record the calendar_response signal (shared writer — identical shape to the API path) ---
+    const recordResult = await recordRsvpResponse({
+      store: this.threadStore,
       accountId,
-      source: "user",
-      type: "calendar_response",
-      status: "active",
-      labels: [],
-      createdAt: now,
-      data: {
-        decision,
-        respondedAt: now,
-        veventUid: originalVeventUid,
-        linkedSignalId: `cal-${originalCalendarMeetingInvite.organizer}-${originalVeventUid}`,
-        sendStatus: "sent",
-      },
-    };
-
-    const saveResult = await this.threadStore.saveSignal(responseSignal);
-    if (saveResult.isErr()) return err(saveResult.error);
+      threadId,
+      veventUid: originalVeventUid,
+      decision,
+      winnerSignalId: winnerId,
+      now: DateTime.utc().toISO()!,
+      generateId: () => generateId("sgn-"),
+    });
+    if (recordResult.isErr()) return err(recordResult.error);
 
     this.logger.track("Calendar RSVP processed successfully.", {
       code: "processor.calendar_response.success",

@@ -8,6 +8,7 @@ import { computeUndoWindowSeconds } from "./undo-window.js";
 import { zParse } from "./validate.js";
 import { toApiThread, toApiSignal, withResolvedContentUrls } from "./signal-transforms.js";
 import { collapseCalendarSignals } from "./calendar-collapse.js";
+import { recordRsvpResponse } from "../processor/calendar/rsvp-response-recorder.js";
 import type * as Api from "./schemas.js";
 import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../retention.js";
@@ -734,15 +735,18 @@ export class ThreadsApi {
       const groupSignals = (groupResult.value.items as unknown as AnySignal[])
         .filter(isCalendarEventSignal)
         .filter(s => s.data.veventUid === calendarData.veventUid);
-      // All groupSignals share one veventUid, so collapse yields exactly one winner.
+      // All groupSignals share one veventUid, so collapse yields exactly one winner. We respond to
+      // — and record against — the WINNER (the event's current state), not whichever signal the
+      // request URL happened to name; a superseded invite must still resolve to the live event.
       const collapse = collapseCalendarSignals(groupSignals);
-      const winner = [...collapse.winners.values()][0];
-      const inviteCancelled = winner?.cancelledAt !== undefined;
+      const [winnerId, winnerEnrichment] = [...collapse.winners.entries()][0] ?? [signal.id, undefined];
+      const winnerInvite = groupSignals.find(s => s.id === winnerId)?.data ?? calendarData;
+      const inviteCancelled = winnerEnrichment?.cancelledAt !== undefined;
 
       const rsvpResult = await calendarForwarder.sendRsvpToOrganizer(
         {
           decision: body.decision,
-          originalCalendarMeetingInvite: calendarData,
+          originalCalendarMeetingInvite: winnerInvite,
           cancelled: inviteCancelled,
           aliasAddress: recipientAddress,
           fromAddress: recipientAddress,
@@ -753,32 +757,21 @@ export class ThreadsApi {
 
       if (rsvpResult.isErr()) return err(c, 422, "Failed to send RSVP", "RSVP_SEND_FAILED");
 
-      const now = DateTime.utc().toISO()!;
-      const responseSignalId = generateId("sgn-");
-      const responseSignal: Signal<CalendarResponseData> = {
-        id: responseSignalId,
-        signalLookupId: responseSignalId,
-        threadId: thread.id,
+      const recordResult = await recordRsvpResponse({
+        store: threadDb,
         accountId,
-        source: "user",
-        type: "calendar_response",
-        status: "active",
-        labels: [],
-        createdAt: now,
-        data: {
-          decision: body.decision,
-          respondedAt: now,
-          veventUid: calendarData.originalVeventUid,
-          linkedSignalId: signal.id,
-          sendStatus: "sent",
-        },
-      };
-
-      const saveResult = await threadDb.saveSignal(responseSignal);
-      if (saveResult.isErr()) {
-        logger.error(`Failed to save RSVP response signal: ${saveResult.error.message}`, { code: "api.rsvp.save_failed", error: saveResult.error });
+        threadId: thread.id,
+        veventUid: winnerInvite.originalVeventUid,
+        decision: body.decision,
+        winnerSignalId: winnerId,
+        now: DateTime.utc().toISO()!,
+        generateId: () => generateId("sgn-"),
+      });
+      if (recordResult.isErr()) {
+        logger.error(`Failed to save RSVP response signal: ${recordResult.error.message}`, { code: "api.rsvp.save_failed", error: recordResult.error });
         return err(c, 500, "Internal Server Error");
       }
+      const responseSignal = recordResult.value;
 
       if (schedulerClient && calendarData.startTime) {
         const eventStart = DateTime.fromISO(calendarData.startTime, { zone: "utc" });
