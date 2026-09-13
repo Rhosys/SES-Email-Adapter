@@ -56,7 +56,7 @@ function makeCalendarData(overrides: Partial<CalendarEventData> = {}): CalendarE
 // Validates: Requirements 7.1, 14.3
 // ---------------------------------------------------------------------------
 
-describe("CalendarForwarder.sendReply — RSVP targets ORGANIZER mailto: address", () => {
+describe("CalendarForwarder.sendRsvpToOrganizer — RSVP targets ORGANIZER mailto: address", () => {
   let emailService: EmailService;
 
   beforeEach(() => {
@@ -90,12 +90,12 @@ describe("CalendarForwarder.sendReply — RSVP targets ORGANIZER mailto: address
     },
   ])("$reason", async ({ organizer, expectedTo }) => {
     const forwarder = makeForwarder(emailService);
-    await forwarder.sendReply(
+    await forwarder.sendRsvpToOrganizer(
       {
         decision: "accepted",
-        originalCalendarData: makeCalendarData({ organizer, originalVeventUid: "uid-event-1" }),
+        originalCalendarMeetingInvite: makeCalendarData({ organizer, originalVeventUid: "uid-event-1" }),
+        cancelled: false,
         aliasAddress: "alias@proxy.com",
-        organizerAddress: organizer,
         fromAddress: "alias@proxy.com",
         accountId: "acct-test",
       },
@@ -112,7 +112,7 @@ describe("CalendarForwarder.sendReply — RSVP targets ORGANIZER mailto: address
 // Validates: Requirements 11.3
 // ---------------------------------------------------------------------------
 
-describe("CalendarForwarder.sendReply — REPLY uses original UID not proxy UID", () => {
+describe("CalendarForwarder.sendRsvpToOrganizer — REPLY uses original UID not proxy UID", () => {
   let emailService: EmailService;
 
   beforeEach(() => {
@@ -132,15 +132,15 @@ describe("CalendarForwarder.sendReply — REPLY uses original UID not proxy UID"
     },
   ])("$reason", async ({ originalUid, proxyUid }) => {
     const forwarder = makeForwarder(emailService);
-    await forwarder.sendReply(
+    await forwarder.sendRsvpToOrganizer(
       {
         decision: "accepted",
-        originalCalendarData: makeCalendarData({
+        originalCalendarMeetingInvite: makeCalendarData({
           originalVeventUid: originalUid,
           proxyUid,
         }),
+        cancelled: false,
         aliasAddress: "alias@proxy.com",
-        organizerAddress: "organizer@example.com",
         fromAddress: "alias@proxy.com",
         accountId: "acct-test",
       },
@@ -163,17 +163,17 @@ describe("CalendarForwarder.sendReply — REPLY uses original UID not proxy UID"
 // Reply is sent as a text/calendar part under the customer tenant from the alias
 // ---------------------------------------------------------------------------
 
-describe("CalendarForwarder.sendReply — identity and MIME shape", () => {
+describe("CalendarForwarder.sendRsvpToOrganizer — identity and MIME shape", () => {
   it("sends METHOD:REPLY as text/calendar, from the alias, under the customer tenant", async () => {
     const emailService = makeEmailService();
     const forwarder = makeForwarder(emailService);
 
-    await forwarder.sendReply(
+    await forwarder.sendRsvpToOrganizer(
       {
         decision: "declined",
-        originalCalendarData: makeCalendarData(),
+        originalCalendarMeetingInvite: makeCalendarData(),
+        cancelled: false,
         aliasAddress: "alias@proxy.com",
-        organizerAddress: "organizer@example.com",
         fromAddress: "alias@proxy.com",
         accountId: "acct-test",
       },
@@ -196,19 +196,19 @@ describe("CalendarForwarder.sendReply — identity and MIME shape", () => {
 // Permanent SES error handling
 // ---------------------------------------------------------------------------
 
-describe("CalendarForwarder.sendReply — permanent SES error", () => {
+describe("CalendarForwarder.sendRsvpToOrganizer — permanent SES error", () => {
   it("returns ok and logs WARN on permanent SES error — no retry", async () => {
     const emailService = makeEmailService();
     const logger = createMockLogger();
     vi.mocked(emailService.sendRaw as ReturnType<typeof vi.fn>).mockResolvedValueOnce(err({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400, message: "Email address is not verified", cause: new Error("test") }));
 
     const forwarder = makeForwarder(emailService);
-    const result = await forwarder.sendReply(
+    const result = await forwarder.sendRsvpToOrganizer(
       {
         decision: "accepted",
-        originalCalendarData: makeCalendarData(),
+        originalCalendarMeetingInvite: makeCalendarData(),
+        cancelled: false,
         aliasAddress: "alias@proxy.com",
-        organizerAddress: "organizer@example.com",
         fromAddress: "alias@proxy.com",
         accountId: "acct-test",
       },

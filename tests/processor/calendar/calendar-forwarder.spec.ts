@@ -223,3 +223,106 @@ describe("CalendarForwarder.forwardInvite — permanent SES error", () => {
     expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "calendar_forwarder.send_permanent")).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// sendReply — the universal backstop that lives in the forwarder (RSVP *eligibility* — is
+// this a rsvpable REQUEST, is the event cancelled — is enforced at the call site, since the
+// relay path legitimately carries a REPLY-method source). The one gate here: a reply with no
+// organizer has nowhere to go, so it is dropped with ERROR without building a MIME or calling
+// SES. A normal reply with an organizer is sent.
+// ---------------------------------------------------------------------------
+
+function makeReplyCalendarData(overrides: Partial<CalendarEventData> = {}): CalendarEventData {
+  return {
+    title: "Reservation at tibits Winterthur",
+    startTime: "2026-09-25T12:15:00Z",
+    organizer: "organizer@example.com",
+    attendees: [],
+    veventUid: "6aa3dd28a1eae",
+    originalVeventUid: "6aa3dd28a1eae",
+    method: "REQUEST",
+    sequence: 0,
+    linkedSignalId: "sgn-email-001",
+    ...overrides,
+  };
+}
+
+describe("CalendarForwarder.sendRsvpToOrganizer — eligibility validation", () => {
+  it("drops a cancelled invite with INFO and never calls SES", async () => {
+    const emailService = makeEmailService();
+    const forwarder = makeForwarder(emailService);
+    const logger = createMockLogger();
+
+    const result = await forwarder.sendRsvpToOrganizer({
+      decision: "accepted",
+      originalCalendarMeetingInvite: makeReplyCalendarData({ method: "REQUEST", organizer: "organizer@example.com" }),
+      cancelled: true,
+      aliasAddress: "alias@customer.com",
+      fromAddress: "alias@customer.com",
+      accountId: "acc-abc123",
+    }, logger);
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().messageId).toBe("");
+    expect(emailService.sendRaw).not.toHaveBeenCalled();
+    expect(logger.calls.some(c => c.method === "info" && c.context?.code === "rsvp.invite_cancelled")).toBe(true);
+  });
+
+  it("drops a non-REQUEST (PUBLISH) invite with INFO and never calls SES", async () => {
+    const emailService = makeEmailService();
+    const forwarder = makeForwarder(emailService);
+    const logger = createMockLogger();
+
+    const result = await forwarder.sendRsvpToOrganizer({
+      decision: "accepted",
+      originalCalendarMeetingInvite: makeReplyCalendarData({ method: "PUBLISH", organizer: "" }),
+      cancelled: false,
+      aliasAddress: "alias@customer.com",
+      fromAddress: "alias@customer.com",
+      accountId: "acc-abc123",
+    }, logger);
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().messageId).toBe("");
+    expect(emailService.sendRaw).not.toHaveBeenCalled();
+    expect(logger.calls.some(c => c.method === "info" && c.context?.code === "rsvp.not_rsvpable_method")).toBe(true);
+  });
+
+  it("drops a REQUEST with an empty organizer with ERROR and never calls SES", async () => {
+    const emailService = makeEmailService();
+    const forwarder = makeForwarder(emailService);
+    const logger = createMockLogger();
+
+    const result = await forwarder.sendRsvpToOrganizer({
+      decision: "accepted",
+      originalCalendarMeetingInvite: makeReplyCalendarData({ method: "REQUEST", organizer: "" }),
+      cancelled: false,
+      aliasAddress: "alias@customer.com",
+      fromAddress: "alias@customer.com",
+      accountId: "acc-abc123",
+    }, logger);
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().messageId).toBe("");
+    expect(emailService.sendRaw).not.toHaveBeenCalled();
+    expect(logger.calls.some(c => c.method === "error" && c.context?.code === "rsvp.no_organizer_address")).toBe(true);
+  });
+
+  it("sends normally for a non-cancelled REQUEST with an organizer", async () => {
+    const emailService = makeEmailService();
+    const forwarder = makeForwarder(emailService);
+    const logger = createMockLogger();
+
+    const result = await forwarder.sendRsvpToOrganizer({
+      decision: "accepted",
+      originalCalendarMeetingInvite: makeReplyCalendarData({ method: "REQUEST", organizer: "organizer@example.com" }),
+      cancelled: false,
+      aliasAddress: "alias@customer.com",
+      fromAddress: "alias@customer.com",
+      accountId: "acc-abc123",
+    }, logger);
+
+    expect(result.isOk()).toBe(true);
+    expect(emailService.sendRaw).toHaveBeenCalledTimes(1);
+  });
+});

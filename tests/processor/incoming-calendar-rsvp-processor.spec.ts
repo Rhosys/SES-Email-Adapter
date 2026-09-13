@@ -11,6 +11,7 @@ import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import { ok } from "../../src/errors.js";
 import type { Signal, CalendarResponseData } from "../../src/types/index.js";
+import type { CalendarEventData } from "../../src/types/calendar.js";
 
 // ---------------------------------------------------------------------------
 // IncomingCalendarRsvpProcessor — the lifecycle half of the inbound calendar
@@ -100,6 +101,34 @@ function makeForwarder(emailService?: EmailService): CalendarForwarder {
   });
 }
 
+/** The ORIGINAL stored invite (METHOD:REQUEST) the relay path loads and relays off. */
+function storedInvite(overrides: Partial<CalendarEventData> = {}): Signal<CalendarEventData> {
+  return {
+    id: "sgn-cal-invite-001",
+    signalLookupId: `cal-${ORGANIZER}-${ORIGINAL_UID}`,
+    threadId: VALID_ARC_ID,
+    accountId: VALID_ACC_ID,
+    source: "signal",
+    type: "calendar_event",
+    status: "active",
+    labels: [],
+    createdAt: "2025-03-15T09:00:00Z",
+    data: {
+      title: "Team Standup",
+      startTime: "2025-03-15T10:00:00Z",
+      endTime: "2025-03-15T11:00:00Z",
+      organizer: ORGANIZER,
+      attendees: [],
+      veventUid: ORIGINAL_UID,
+      originalVeventUid: ORIGINAL_UID,
+      method: "REQUEST",
+      sequence: 0,
+      linkedSignalId: "sgn-email-001",
+      ...overrides,
+    },
+  };
+}
+
 function makeThreadStore(overrides: Partial<RsvpThreadStore> = {}): RsvpThreadStore {
   return {
     getThread: vi.fn().mockResolvedValue(ok({
@@ -113,6 +142,7 @@ function makeThreadStore(overrides: Partial<RsvpThreadStore> = {}): RsvpThreadSt
       createdAt: "2025-03-15T09:00:00Z",
     })),
     saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
+    listSignals: vi.fn().mockResolvedValue(ok({ items: [storedInvite()] })),
     ...overrides,
   };
 }
@@ -187,7 +217,7 @@ describe("IncomingCalendarRsvpProcessor — drop paths (ok, no signal, WARN)", (
   it("drops a forged proxy UID (HMAC mismatch) before any I/O", async () => {
     const forgedUid = `${VALID_ACC_ID}.${VALID_ARC_ID}.${ORIGINAL_UID}.AAAAAAAAAAAAAAAA@${SERVICE_DOMAIN}`;
     const { processor, logger, threadStore, forwarder } = makeProcessor({ raw: rawRsvpEmail({ proxyUid: forgedUid }) });
-    const sendReplySpy = vi.spyOn(forwarder, "sendReply");
+    const sendReplySpy = vi.spyOn(forwarder, "sendRsvpToOrganizer");
 
     const result = await processor.process(makeMessage());
 

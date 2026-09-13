@@ -44,11 +44,26 @@ export interface ForwardInviteOpts {
 // Options for a single RSVP reply
 // ---------------------------------------------------------------------------
 
-export interface SendReplyOpts {
+export interface SendRsvpToOrganizerOpts {
   decision: "accepted" | "declined" | "tentative";
-  originalCalendarData: CalendarEventData;
+  /**
+   * The ORIGINAL calendar meeting invite being responded to — always the stored REQUEST, never
+   * the RSVP itself. Both callers converge here: the API path loads the invite the user clicked
+   * on; the relay path decodes the inbound REPLY's proxy UID and loads the same stored invite.
+   * sendRsvpToOrganizer validates this invite (must be a REQUEST carrying an organizer) before
+   * emitting a REPLY to that organizer.
+   */
+  originalCalendarMeetingInvite: CalendarEventData;
+  /**
+   * Whether the invite's latest collapsed state is a cancellation. Derived from the whole event
+   * group (a later CANCEL, or a CANCEL since reinstated by a newer REQUEST), which a single
+   * invite record cannot reveal — so the caller computes it and supplies it here. A cancelled
+   * invite is accepted but never relayed upstream.
+   */
+  cancelled: boolean;
+  /** The alias that received/represents the user — the ATTENDEE address on the outgoing REPLY. */
   aliasAddress: string;
-  organizerAddress: string;
+  /** The From address of the outgoing REPLY (the alias, masking the user's real mailbox). */
   fromAddress: string;
   accountId: string;
 }
@@ -198,12 +213,51 @@ export class CalendarForwarder {
    * alias address, using the ORIGINAL event UID (RFC 6047 §2.3). A permanent SES
    * rejection is swallowed (logged WARN, returns ok with an empty messageId).
    */
-  async sendReply(opts: SendReplyOpts, logger: Logger): Promise<Result<{ messageId: string }, DbError | EmailServiceError>> {
-    const { decision, originalCalendarData, aliasAddress, organizerAddress, fromAddress, accountId } = opts;
+  /**
+   * Emit a METHOD:REPLY back to the organizer of an ORIGINAL calendar meeting invite. This is
+   * the single mechanism both RSVP entry points converge on — the dashboard API (the user clicks
+   * Accept/Decline) and the inbound-REPLY relay (the user's native calendar client replied to our
+   * proxy address). Each caller maps its own incoming shape to the same original invite and passes
+   * it here; this method is the sole validator of RSVP eligibility. It sends only when the invite's
+   * latest state is a schedulable REQUEST that carries an organizer and is not cancelled. Anything
+   * else is accepted but not relayed upstream — an expected, benign outcome, swallowed to an empty
+   * messageId (the client already gates its RSVP control on the same `rsvpable` rule).
+   */
+  async sendRsvpToOrganizer(opts: SendRsvpToOrganizerOpts, logger: Logger): Promise<Result<{ messageId: string }, DbError | EmailServiceError>> {
+    const { decision, originalCalendarMeetingInvite, cancelled, aliasAddress, fromAddress, accountId } = opts;
+    const organizerAddress = originalCalendarMeetingInvite.organizer;
+    const veventUid = originalCalendarMeetingInvite.originalVeventUid;
+
+    // Cancelled: the invite's latest collapsed state is a CANCEL. Accept the RSVP, don't relay.
+    if (cancelled) {
+      logger.info("RSVP for a cancelled calendar invite — accepted but not relayed to the organizer.", {
+        code: "rsvp.invite_cancelled", accountId, veventUid,
+      });
+      return ok({ messageId: "" });
+    }
+
+    // Not a schedulable REQUEST (PUBLISH informational, CANCEL, REPLY/COUNTER, …): nothing to
+    // RSVP to. Expected traffic, not a failure — drop with INFO.
+    if (originalCalendarMeetingInvite.method.toUpperCase() !== "REQUEST") {
+      logger.info("RSVP for a non-REQUEST calendar invite — not RSVP-eligible. Dropping.", {
+        code: "rsvp.not_rsvpable_method", accountId, veventUid, method: originalCalendarMeetingInvite.method,
+      });
+      return ok({ messageId: "" });
+    }
+
+    // A REQUEST with no organizer has nowhere to reply to. Per RFC 5546 a METHOD:REQUEST MUST
+    // carry ORGANIZER, so an empty value is non-conformant (or a poisoned pre-PUBLISH record) —
+    // never normal traffic, hence ERROR. Short-circuit before building the MIME or calling SES.
+    if (!organizerAddress.trim()) {
+      logger.error("RSVP invite has no organizer address — non-conformant (RFC 5546 requires ORGANIZER on a REQUEST). Dropping.", {
+        code: "rsvp.no_organizer_address", accountId, veventUid,
+      });
+      return ok({ messageId: "" });
+    }
 
     const icsContent = buildReplyIcs({
-      veventUid: originalCalendarData.originalVeventUid,
-      sequence: originalCalendarData.sequence,
+      veventUid,
+      sequence: originalCalendarMeetingInvite.sequence,
       attendeeAddress: aliasAddress,
       decision: PARTSTAT_MAP[decision],
       organizerAddress,
@@ -212,7 +266,7 @@ export class CalendarForwarder {
     return this.sendCalendarMessage({
       from: fromAddress,
       to: organizerAddress,
-      subject: `Re: ${originalCalendarData.title}`,
+      subject: `Re: ${originalCalendarMeetingInvite.title}`,
       icsContent,
       method: "REPLY",
       tenant: accountId,

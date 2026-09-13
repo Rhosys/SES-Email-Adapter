@@ -170,6 +170,11 @@ function rawRsvpEmailFrom(icsContent: string): Uint8Array {
   return new Uint8Array(Buffer.from(message, "utf8"));
 }
 
+/** The ORIGINAL stored REQUEST invite the relay path loads and relays off (veventUid = VEVENT_UID). */
+function makeStoredInvite(): Signal<CalendarEventData> {
+  return makeCalendarSignal();
+}
+
 function makeRsvpThreadStore(): RsvpThreadStore {
   return {
     getThread: vi.fn().mockResolvedValue(ok({
@@ -183,6 +188,7 @@ function makeRsvpThreadStore(): RsvpThreadStore {
       createdAt: "2025-03-15T09:00:00Z",
     })),
     saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
+    listSignals: vi.fn().mockResolvedValue(ok({ items: [makeStoredInvite()] })),
   };
 }
 
@@ -351,12 +357,12 @@ describe("Scenario: UI RSVP sends masked reply to organizer preserving user priv
     const forwarder = makeForwarder(emailService);
     const calendarData = makeCalendarSignal().data;
 
-    const result = await forwarder.sendReply(
+    const result = await forwarder.sendRsvpToOrganizer(
       {
         decision: "accepted",
-        originalCalendarData: calendarData,
+        originalCalendarMeetingInvite: calendarData,
+        cancelled: false,
         aliasAddress: ALIAS_ADDRESS,
-        organizerAddress: ORGANIZER_EMAIL,
         fromAddress: ALIAS_ADDRESS,
         accountId: "acct-test",
       },

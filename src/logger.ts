@@ -70,6 +70,12 @@ function redactValue(key: string, value: unknown): unknown {
     return value.length > 8 ? value.slice(0, 8) + "[REDACTED]" : "[REDACTED]";
   }
   if (key === "embeddings" && value && typeof value === "object") return "<Embeddings-Map-Array>";
+  // Binary payloads (raw MIME bytes, S3 object bodies) are TypedArrays/Buffers/ArrayBuffers.
+  // They are `typeof "object"` and not real Arrays, so redact() would otherwise recurse their
+  // integer-indexed keys and emit a {"0":70,"1":114,…} number map for every byte. Collapse them
+  // to a byte-count descriptor — the contents are never useful in a log and may carry message body.
+  if (ArrayBuffer.isView(value)) return `<${value.constructor.name}: ${value.byteLength} bytes>`;
+  if (value instanceof ArrayBuffer) return `<ArrayBuffer: ${value.byteLength} bytes>`;
   if (typeof value === "bigint") return value.toString();
   if (typeof value === "function") return `[Function: ${value.name || "anonymous"}]`;
   return value;

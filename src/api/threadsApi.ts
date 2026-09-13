@@ -721,12 +721,30 @@ export class ThreadsApi {
         return err(c, 422, "Domain misconfiguration", "DOMAIN_MISCONFIGURATION", { domain: aliasDomain, reason: "DKIM + SPF not configured for alias domain" });
       }
 
-      const rsvpResult = await calendarForwarder.sendReply(
+      // Determine the invite's cancellation state from its latest COLLAPSED state, not the single
+      // stored signal: a later CANCEL (or a CANCEL since reinstated by a newer REQUEST) is only
+      // visible across the whole event group. sendRsvpToOrganizer validates the rest of RSVP
+      // eligibility (schedulable REQUEST, organizer present) from the invite itself; `cancelled`
+      // is the one fact it cannot derive from a single record, so we compute it here and pass it.
+      const groupResult = await threadDb.listSignals(accountId, thread.id, { limit: 100 });
+      if (groupResult.isErr()) {
+        logger.error(`Failed to load calendar group for RSVP eligibility: ${groupResult.error.message}`, { code: "api.rsvp.load_group_failed", error: groupResult.error });
+        return err(c, 500, "Internal Server Error");
+      }
+      const groupSignals = (groupResult.value.items as unknown as AnySignal[])
+        .filter(isCalendarEventSignal)
+        .filter(s => s.data.veventUid === calendarData.veventUid);
+      // All groupSignals share one veventUid, so collapse yields exactly one winner.
+      const collapse = collapseCalendarSignals(groupSignals);
+      const winner = [...collapse.winners.values()][0];
+      const inviteCancelled = winner?.cancelledAt !== undefined;
+
+      const rsvpResult = await calendarForwarder.sendRsvpToOrganizer(
         {
           decision: body.decision,
-          originalCalendarData: calendarData,
+          originalCalendarMeetingInvite: calendarData,
+          cancelled: inviteCancelled,
           aliasAddress: recipientAddress,
-          organizerAddress: calendarData.organizer,
           fromAddress: recipientAddress,
           accountId,
         },

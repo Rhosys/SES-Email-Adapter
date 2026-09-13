@@ -182,6 +182,11 @@ function toApiCalendarData(type: string, data: unknown): unknown {
         ...(a.role ? { optional: a.role === "OPT-PARTICIPANT" } : {}),
       })),
       linkedSignalId: d.linkedSignalId,
+      // Base value; the list endpoint overrides it from the collapsed winner's enrichment
+      // (spread after this DTO). A calendar_event fetched outside collapse defaults to
+      // non-rsvpable — the safe default, since eligibility can only be decided across the
+      // whole event group (a later CANCEL vetoes a REQUEST).
+      rsvpable: false,
     };
   }
   if (type === "calendar_response") {

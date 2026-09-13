@@ -227,6 +227,30 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
     expect(body.signals[0]!.data.linkedSignalId).toBe("sgn-email-001");
   });
 
+  it("marks a REQUEST-with-organizer calendar signal rsvpable in the DTO", async () => {
+    const calSignal = makeCalendarEventSignal();
+    threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-15T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-15T09:00:00Z" }));
+    threadDb.listSignals.mockResolvedValueOnce(ok({ items: [calSignal] }));
+    threadDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
+
+    const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { signals: Array<{ data: { rsvpable: boolean } }> };
+    expect(body.signals[0]!.data.rsvpable).toBe(true);
+  });
+
+  it("marks a PUBLISH (informational) calendar signal non-rsvpable in the DTO", async () => {
+    const calSignal = makeCalendarEventSignal({ data: { ...makeCalendarEventSignal().data, method: "PUBLISH", organizer: "" } });
+    threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-15T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-15T09:00:00Z" }));
+    threadDb.listSignals.mockResolvedValueOnce(ok({ items: [calSignal] }));
+    threadDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
+
+    const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { signals: Array<{ data: { rsvpable: boolean } }> };
+    expect(body.signals[0]!.data.rsvpable).toBe(false);
+  });
+
   it("includes most recent calendar_response decision alongside calendar signal", async () => {
     const calSignal = makeCalendarEventSignal();
     const responseSignal = makeCalendarResponseSignal();

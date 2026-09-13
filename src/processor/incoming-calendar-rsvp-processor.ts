@@ -25,8 +25,10 @@ import type { EmailContentStore } from "../content-store.js";
 import { MailparserMimeParser } from "../mime-parser.js";
 import type { CalendarForwarder } from "./calendar/calendar-forwarder.js";
 import { parseIcs } from "./calendar/ics-parser.js";
+import { collapseCalendarSignals } from "../api/calendar-collapse.js";
+import { isCalendarEventSignal } from "../types/calendar.js";
 import type { Logger } from "../logger.js";
-import type { Thread, Signal, CalendarResponseData, CalendarEventData } from "../types/index.js";
+import type { Thread, Signal, AnySignal, CalendarResponseData } from "../types/index.js";
 import { generateId } from "../utils/id.js";
 
 // ---------------------------------------------------------------------------
@@ -37,6 +39,10 @@ import { generateId } from "../utils/id.js";
 export interface RsvpThreadStore {
   getThread(accountId: string, id: string): Promise<Result<Thread | null, DbError>>;
   saveSignal(signal: Signal<CalendarResponseData>): Promise<Result<void, DbError>>;
+  // Load the thread's signals so the relay path can find the ORIGINAL stored invite for the
+  // RSVP's event and collapse the group to its latest state. The inbound REPLY tells us the
+  // event identity (via the HMAC proxy UID); the stored invite is what we actually relay.
+  listSignals(accountId: string, threadId: string, params: { limit?: number }): Promise<Result<{ items: Signal[] }, DbError>>;
 }
 
 export interface IncomingCalendarRsvpProcessorDeps {
@@ -96,7 +102,7 @@ export class IncomingCalendarRsvpProcessor {
       return ok(undefined);
     }
 
-    const { decision, accountId, threadId, originalVeventUid, organizerAddress } = validation.value;
+    const { decision, accountId, threadId, originalVeventUid } = validation.value;
 
     // --- 4. Look up the thread (identity is HMAC-authoritative from here on) ---
     const threadResult = await this.threadStore.getThread(accountId, threadId);
@@ -110,21 +116,41 @@ export class IncomingCalendarRsvpProcessor {
       return ok(undefined);
     }
 
+    // --- 5. Load the ORIGINAL stored invite for this event and collapse its group ---
+    // The inbound REPLY authenticated the event identity (via the HMAC proxy UID), but we relay
+    // the RSVP off the stored REQUEST, not off the REPLY itself — the invite is the source of the
+    // organizer, sequence, and eligibility. This mirrors the API path so both converge on the same
+    // original invite and the same sendRsvpToOrganizer validation.
+    const groupResult = await this.threadStore.listSignals(accountId, threadId, { limit: 100 });
+    if (groupResult.isErr()) return err(groupResult.error);
+    const inviteGroup = (groupResult.value.items as unknown as AnySignal[])
+      .filter(isCalendarEventSignal)
+      .filter(s => s.data.veventUid === originalVeventUid);
+    if (inviteGroup.length === 0) {
+      this.logger.warn("Calendar RSVP: no stored invite found for the event — dropping.", {
+        code: "processor.calendar_response.invite_not_found",
+        accountId,
+        threadId,
+        veventUid: originalVeventUid,
+      });
+      return ok(undefined);
+    }
+    const collapse = collapseCalendarSignals(inviteGroup);
+    const [winnerId, enrichment] = [...collapse.winners.entries()][0]!;
+    const originalCalendarMeetingInvite = inviteGroup.find(s => s.id === winnerId)!.data;
+    const inviteCancelled = enrichment.cancelledAt !== undefined;
+
     // The reply address that received this RSVP is also the alias we send FROM,
     // masking the user's real mailbox back to the organizer.
     const aliasAddress = recipient;
 
-    // --- 5. Relay the RSVP back to the organizer (send-first, record-second) ---
-    const replyResult = await this.calendarForwarder.sendReply(
+    // --- 6. Relay the RSVP back to the organizer (send-first, record-second) ---
+    const replyResult = await this.calendarForwarder.sendRsvpToOrganizer(
       {
         decision,
-        originalCalendarData: {
-          ...parseResult.value.calendarData,
-          originalVeventUid,
-          linkedSignalId: "",
-        } as CalendarEventData,
+        originalCalendarMeetingInvite,
+        cancelled: inviteCancelled,
         aliasAddress,
-        organizerAddress,
         fromAddress: aliasAddress,
         accountId,
       },
@@ -132,7 +158,7 @@ export class IncomingCalendarRsvpProcessor {
     );
     if (replyResult.isErr()) return err(replyResult.error);
 
-    // --- 6. Record the calendar_response signal ---
+    // --- 7. Record the calendar_response signal ---
     const now = DateTime.utc().toISO()!;
     const signalId = generateId("sgn-");
     const responseSignal: Signal<CalendarResponseData> = {
@@ -149,7 +175,7 @@ export class IncomingCalendarRsvpProcessor {
         decision,
         respondedAt: now,
         veventUid: originalVeventUid,
-        linkedSignalId: `cal-${organizerAddress}-${originalVeventUid}`,
+        linkedSignalId: `cal-${originalCalendarMeetingInvite.organizer}-${originalVeventUid}`,
         sendStatus: "sent",
       },
     };
