@@ -330,7 +330,7 @@ export class ImapAdapter implements ProviderAdapter {
     return ok({ syncCursor: formatSyncCursor(uidvalidity, lastUid), syncState, expiresAt, providerSubscriptionId: "poll", emailAddress: imapConfig.username });
   }
 
-  async renew(emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>> {
+  async renew(emx: ExternalMailExchange, opts?: { includeOverlap?: boolean }): Promise<Result<void, ProviderRenewalError>> {
     const imapConfig = emx.imapConfig;
     if (!imapConfig) {
       return err({ kind: "provider_renewal_failed", cause: "Missing imapConfig" });
@@ -381,9 +381,10 @@ export class ImapAdapter implements ProviderAdapter {
       return this.handleRenewalFailure(emx, "Mailbox was rebuilt on the server (UIDVALIDITY changed)");
     }
 
-    // Back up cursor by 10 to catch any messages that landed between cursor-write and this poll.
-    // Pipeline deduplicates, so re-enqueuing already-processed UIDs is safe.
-    const searchFrom = Math.max(0, lastUid - 10);
+    // Normal polling trusts the stored cursor exactly — no backdating. Only a UI-driven config
+    // change (e.g. host/credentials edited via PATCH) requests includeOverlap, to re-check a
+    // small window in case the reconnect landed on a different mailbox state.
+    const searchFrom = opts?.includeOverlap ? Math.max(0, lastUid - 10) : lastUid;
     const searchResult = await conn.searchNewUids(searchFrom);
     await conn.logout();
 
