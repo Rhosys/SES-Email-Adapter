@@ -341,6 +341,29 @@ describe("IncomingCalendarRsvpProcessor — happy path", () => {
     // The (first) error is only surfaced once every attachment has been attempted.
     expect(result.isErr()).toBe(true);
   });
+
+  it("logs every failed attachment, not only the one surfaced as the returned error", async () => {
+    const proxyUidA = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
+    const proxyUidB = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
+    const emailService = { sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })) } as unknown as EmailService;
+    // BOTH attachments fail to save — only returning the first error must not mean the
+    // second failure goes unlogged and silently disappears.
+    const saveSignal = vi.fn()
+      .mockResolvedValueOnce(err(dbError(new Error("write failed A"))))
+      .mockResolvedValueOnce(err(dbError(new Error("write failed B"))));
+    const threadStore = makeThreadStore({ saveSignal });
+    const { processor, logger } = makeProcessor({
+      raw: rawMultiRsvpEmail({ proxyUidA, proxyUidB }),
+      forwarder: makeForwarder(emailService),
+      threadStore,
+    });
+
+    const result = await processor.process(makeMessage());
+
+    expect(result.isErr()).toBe(true);
+    const failureLogs = logger.calls.filter(c => c.method === "error" && c.context?.code === "processor.calendar_response.attachment_failed");
+    expect(failureLogs).toHaveLength(2);
+  });
 });
 
 describe("IncomingCalendarRsvpProcessor — drop paths (ok, no signal, WARN)", () => {

@@ -92,11 +92,23 @@ export class IncomingCalendarRsvpProcessor {
 
     // Attempt every attachment even if one hits a genuine infra error — a bundled message
     // might carry several attendees' replies, and one DB/send failure shouldn't stop the
-    // rest from being relayed and recorded. Surface the first error only after all have run.
+    // rest from being relayed and recorded. Every failure is logged as it happens (so none
+    // are lost even though only the first is returned); the first error is surfaced only
+    // after all attachments have been attempted, so SQS retries the whole message.
     let firstError: DbError | EmailServiceError | undefined;
     for (const icsBytes of icsAttachments) {
       const result = await this.processOneIcs(icsBytes, recipient);
-      if (result.isErr() && !firstError) firstError = result.error;
+      if (result.isErr()) {
+        // TransientSesError carries no `message` field, so log the whole typed error rather
+        // than interpolate one that might not exist.
+        this.logger.error("Calendar RSVP: failed to process attachment.", {
+          code: "processor.calendar_response.attachment_failed",
+          recipient,
+          compositeMailMessageId: msg.compositeMailMessageId,
+          error: result.error,
+        });
+        if (!firstError) firstError = result.error;
+      }
     }
     if (firstError) return err(firstError);
     return ok(undefined);
