@@ -257,6 +257,48 @@ describe("IncomingCalendarRsvpProcessor — happy path", () => {
     expect(saved.data.veventUid).toBe(ORIGINAL_UID);
   });
 
+  it("records a second, separate RSVP-reply email for the same event as its own signal (a changed mind, not a duplicate)", async () => {
+    // Two DISTINCT inbound emails (their own S3 key / SQS message in production) for the SAME
+    // event and attendee — e.g. the user accepted, then later declined from their calendar app.
+    // Each is its own process() call; there is no per-event idempotency that would drop the
+    // second because "we already have a response for this veventUid". recordRsvpResponse is
+    // append-only (see rsvp-response-recorder.ts) and getLatestCalendarResponse resolves
+    // "current" by max(respondedAt), so both must be saved and the later one must win on read.
+    const proxyUid = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
+    const emailService = { sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })) } as unknown as EmailService;
+    const threadStore = makeThreadStore();
+    const forwarder = makeForwarder(emailService);
+    const logger = createMockLogger();
+    const processor = new IncomingCalendarRsvpProcessor({
+      emailContentStore: makeContentStore(rawRsvpEmail({ proxyUid, partstat: "ACCEPTED" })),
+      calendarForwarder: forwarder,
+      threadStore,
+      logger,
+    });
+
+    const firstResult = await processor.process(makeMessage());
+    expect(firstResult.isOk()).toBe(true);
+
+    // A later, separate email arrives changing the decision — same event, same attendee.
+    const laterProcessor = new IncomingCalendarRsvpProcessor({
+      emailContentStore: makeContentStore(rawRsvpEmail({ proxyUid, partstat: "DECLINED" })),
+      calendarForwarder: forwarder,
+      threadStore,
+      logger,
+    });
+    const secondResult = await laterProcessor.process(makeMessage());
+    expect(secondResult.isOk()).toBe(true);
+
+    // Both were relayed to the organizer and both were recorded — nothing was dropped as a dupe.
+    expect(emailService.sendRaw).toHaveBeenCalledTimes(2);
+    const saveCalls = (threadStore.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
+    expect(saveCalls).toHaveLength(2);
+    const decisions = saveCalls.map((call) => (call[0] as Signal<CalendarResponseData>).data.decision);
+    expect(decisions).toEqual(["accepted", "declined"]);
+    // Both signals share the same veventUid — same event, two records in its RSVP history.
+    expect(saveCalls.every((call) => (call[0] as Signal<CalendarResponseData>).data.veventUid === ORIGINAL_UID)).toBe(true);
+  });
+
   it("processes every calendar attachment on a message that bundles multiple replies", async () => {
     const proxyUidA = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
     const proxyUidB = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
