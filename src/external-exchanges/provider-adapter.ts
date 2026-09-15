@@ -89,8 +89,15 @@ export interface ProviderAdapter {
    * they authenticate from the config already on `emx`.
    */
   activate(emx: ExternalMailExchange, identity?: ActivationIdentity): Promise<Result<ActivationResult, ProviderActivationError>>
-  /** Every method past `activate` resolves its own credentials from `emx` internally. */
-  renew(emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>>
+  /**
+   * Every method past `activate` resolves its own credentials from `emx` internally.
+   *
+   * `includeOverlap` (IMAP only; other adapters ignore it) asks the adapter to also re-check a
+   * small window of already-seen UIDs, not just search strictly forward of the stored cursor.
+   * Only meaningful right after a UI-driven config change re-points the connection at what may
+   * be a different mailbox state — routine polling never sets it.
+   */
+  renew(emx: ExternalMailExchange, opts?: { includeOverlap?: boolean }): Promise<Result<void, ProviderRenewalError>>
   deactivate(emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>>
   fetchMessage(providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>>
   /**
