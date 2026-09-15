@@ -10,6 +10,7 @@ import type { UpdateThreadFields } from "../database/thread-database.js";
 // ---------------------------------------------------------------------------
 
 export interface FollowupMessage {
+  sqsMessageAttributeMessageType: "signal_followup";
   accountId: string;
   threadId: string;
 }

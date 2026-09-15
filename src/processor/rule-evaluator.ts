@@ -1,4 +1,4 @@
-import type { RuleEvaluator } from "./processor.js";
+import type { RuleEvaluator } from "./incoming-email-processor.js";
 import type { Rule, Signal, Thread } from "../types/index.js";
 import type { Logger } from "../logger.js";
 import type { UserCodeExecutorClient } from "./user-code-client.js";

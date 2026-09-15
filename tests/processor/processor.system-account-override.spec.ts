@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok } from "neverthrow";
-import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
+import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
-import type { ThreadMatcherPort, Notifier, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, Notifier, InboundSignalMessage, SqsDispatcher } from "../../src/processor/incoming-email-processor.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
@@ -150,7 +150,7 @@ describe("SYSTEM account workflow override", () => {
       { annotateRuleError: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
     );
 
-    return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
+    return new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
       ...SHARED_NEW_DEPS,
       threadDb,
       accountDb,

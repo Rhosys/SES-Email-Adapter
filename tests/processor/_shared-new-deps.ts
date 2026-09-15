@@ -1,6 +1,6 @@
 /**
- * Shared mock dependencies for the 4 new SignalProcessorOptions fields.
- * Import and spread into any new SignalProcessor({...}) call.
+ * Shared mock dependencies for the 4 new IncomingEmailProcessorOptions fields.
+ * Import and spread into any new IncomingEmailProcessor({...}) call.
  */
 import { vi } from "vitest";
 import { ok } from "../../src/errors.js";

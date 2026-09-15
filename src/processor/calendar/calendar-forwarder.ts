@@ -23,7 +23,7 @@ import type { Signal, CalendarEventData } from "../../types/index.js";
 import type { DbError, Result } from "../../errors.js";
 import { ok, err, dbError } from "../../errors.js";
 import type { Logger } from "../../logger.js";
-import { buildProxyUid } from "./proxy-uid.js";
+import { buildProxyUid, validateProxyUid } from "./proxy-uid.js";
 import { buildForwardIcs, buildReplyIcs } from "./ics-builder.js";
 import { buildMimeMessage } from "../../email/mime-builder.js";
 import type { HmacSecretGenerator } from "./hmac-secret-generator.js";
@@ -44,11 +44,26 @@ export interface ForwardInviteOpts {
 // Options for a single RSVP reply
 // ---------------------------------------------------------------------------
 
-export interface SendReplyOpts {
+export interface SendRsvpToOrganizerOpts {
   decision: "accepted" | "declined" | "tentative";
-  originalCalendarData: CalendarEventData;
+  /**
+   * The ORIGINAL calendar meeting invite being responded to — always the stored REQUEST, never
+   * the RSVP itself. Both callers converge here: the API path loads the invite the user clicked
+   * on; the relay path decodes the inbound REPLY's proxy UID and loads the same stored invite.
+   * sendRsvpToOrganizer validates this invite (must be a REQUEST carrying an organizer) before
+   * emitting a REPLY to that organizer.
+   */
+  originalCalendarMeetingInvite: CalendarEventData;
+  /**
+   * Whether the invite's latest collapsed state is a cancellation. Derived from the whole event
+   * group (a later CANCEL, or a CANCEL since reinstated by a newer REQUEST), which a single
+   * invite record cannot reveal — so the caller computes it and supplies it here. A cancelled
+   * invite is accepted but never relayed upstream.
+   */
+  cancelled: boolean;
+  /** The alias that received/represents the user — the ATTENDEE address on the outgoing REPLY. */
   aliasAddress: string;
-  organizerAddress: string;
+  /** The From address of the outgoing REPLY (the alias, masking the user's real mailbox). */
   fromAddress: string;
   accountId: string;
 }
@@ -58,6 +73,44 @@ const PARTSTAT_MAP = {
   declined: "DECLINED",
   tentative: "TENTATIVE",
 } as const;
+
+const PARTSTAT_TO_DECISION: Record<string, "accepted" | "declined" | "tentative"> = {
+  ACCEPTED: "accepted",
+  DECLINED: "declined",
+  TENTATIVE: "tentative",
+};
+
+// ---------------------------------------------------------------------------
+// Inbound RSVP validation — the stateless half of the calendar loop.
+//
+// Given a parsed inbound .ics, decide whether it is a genuine RSVP to an invite
+// WE forwarded. Every check is pure computation over the .ics plus the HMAC
+// secret — no I/O, no database. The only trust anchor is the proxy UID's HMAC:
+// an attacker can address a message to the public {threadId}@{accountId}.domain
+// reply address, but cannot forge a UID that validates without the secret, so
+// the accountId/threadId/originalVeventUid returned here are authoritative and
+// the untrusted recipient address is never consulted for identity.
+// ---------------------------------------------------------------------------
+
+/** A validated RSVP, with identity taken from the HMAC-authenticated proxy UID. */
+export interface ValidatedRsvp {
+  decision: "accepted" | "declined" | "tentative";
+  accountId: string;
+  threadId: string;
+  originalVeventUid: string;
+  organizerAddress: string;
+}
+
+/**
+ * Why an inbound message that reached the RSVP reply address is not a processable
+ * RSVP. Each variant carries the log `code` the caller emits before dropping.
+ * `not_reply_method` and `no_partstat` are malformed-but-benign; `hmac_failed` is
+ * the security-relevant one (forged or misrouted proxy UID).
+ */
+export type RsvpRejection =
+  | { kind: "not_reply_method"; code: "processor.calendar_response.no_reply_method"; method: string }
+  | { kind: "no_partstat"; code: "processor.calendar_response.no_partstat" }
+  | { kind: "hmac_failed"; code: "processor.calendar_response.hmac_failed"; reason: string };
 
 // ---------------------------------------------------------------------------
 // Internal shape describing one calendar send — the identity + payload that
@@ -144,7 +197,7 @@ export class CalendarForwarder {
     if (sendResult.isErr()) return err(sendResult.error);
     // A permanent rejection resolves to ok with an empty messageId — nothing more to do.
     if (sendResult.value.messageId) {
-      logger.track("Calendar invite forwarded successfully.", {
+      logger.info("Calendar invite forwarded successfully.", {
         code: "processor.calendar_forwarder.sent",
         accountId,
         signalId: calendarSignal.id,
@@ -160,12 +213,51 @@ export class CalendarForwarder {
    * alias address, using the ORIGINAL event UID (RFC 6047 §2.3). A permanent SES
    * rejection is swallowed (logged WARN, returns ok with an empty messageId).
    */
-  async sendReply(opts: SendReplyOpts, logger: Logger): Promise<Result<{ messageId: string }, DbError | EmailServiceError>> {
-    const { decision, originalCalendarData, aliasAddress, organizerAddress, fromAddress, accountId } = opts;
+  /**
+   * Emit a METHOD:REPLY back to the organizer of an ORIGINAL calendar meeting invite. This is
+   * the single mechanism both RSVP entry points converge on — the dashboard API (the user clicks
+   * Accept/Decline) and the inbound-REPLY relay (the user's native calendar client replied to our
+   * proxy address). Each caller maps its own incoming shape to the same original invite and passes
+   * it here; this method is the sole validator of RSVP eligibility. It sends only when the invite's
+   * latest state is a schedulable REQUEST that carries an organizer and is not cancelled. Anything
+   * else is accepted but not relayed upstream — an expected, benign outcome, swallowed to an empty
+   * messageId (the client already gates its RSVP control on the same `rsvpable` rule).
+   */
+  async sendRsvpToOrganizer(opts: SendRsvpToOrganizerOpts, logger: Logger): Promise<Result<{ messageId: string }, DbError | EmailServiceError>> {
+    const { decision, originalCalendarMeetingInvite, cancelled, aliasAddress, fromAddress, accountId } = opts;
+    const organizerAddress = originalCalendarMeetingInvite.organizer;
+    const veventUid = originalCalendarMeetingInvite.originalVeventUid;
+
+    // Cancelled: the invite's latest collapsed state is a CANCEL. Accept the RSVP, don't relay.
+    if (cancelled) {
+      logger.info("RSVP for a cancelled calendar invite — accepted but not relayed to the organizer.", {
+        code: "rsvp.invite_cancelled", accountId, veventUid,
+      });
+      return ok({ messageId: "" });
+    }
+
+    // Not a schedulable REQUEST (PUBLISH informational, CANCEL, REPLY/COUNTER, …): nothing to
+    // RSVP to. Expected traffic, not a failure — drop with INFO.
+    if (originalCalendarMeetingInvite.method.toUpperCase() !== "REQUEST") {
+      logger.info("RSVP for a non-REQUEST calendar invite — not RSVP-eligible. Dropping.", {
+        code: "rsvp.not_rsvpable_method", accountId, veventUid, method: originalCalendarMeetingInvite.method,
+      });
+      return ok({ messageId: "" });
+    }
+
+    // A REQUEST with no organizer has nowhere to reply to. Per RFC 5546 a METHOD:REQUEST MUST
+    // carry ORGANIZER, so an empty value is non-conformant (or a poisoned pre-PUBLISH record) —
+    // never normal traffic, hence ERROR. Short-circuit before building the MIME or calling SES.
+    if (!organizerAddress.trim()) {
+      logger.error("RSVP invite has no organizer address — non-conformant (RFC 5546 requires ORGANIZER on a REQUEST). Dropping.", {
+        code: "rsvp.no_organizer_address", accountId, veventUid,
+      });
+      return ok({ messageId: "" });
+    }
 
     const icsContent = buildReplyIcs({
-      veventUid: originalCalendarData.originalVeventUid,
-      sequence: originalCalendarData.sequence,
+      veventUid,
+      sequence: originalCalendarMeetingInvite.sequence,
       attendeeAddress: aliasAddress,
       decision: PARTSTAT_MAP[decision],
       organizerAddress,
@@ -174,13 +266,53 @@ export class CalendarForwarder {
     return this.sendCalendarMessage({
       from: fromAddress,
       to: organizerAddress,
-      subject: `Re: ${originalCalendarData.title}`,
+      subject: `Re: ${originalCalendarMeetingInvite.title}`,
       icsContent,
       method: "REPLY",
       tenant: accountId,
       permanentLogCode: "rsvp.send_permanent",
       logContext: { accountId },
     }, logger);
+  }
+
+  /**
+   * Validate an inbound .ics as an RSVP to an invite we forwarded. Stateless: no
+   * I/O. On success returns the decision plus the identity decoded from the
+   * HMAC-authenticated proxy UID (the .ics VEVENT UID is the proxy UID we stamped
+   * on the forwarded invite). Any rejection is returned typed, with its log code,
+   * for the caller to log-and-drop — nothing here writes or sends.
+   */
+  async validateRsvp(calendarData: CalendarEventData): Promise<Result<ValidatedRsvp, RsvpRejection>> {
+    // Must be a REPLY. REQUEST/CANCEL/PUBLISH at this address are not RSVPs.
+    if (calendarData.method.toUpperCase() !== "REPLY") {
+      return err({ kind: "not_reply_method", code: "processor.calendar_response.no_reply_method", method: calendarData.method });
+    }
+
+    // Decision from the first attendee bearing a recognised PARTSTAT.
+    let decision: "accepted" | "declined" | "tentative" | undefined;
+    for (const attendee of calendarData.attendees) {
+      if (attendee.partstat) {
+        const mapped = PARTSTAT_TO_DECISION[attendee.partstat.toUpperCase()];
+        if (mapped) { decision = mapped; break; }
+      }
+    }
+    if (!decision) {
+      return err({ kind: "no_partstat", code: "processor.calendar_response.no_partstat" });
+    }
+
+    // The proxy UID (the VEVENT UID) is the only trust anchor. Its HMAC binds
+    // accountId + threadId + originalVeventUid; a valid one is authoritative.
+    const uidResult = await validateProxyUid({
+      proxyUid: calendarData.veventUid,
+      serviceDomain: this.serviceDomain,
+      hmac: this.hmac,
+    });
+    if (uidResult.isErr()) {
+      return err({ kind: "hmac_failed", code: "processor.calendar_response.hmac_failed", reason: uidResult.error });
+    }
+
+    const { accountId, threadId, originalVeventUid } = uidResult.value;
+    return ok({ decision, accountId, threadId, originalVeventUid, organizerAddress: calendarData.organizer });
   }
 
   /**

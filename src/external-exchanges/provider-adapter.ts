@@ -67,19 +67,6 @@ export interface RawMimeResult {
   receivedAt: string
 }
 
-/**
- * The linked-identity coordinates a provider token lookup needs, read off an exchange record.
- *
- * Returns null when the exchange predates connection tracking (or is IMAP/JMAP, which has no
- * linked identity at all). Callers treat null as "this exchange cannot be used until the user
- * reconnects it" — there is deliberately no fallback to deriving the connection from the
- * platform, because a derived value is a guess about someone else's configuration.
- */
-export function exchangeCredentials(emx: ExternalMailExchange): { userId: string; connectionId: string; connectionUserId: string } | null {
-  if (!emx.userId || !emx.connectionId || !emx.connectionUserId) return null
-  return { userId: emx.userId, connectionId: emx.connectionId, connectionUserId: emx.connectionUserId }
-}
-
 export interface SendResult {
   /** Provider-assigned id for the sent message (Gmail message id, Graph request id). */
   providerMessageId: string
@@ -102,19 +89,24 @@ export interface ProviderAdapter {
    * they authenticate from the config already on `emx`.
    */
   activate(emx: ExternalMailExchange, identity?: ActivationIdentity): Promise<Result<ActivationResult, ProviderActivationError>>
-  /** Every method past `activate` resolves its own credentials from `emx` — see `exchangeCredentials`. */
-  renew(emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>>
+  /**
+   * Every method past `activate` resolves its own credentials from `emx` internally.
+   *
+   * `includeOverlap` (IMAP only; other adapters ignore it) asks the adapter to also re-check a
+   * small window of already-seen UIDs, not just search strictly forward of the stored cursor.
+   * Only meaningful right after a UI-driven config change re-points the connection at what may
+   * be a different mailbox state — routine polling never sets it.
+   */
+  renew(emx: ExternalMailExchange, opts?: { includeOverlap?: boolean }): Promise<Result<void, ProviderRenewalError>>
   deactivate(emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>>
   fetchMessage(providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>>
   /**
-   * Sends a fully-formed RFC 5322 message through the provider on the mailbox owner's behalf.
-   *
-   * Optional, but every current adapter implements it: Gmail/Outlook via their OAuth send
-   * APIs, IMAP via SMTP submission on the same host/credentials, JMAP via EmailSubmission
-   * (RFC 8621) on the same session. The send router treats an absent method — or a JMAP/IMAP
-   * server that turns out not to support sending — as "this exchange cannot send" and fails
-   * the send rather than silently falling back to SES, which would emit unaligned mail from a
-   * domain we are not authorized for.
+   * Sends a fully-formed RFC 5322 message through the provider on the mailbox owner's behalf:
+   * Gmail/Outlook via their OAuth send APIs, IMAP via SMTP submission on the same
+   * host/credentials, JMAP via EmailSubmission (RFC 8621) on the same session. A server that
+   * turns out not to support sending surfaces as a `provider_send_*` failure returned from
+   * here — never as an absent method. Every platform can send, so the router never needs to
+   * ask whether an adapter has this capability.
    */
-  sendMessage?(rawMime: Uint8Array, emx: ExternalMailExchange): Promise<Result<SendResult, ProviderSendError>>
+  sendMessage(rawMime: Uint8Array, emx: ExternalMailExchange): Promise<Result<SendResult, ProviderSendError>>
 }

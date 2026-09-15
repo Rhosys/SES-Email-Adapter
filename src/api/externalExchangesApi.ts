@@ -9,7 +9,7 @@ import type { Logger } from "../logger.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 import type { SignalQueue } from "../messaging/signal-queue.js";
 import type { AccessService } from "./accountsApi.js";
-import { EMX_PLATFORMS, type ExternalMailExchange } from "../types/index.js";
+import { EMX_PLATFORMS, type ExternalMailExchange, type EmxPlatform } from "../types/index.js";
 
 const CreateExternalExchangeRequest = z.object({
   platform: z.enum(EMX_PLATFORMS),
@@ -25,8 +25,8 @@ const CreateExternalExchangeRequest = z.object({
  * Connection id to use when a client did not send one.
  *
  * This is the one place a connection id is inferred, and only at connect time, where the
- * inference matches what the client would have sent anyway. Every later use reads the value
- * persisted on the exchange — see `exchangeCredentials`.
+ * inference matches what the client would have sent anyway. Every later use reads the identity
+ * coordinates persisted on the exchange — each OAuth adapter's private `getToken` does this.
  */
 const DEFAULT_CONNECTION_IDS: Record<string, string> = { gmail: "google", outlook: "microsoft" };
 
@@ -116,7 +116,7 @@ export class ExternalExchangesApi {
   constructor(
     private readonly accountDb: AccountDatabase,
     private readonly exchangesDb: ExchangesDatabase,
-    private readonly adapters: Record<string, ProviderAdapter>,
+    private readonly adapters: Record<EmxPlatform, ProviderAdapter>,
     private readonly getLinkedIdentity: AccessService["getLinkedIdentity"],
     private readonly encryptionManager: EncryptionManager,
     private readonly signalQueue: SignalQueue,
@@ -129,8 +129,8 @@ export class ExternalExchangesApi {
 
 
     /** Trigger immediate dispatch for a specific exchange — awaited with error logging */
-    const triggerDispatch = async (targetAccountId: string, emxId: string) => {
-      const result = await signalQueue.send("emx_dispatch", { emxId, accountId: targetAccountId });
+    const triggerDispatch = async (targetAccountId: string, emxId: string, includeOverlap?: boolean) => {
+      const result = await signalQueue.send("emx_dispatch", { emxId, accountId: targetAccountId, includeOverlap });
       if (result.isErr()) {
         logger.warn("Failed to enqueue emx_dispatch", { code: "api.emx.dispatch_enqueue_failed", emxId, error: result.error });
       }
@@ -536,7 +536,7 @@ export class ExternalExchangesApi {
         if (imapReactivateResult.isErr()) { logger.error("Failed to reactivate IMAP exchange", { code: "api.emx.patch.imap.reactivate_failed", accountId, emxId, error: imapReactivateResult.error }); return err(c, 500, "Internal Server Error"); }
       }
 
-      await triggerDispatch(accountId, emxId);
+      await triggerDispatch(accountId, emxId, true);
       const freshResult = await exchangesDb.getExternalExchange(accountId, emxId);
       logger.info("IMAP exchange patched", { code: "api.emx.patch.imap.done", accountId, emxId, previousStatus: emx.status, reactivated: emx.status === "activation_failed" });
       if (freshResult.isOk() && freshResult.value) { return c.json(serializeEmx(freshResult.value), 200); }

@@ -89,7 +89,16 @@ export interface Notifier {
  * Failure modes of an outbound send, across both routes: SES rejections, provider-side
  * rejections (Gmail/Graph), and the database reads that decide which route to take.
  */
-export type ReplySendError = EmailServiceError | ProviderSendError | DbError | { kind: "loop_guard_tripped"; hopCount: number };
+export type ReplySendError =
+  | EmailServiceError
+  | ProviderSendError
+  | DbError
+  | { kind: "loop_guard_tripped"; hopCount: number }
+  // The from-address has no DMARC-aligned way to leave: it is not backed by a capable exchange,
+  // its domain is not verified for SES, and platform fallback was not permitted for this send.
+  // This is a routing refusal decided before any provider or SES call — distinct from a provider
+  // rejecting a message it received. `reason` explains which routing precondition failed.
+  | { kind: "from_address_unsendable"; reason: string };
 
 export interface ReplySender {
   sendReply(opts: {
@@ -327,7 +336,7 @@ export { SYSTEM_RULES } from "./system-rules.js";
 // Processor
 // ---------------------------------------------------------------------------
 
-interface SignalProcessorOptions {
+interface IncomingEmailProcessorOptions {
   threadDb: ThreadDatabase;
   accountDb: AccountDatabase;
   processingDb: ProcessingDatabase;
@@ -356,7 +365,7 @@ interface SignalProcessorOptions {
   platformTenantName: string;
 }
 
-export class SignalProcessor {
+export class IncomingEmailProcessor {
   private readonly threadDb: ThreadDatabase;
   private readonly accountDb: AccountDatabase;
   private readonly processingDb: ProcessingDatabase;
@@ -384,7 +393,7 @@ export class SignalProcessor {
   private readonly accessService: Pick<AccessService, "listUsers" | "getUserProfile">;
   private readonly platformTenantName: string;
 
-  constructor(opts: SignalProcessorOptions) {
+  constructor(opts: IncomingEmailProcessorOptions) {
     this.threadDb = opts.threadDb;
     this.accountDb = opts.accountDb;
     this.processingDb = opts.processingDb;
@@ -919,7 +928,7 @@ export class SignalProcessor {
     const resolved = await this.resolveAccountIdAndAlias(recipientAddress);
     if (resolved.isErr()) return err(resolved.error);
     if (!resolved.value) {
-      this.logger.track("No account owns this recipient address — dropping message.", { code: "processor.no_account_for_recipient", recipientAddress, compositeMailMessageId: msg.compositeMailMessageId, destination });
+      this.logger.track(`No account owns the recipient address ${recipientAddress || destination.join(", ") || "(none)"} — dropping message.`, { code: "processor.no_account_for_recipient", recipientAddress, compositeMailMessageId: msg.compositeMailMessageId, destination });
       return err(noAccountError(recipientAddress, destination, msg.compositeMailMessageId, msg.expectedAccountId));
     }
     const { accountId, aliasConfig } = resolved.value;
@@ -1823,6 +1832,16 @@ export class SignalProcessor {
     const calendarTimestamp = DateTime.utc().toISO()!;
     const signalLookupId = buildCalendarSignalLookupId(calendarData.organizer, calendarData.veventUid);
 
+    // The .ics ORGANIZER is optional and many transactional invites (reservations,
+    // ticket confirmations) omit it, leaving both organizer and organizerCn blank so
+    // the card has no name to show. When the email was classified as an event, fall
+    // back to the extracted event name as the display organizer. This is display-only:
+    // signalLookupId above still keys on the real (possibly empty) .ics organizer, so
+    // event-group keying stays stable across invite/update/cancel snapshots.
+    const eventNameFallback =
+      signal.data.workflowData.workflow === "events" ? signal.data.workflowData.eventName : undefined;
+    const organizerCn = calendarData.organizerCn ?? (calendarData.organizer ? undefined : eventNameFallback);
+
     // Store raw .ics as S3 attachment on the calendar signal
     const icsS3Key = `content/accounts/${accountId}/calendar/${calendarSignalId}/invite.ics`;
     await this.contentStore.saveIcsContentAsCalendar(icsS3Key, rawIcsContent);
@@ -1841,6 +1860,7 @@ export class SignalProcessor {
       ...(ttl !== undefined ? { ttl } : {}),
       data: {
         ...calendarData,
+        ...(organizerCn !== undefined ? { organizerCn } : {}),
         linkedSignalId: signal.id,
       },
     };
@@ -1867,13 +1887,12 @@ export class SignalProcessor {
       if (eventStart.isValid && eventStart > now) {
         const fireAt = eventStart.startOf("day").set({ hour: 8 }).toISO()!;
         const suffix = `calendar.${eventStart.toFormat("yyyyMMdd")}`;
-        const scheduleResult = await this.schedulerClient.createFollowup({
+        const scheduleResult = await this.schedulerClient.createFollowupSchedule({
           accountId,
           threadId: thread.id,
           scheduleKeyId: calendarSignalId,
           fireAt,
           suffix,
-          sqsMessageAttributeMessageType: "signal_followup",
         });
         if (scheduleResult.isErr()) {
           this.logger.error(`Failed to create calendar day-of schedule: ${scheduleResult.error.message}`, { code: "processor.calendar.schedule_failed", signal, thread, calendarSignalId, fireAt, error: scheduleResult.error });
@@ -1895,13 +1914,12 @@ export class SignalProcessor {
           if (reminderTime > now) {
             const fireAt = reminderTime.toISO()!;
             const suffix = `rsvp.${eventStart.toFormat("yyyyMMdd")}`;
-            const rsvpResult = await this.schedulerClient.createFollowup({
+            const rsvpResult = await this.schedulerClient.createRsvpReminderSchedule({
               accountId,
               threadId: thread.id,
-              scheduleKeyId: calendarSignalId,
+              calendarSignalId,
               fireAt,
               suffix,
-              sqsMessageAttributeMessageType: "rsvp_reminder",
             });
             if (rsvpResult.isErr()) {
               this.logger.error(`Failed to create RSVP reminder schedule: ${rsvpResult.error.message}`, {

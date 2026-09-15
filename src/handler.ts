@@ -3,7 +3,7 @@ import { SQS_MESSAGE_TYPES } from "./types/index.js";
 import { ok, err, processorError, errorMessage } from "./errors.js";
 import type { Result } from "./errors.js";
 import { isStepFunctionTaskEvent } from "./onboarding/types.js";
-import type { InboundSignalMessage, SideEffectPayload } from "./processor/processor.js";
+import type { InboundSignalMessage, SideEffectPayload } from "./processor/incoming-email-processor.js";
 import type { SESMessage, SESReceiptS3Action } from "aws-lambda";
 import type { FollowupMessage } from "./scheduler/followup-handler.js";
 import type { RsvpReminderMessage } from "./scheduler/rsvp-reminder.js";
@@ -12,12 +12,13 @@ import type { ReindexSegmentMessage } from "./jobs/reindex/reindex-dispatcher.js
 import type { DraftSendPayload } from "./processor/draft-send-dispatcher.js";
 import { DateTime } from "luxon";
 import { CompositeRoot } from "./composite-root.js";
+import { isRsvpReplyAddress } from "./processor/inbound-router.js";
 
 const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND, MSG_TYPE_SIGNAL_FOLLOWUP, MSG_TYPE_RSVP_REMINDER, MSG_TYPE_DIGEST_DISPATCH, MSG_TYPE_DIGEST_SEND, MSG_TYPE_EMX_INBOUND, MSG_TYPE_EMX_DISPATCH, MSG_TYPE_EMX_IDLE] = SQS_MESSAGE_TYPES;
 const RETRY_TRACK_THRESHOLD = 30;
 
 const root = new CompositeRoot();
-const { logger, processor, onboardingHandler, domainHealthJob, healthcheckJob, reindexWorker, draftSendWorker, followupHandler, rsvpReminderHandler, digestDispatcher, digestWorker, sesFeedbackProcessor, authService, deviceStore, emxInboundWorker, emxDispatchWorker, emxIdleWorker, wsDeliverer, app } = root;
+const { logger, processor, rsvpProcessor, mailDomain, onboardingHandler, domainHealthJob, healthcheckJob, reindexWorker, draftSendWorker, followupHandler, rsvpReminderHandler, digestDispatcher, digestWorker, sesFeedbackProcessor, authService, deviceStore, emxInboundWorker, emxDispatchWorker, emxIdleWorker, wsDeliverer, app } = root;
 // ---------------------------------------------------------------------------
 // Wiring lives in CompositeRoot (see composite-root.ts).
 // ---------------------------------------------------------------------------
@@ -112,7 +113,21 @@ async function handlerInner(
     for (const record of event.Records) {
       const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
       const messageType = record.messageAttributes?.["messageType"]?.stringValue ?? "unknown";
-      logger.info("SQS message received", { code: "handler.sqs.received", messageId: record.messageId, messageType, receiveCount });
+      // Metadata only — never log record.body, it's untrusted/PII-bearing email content.
+      logger.info("Processing SQS message", {
+        code: "handler.sqs.processing",
+        messageId: record.messageId,
+        receiptHandle: record.receiptHandle,
+        messageType,
+        receiveCount,
+        attributes: record.attributes,
+        messageAttributes: record.messageAttributes,
+        md5OfBody: record.md5OfBody,
+        md5OfMessageAttributes: record.md5OfMessageAttributes,
+        eventSource: record.eventSource,
+        eventSourceARN: record.eventSourceARN,
+        awsRegion: record.awsRegion,
+      });
 
       let body: unknown;
       try {
@@ -123,8 +138,18 @@ async function handlerInner(
         continue;
       }
 
+      // Body-level fallback: EventBridge Scheduler can't set SQS message attributes,
+      // so scheduled messages (emx_dispatch, digest_dispatch, signal_followup, rsvp_reminder)
+      // embed the routing type in the body as `sqsMessageAttributeMessageType` instead.
       const resolvedMessageType = record.messageAttributes?.["messageType"]?.stringValue ?? (body as { sqsMessageAttributeMessageType?: string }).sqsMessageAttributeMessageType;
-      const result = await processSqsRecord(body, resolvedMessageType, receiveCount, record.messageId);
+
+      let result: Result<void, unknown>;
+      try {
+        result = await processSqsRecord(body, resolvedMessageType, receiveCount, record.messageId);
+      } catch (e) {
+        logger.error(`processSqsRecord threw an unhandled exception — isolating to this record so the rest of the batch isn't retried: ${e instanceof Error ? e.message : e}`, { code: "handler.sqs.record_threw", messageId: record.messageId, receiveCount, messageType: resolvedMessageType, error: e });
+        result = err(e);
+      }
 
       if (result.isErr()) {
         if (receiveCount > RETRY_TRACK_THRESHOLD) {
@@ -188,7 +213,7 @@ async function processSqsRecord(
 
   if (messageType === MSG_TYPE_RSVP_REMINDER) {
     const message = body as RsvpReminderMessage;
-    if (!message.accountId || !message.signalId || !message.threadId) {
+    if (!message.accountId || !message.calendarSignalId || !message.threadId) {
       logger.error("Malformed rsvp_reminder payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_rsvp_reminder", sqsMessageId });
       return ok(undefined);
     }
@@ -300,6 +325,17 @@ async function processSqsRecord(
     dkimVerdict: ses.receipt.dkimVerdict.status,
     dmarcVerdict: ses.receipt.dmarcVerdict.status,
   };
+
+  // A message to {threadId}@{accountId}.{mailDomain} is a calendar RSVP coming back
+  // from an invite we forwarded, not an inbound email — a different lifecycle with a
+  // different owner. Route it before the email processor's account resolution, which
+  // would otherwise drop it as belonging to no alias.
+  if (isRsvpReplyAddress(ses.mail.destination[0] ?? "", mailDomain)) {
+    const rsvpResult = await rsvpProcessor.process(message);
+    if (rsvpResult.isErr()) return err(processorError(rsvpResult.error));
+    return ok(undefined);
+  }
+
   const result = await processor.processInbound(message, receiveCount);
   if (result.isErr() && result.error.kind === "no_account_for_recipient") return ok(undefined);
   if (result.isErr()) return err(processorError(result.error));

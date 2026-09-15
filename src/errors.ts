@@ -61,6 +61,9 @@ function ownToken(e: unknown): string | undefined {
   if (e && typeof e === "object") {
     const o = e as Record<string, unknown>;
     if (typeof o.message === "string" && o.message.length > 0) return o.message;
+    // Error kinds that generate a known explanation carry it in `reason` (see the cause-vs-reason
+    // convention) rather than `message`.
+    if (typeof o.reason === "string" && o.reason.length > 0) return o.reason;
     // SES error kinds carry `errorName` instead of a top-level `message`.
     if (typeof o.errorName === "string" && o.errorName.length > 0) return o.errorName;
   }

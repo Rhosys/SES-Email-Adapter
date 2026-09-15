@@ -1,8 +1,8 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { ok } from "../../src/errors.js";
-import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ThreadMatcherPort, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
+import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
@@ -107,7 +107,7 @@ describe("processSideEffect — correlation context", () => {
 
   function makeProcessor(opts: { replySender: ReplySender; forwardingService: IForwardingService; store?: ReturnType<typeof makeStore> }) {
     mockLogger = createMockLogger();
-    return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+    return new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...(opts.store ?? makeStore()),
       contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
       emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://signed-url"), getContent: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://signed-url") } as never,

@@ -36,17 +36,16 @@ describe("EventBridgeSchedulerClient", () => {
     schedulerMock.restore();
   });
 
-  describe("createFollowup", () => {
+  describe("createFollowupSchedule", () => {
     it("sends CreateScheduleCommand with correct params", async () => {
       schedulerMock.on(CreateScheduleCommand).resolves({});
 
-      const result = await client.createFollowup({
+      const result = await client.createFollowupSchedule({
         accountId: "acc-123",
         threadId: "arc-789",
         scheduleKeyId: "arc-789",
         fireAt: "2025-08-01T10:00:00Z",
         suffix: "followup",
-        sqsMessageAttributeMessageType: "signal_followup",
       });
 
       expect(result.isOk()).toBe(true);
@@ -65,16 +64,15 @@ describe("EventBridgeSchedulerClient", () => {
       });
     });
 
-    it("target input contains accountId and threadId as JSON", async () => {
+    it("target input is a self-describing signal_followup payload", async () => {
       schedulerMock.on(CreateScheduleCommand).resolves({});
 
-      await client.createFollowup({
+      await client.createFollowupSchedule({
         accountId: "acc-123",
         threadId: "arc-789",
         scheduleKeyId: "arc-789",
         fireAt: "2025-08-01T10:00:00Z",
         suffix: "followup",
-        sqsMessageAttributeMessageType: "signal_followup",
       });
 
       const calls = schedulerMock.commandCalls(CreateScheduleCommand);
@@ -89,29 +87,27 @@ describe("EventBridgeSchedulerClient", () => {
     it("schedule expression uses at() format without trailing Z or fractional seconds", async () => {
       schedulerMock.on(CreateScheduleCommand).resolves({});
 
-      await client.createFollowup({
+      await client.createFollowupSchedule({
         accountId: "acc-1",
         threadId: "arc-3",
         scheduleKeyId: "arc-3",
         fireAt: "2025-12-25T08:00:00.000Z",
         suffix: "cal",
-        sqsMessageAttributeMessageType: "signal_followup",
       });
 
       const calls = schedulerMock.commandCalls(CreateScheduleCommand);
       expect(calls[0]!.args[0].input.ScheduleExpression).toBe("at(2025-12-25T08:00:00)");
     });
 
-    it("logs WARN on every createFollowup call", async () => {
+    it("logs WARN on every createFollowupSchedule call", async () => {
       schedulerMock.on(CreateScheduleCommand).resolves({});
 
-      await client.createFollowup({
+      await client.createFollowupSchedule({
         accountId: "acc-a",
         threadId: "arc-c",
         scheduleKeyId: "arc-c",
         fireAt: "2025-09-01T12:00:00Z",
         suffix: "test",
-        sqsMessageAttributeMessageType: "signal_followup",
       });
 
       const warnCalls = logger.calls.filter((c) => c.method === "warn");
@@ -122,17 +118,44 @@ describe("EventBridgeSchedulerClient", () => {
     it("returns err on SDK failure", async () => {
       schedulerMock.on(CreateScheduleCommand).rejects(new Error("Throttled"));
 
-      const result = await client.createFollowup({
+      const result = await client.createFollowupSchedule({
         accountId: "acc-x",
         threadId: "arc-z",
         scheduleKeyId: "arc-z",
         fireAt: "2025-09-01T12:00:00Z",
         suffix: "fail",
-        sqsMessageAttributeMessageType: "signal_followup",
       });
 
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().kind).toBe("db_error");
+    });
+  });
+
+  describe("createRsvpReminderSchedule", () => {
+    it("target input carries calendarSignalId, keyed on the calendar signal", async () => {
+      schedulerMock.on(CreateScheduleCommand).resolves({});
+
+      const result = await client.createRsvpReminderSchedule({
+        accountId: "acc-123",
+        threadId: "arc-789",
+        calendarSignalId: "sgn-cal-evt-001",
+        fireAt: "2025-08-01T10:00:00Z",
+        suffix: "rsvp.20250802",
+      });
+
+      expect(result.isOk()).toBe(true);
+
+      const calls = schedulerMock.commandCalls(CreateScheduleCommand);
+      expect(calls).toHaveLength(1);
+      // Schedule name is keyed on the calendar signal, not the thread.
+      expect(calls[0]!.args[0].input.Name).toBe("acc-123.sgn-cal-evt-001.rsvp.20250802");
+      const targetInput = JSON.parse(calls[0]!.args[0].input.Target!.Input!);
+      expect(targetInput).toEqual({
+        sqsMessageAttributeMessageType: "rsvp_reminder",
+        accountId: "acc-123",
+        threadId: "arc-789",
+        calendarSignalId: "sgn-cal-evt-001",
+      });
     });
   });
 

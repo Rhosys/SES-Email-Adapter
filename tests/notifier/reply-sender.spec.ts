@@ -4,10 +4,11 @@ import type { EmailService } from "../../src/email/email-service.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import type { ExchangesDatabase } from "../../src/database/exchanges-database.js";
 import type { ProviderAdapter } from "../../src/external-exchanges/provider-adapter.js";
-import type { Alias, ExternalMailExchange } from "../../src/types/index.js";
+import type { Alias, ExternalMailExchange, EmxPlatform } from "../../src/types/index.js";
 import { ok, err } from "../../src/errors.js";
 import type { Logger } from "../../src/logger.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
+import { makeMockAdapters } from "../helpers/provider-adapters.js";
 import { TAG_TYPE, TAG_ACCOUNT_ID, TAG_SIGNAL_ID, TAG_THREAD_ID } from "../../src/email/ses-tags.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -54,14 +55,14 @@ function makeSender(opts: {
   logger?: Logger;
   accountDb?: AccountDatabase;
   exchangesDb?: ExchangesDatabase;
-  adapters?: Record<string, ProviderAdapter>;
+  adapters?: Partial<Record<EmxPlatform, ProviderAdapter>>;
 } ): ReplySenderService {
   return new ReplySenderService({
     emailService: opts.emailService,
     logger: opts.logger ?? makeLogger(),
     accountDb: opts.accountDb ?? makeAccountDb(),
     exchangesDb: opts.exchangesDb ?? makeExchangesDb(),
-    adapters: opts.adapters ?? {},
+    adapters: makeMockAdapters(opts.adapters),
   });
 }
 
@@ -347,23 +348,9 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     expect((adapter.sendMessage as ReturnType<typeof vi.fn>).mock.calls[0]![1]).toEqual(exchange);
   });
 
-  it("refuses to send when the exchange predates connection tracking", async () => {
-    const emailService = makeEmailService();
-    const legacy = { ...ACTIVE_GMAIL_EXCHANGE };
-    delete legacy.userId;
-    delete legacy.connectionId;
-    const handler = makeSender({
-      emailService,
-      // Unverified domain + REPLY forbids platform fallback → the unusable exchange refuses.
-      accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, senderSetupComplete: false }), exchangesDb: makeExchangesDb({ exchange: legacy }),
-      adapters: { gmail: makeGmailAdapter(ok({ providerMessageId: "unused" })) },
-    });
-
-    const result = await handler.sendReply(REPLY);
-
-    expect(result.isErr()).toBe(true);
-    expect(emailService.send).not.toHaveBeenCalled();
-  });
+  // Note: whether an exchange can actually mint a token (e.g. one predating connection tracking)
+  // is the adapter's concern, verified in provider-send.test.ts — the router no longer inspects
+  // credentials, so there is no router-level "refuses on missing identity" case here.
 
   it("hands the provider a complete RFC 5322 message as the first argument", async () => {
     const adapter = makeGmailAdapter(ok({ providerMessageId: "gmail-msg-1" }));
@@ -471,19 +458,18 @@ describe("ReplySenderService — routing to an external mailbox", () => {
     expect(logger.calls.some(c => c.method === "error" && c.context?.code === "reply_sender.provider_unavailable")).toBe(true);
   });
 
-  it("falls back to SES when the exchange cannot send but the account has verified the domain", async () => {
+  it("falls back to SES when the alias's exchange is gone but the account has verified the domain", async () => {
     const emailService = makeEmailService();
     (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "ses-1" }));
-    // An IMAP exchange on a domain the account registered with us: SES is a legitimate,
-    // DMARC-aligned sender for it, so refusing the send would be wrong.
+    // The alias points at a deleted exchange, but on a domain the account registered with us:
+    // SES is a legitimate, DMARC-aligned sender for it, so refusing the send would be wrong.
     const handler = makeSender({
       emailService,
       accountDb: makeAccountDb({
         alias: { ...ALIAS_WITH_EXCHANGE, aliasAddress: "me@owned.com", domain: "owned.com" },
         senderSetupComplete: true,
       }),
-      exchangesDb: makeExchangesDb({ exchange: { ...ACTIVE_GMAIL_EXCHANGE, platform: "imap" } }),
-      adapters: {},
+      exchangesDb: makeExchangesDb({ exchange: null }),
     });
 
     const result = await handler.sendReply({ ...REPLY, from: { address: "me@owned.com" } });
@@ -558,11 +544,6 @@ describe("ReplySenderService — allowFallbackToPlatformSending", () => {
     accountId: "acct-test",
   };
 
-  function makeImapAdapter(): ProviderAdapter {
-    // No sendMessage — an IMAP-style adapter that cannot send.
-    return { activate: vi.fn(), renew: vi.fn(), deactivate: vi.fn(), fetchMessage: vi.fn() } as unknown as ProviderAdapter;
-  }
-
   it("rewrites to the platform sender + tenant when fallback is allowed and the address cannot send as itself", async () => {
     const emailService = makeEmailService();
     (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "ses-1" }));
@@ -614,16 +595,14 @@ describe("ReplySenderService — allowFallbackToPlatformSending", () => {
     expect(call.fromSender).toBe(`Support Team <user@gmail.com>`);
   });
 
-  it("errors (never degrades) when an exchange-backed alias cannot send, regardless of the flag", async () => {
+  it("errors (never degrades) when the alias's exchange is gone and the domain is unverified, regardless of the flag", async () => {
     const emailService = makeEmailService();
-    // Exchange-backed alias on an unverified domain, exchange is IMAP (cannot send). Even with
-    // fallback allowed, the provider-capability failure is an error — but only because the
-    // domain is unverified; the flag then decides platform rewrite vs error.
+    // Alias points at an exchange that has been deleted, on an unverified domain — the address
+    // cannot send as itself. With fallback NOT allowed, the send is refused.
     const handler = makeSender({
       emailService,
       accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, senderSetupComplete: false }),
-      exchangesDb: makeExchangesDb({ exchange: { ...ACTIVE_GMAIL_EXCHANGE, platform: "imap" } }),
-      adapters: { imap: makeImapAdapter() },
+      exchangesDb: makeExchangesDb({ exchange: null }),
     });
 
     const result = await handler.sendReply({ ...REPLY_UNVERIFIED, from: { address: "user@gmail.com" },allowFallbackToPlatformSending: false });
@@ -632,15 +611,14 @@ describe("ReplySenderService — allowFallbackToPlatformSending", () => {
     expect(emailService.send).not.toHaveBeenCalled();
   });
 
-  it("degrades an exchange-backed alias that cannot send to platform when fallback is allowed", async () => {
+  it("degrades to platform when the alias's exchange is gone and fallback is allowed", async () => {
     const emailService = makeEmailService();
     (emailService.send as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({ messageId: "ses-1" }));
     (emailService as unknown as { platformTenant: string }).platformTenant = "platform-tenant";
     const handler = makeSender({
       emailService,
       accountDb: makeAccountDb({ alias: ALIAS_WITH_EXCHANGE, senderSetupComplete: false }),
-      exchangesDb: makeExchangesDb({ exchange: { ...ACTIVE_GMAIL_EXCHANGE, platform: "imap" } }),
-      adapters: { imap: makeImapAdapter() },
+      exchangesDb: makeExchangesDb({ exchange: null }),
     });
 
     const result = await handler.sendReply({ ...REPLY_UNVERIFIED, from: { address: "user@gmail.com" },allowFallbackToPlatformSending: true });

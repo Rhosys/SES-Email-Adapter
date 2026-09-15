@@ -34,18 +34,20 @@ export class RsvpReminderHandler {
   }
 
   async process(message: RsvpReminderMessage): Promise<Result<void, DbError>> {
-    const { accountId, signalId, threadId } = message;
-    this.logger.info("RSVP reminder: processing", { code: "rsvp_reminder.start", accountId, signalId, threadId });
+    const { accountId, calendarSignalId, threadId } = message;
+    this.logger.info("RSVP reminder: processing", { code: "rsvp_reminder.start", accountId, calendarSignalId, threadId });
 
     // 1. Fetch signal
-    const signalResult = await this.threadDb.getSignalById(accountId, signalId, threadId);
+    const signalResult = await this.threadDb.getSignalById(accountId, calendarSignalId, threadId);
     if (signalResult.isErr()) return err(signalResult.error);
 
     const signal = signalResult.value;
     if (!signal) {
-      this.logger.track("RSVP reminder: signal not found, discarding.", {
+      // We scheduled this reminder against a calendar_event signal we wrote — its absence is a
+      // data-integrity fault (bad write, premature TTL, wrong id), not a benign stale-fire.
+      this.logger.error("RSVP reminder: scheduled calendar signal not found in database, discarding.", {
         code: "rsvp_reminder.signal_missing",
-        accountId, signalId, threadId,
+        accountId, calendarSignalId, threadId,
       });
       return ok(undefined);
     }
@@ -85,7 +87,7 @@ export class RsvpReminderHandler {
       this.logger.track("RSVP reminder: thread not found, discarding.", {
         code: "rsvp_reminder.thread_missing",
         signal,
-        accountId, signalId, threadId,
+        accountId, calendarSignalId, threadId,
       });
       return ok(undefined);
     }

@@ -8,7 +8,7 @@ import { OnboardingTaskHandler } from "./onboarding/onboarding-task-handler.js";
 import { SfnAccountCreationStarter } from "./onboarding/account-creation-starter.js";
 import type { AccountCreationStarter } from "./onboarding/account-creation-starter.js";
 import { SignalClassifier } from "./classifier/classifier.js";
-import { SignalProcessor } from "./processor/processor.js";
+import { IncomingEmailProcessor } from "./processor/incoming-email-processor.js";
 import { SqsDispatcherImpl } from "./processor/sqs-dispatcher.js";
 import { LambdaContentSanitizer } from "./processor/content-sanitizer-client.js";
 import { JsonLogicRuleEvaluator } from "./processor/rule-evaluator.js";
@@ -58,6 +58,7 @@ import { ReindexDispatcher } from "./jobs/reindex/reindex-dispatcher.js";
 import { DraftSendDispatcher } from "./processor/draft-send-dispatcher.js";
 import { DraftSendWorker } from "./processor/draft-send-worker.js";
 import { CalendarForwarder } from "./processor/calendar/calendar-forwarder.js";
+import { IncomingCalendarRsvpProcessor } from "./processor/incoming-calendar-rsvp-processor.js";
 import type { PostApprovalCalendarHandlerDeps } from "./processor/calendar/post-approval-handler.js";
 import { HmacSecretGenerator } from "./processor/calendar/hmac-secret-generator.js";
 import { SignalQueue } from "./messaging/signal-queue.js";
@@ -70,8 +71,8 @@ import { EmxDispatchWorker } from "./external-exchanges/emx-dispatch-worker.js";
 import { ExchangesDatabase } from "./database/exchanges-database.js";
 import { EmxIdleWorker } from "./external-exchanges/emx-idle-worker.js";
 import type { ProviderAdapter } from "./external-exchanges/provider-adapter.js";
+import type { EmxPlatform } from "./types/index.js";
 import { EncryptionManager } from "./secrets/encryption-manager.js";
-import { getClient as getAuthressClient } from "./api/authress-access.js";
 import { RequestLogger } from "./logger.js";
 
 // ---------------------------------------------------------------------------
@@ -85,7 +86,9 @@ import { RequestLogger } from "./logger.js";
 
 export class CompositeRoot {
   public readonly logger: RequestLogger;
-  public readonly processor: SignalProcessor;
+  public readonly processor: IncomingEmailProcessor;
+  public readonly rsvpProcessor: IncomingCalendarRsvpProcessor;
+  public readonly mailDomain: string;
   public readonly onboardingHandler: OnboardingTaskHandler;
   public readonly domainHealthJob: DomainHealthJob;
   public readonly healthcheckJob: HealthcheckJob;
@@ -174,34 +177,16 @@ export class CompositeRoot {
     // mailbox has to go out through that provider, so ReplySenderService needs the adapters.
     // -----------------------------------------------------------------------
 
-    /**
-     * Fetches the provider access token Authress holds for a linked identity.
-     *
-     * `userId` is the Authress account user who linked the mailbox — the `userId` path
-     * parameter of GET /v1/connections/{connectionId}/users/{userId}/credentials.
-     * `connectionUserId` selects which of that user's (possibly several) identities linked
-     * under `connectionId` to fetch credentials for — without it Authress returns whichever
-     * identity logged in most recently, which is wrong when a user has linked more than one
-     * mailbox through the same connection.
-     */
-    const getProviderToken = async (userId: string, connectionId: string, connectionUserId: string): Promise<string> => {
-      const client = getAuthressClient();
-      const response = await client.connections.getConnectionCredentials(connectionId, userId, connectionUserId);
-      return response.data.accessToken;
-    };
-
     const gmailProvider = new GmailProvider({
       db: exchangesDb,
       signalQueue,
       logger,
-      getProviderToken,
     });
 
     const outlookProvider = new OutlookProvider({
       db: exchangesDb,
       signalQueue,
       logger,
-      getProviderToken,
     });
 
     const encryptionManager = new EncryptionManager(kms, logger);
@@ -222,7 +207,7 @@ export class CompositeRoot {
       logger,
     });
 
-    const emxAdapters: Record<string, ProviderAdapter> = {
+    const emxAdapters: Record<EmxPlatform, ProviderAdapter> = {
       gmail: gmailProvider,
       outlook: outlookProvider,
       imap: imapAdapter,
@@ -265,7 +250,7 @@ export class CompositeRoot {
 
     const searchDatabase = createSearchDatabase(logger);
 
-    const processor = new SignalProcessor({
+    const processor = new IncomingEmailProcessor({
       threadDb,
       resourceDb,
       accountDb,
@@ -303,6 +288,16 @@ export class CompositeRoot {
     });
 
     const sesFeedbackProcessor = new SesFeedbackProcessor(processingDb, accountDb, logger, threadDb);
+
+    // The inbound half of the calendar loop: RSVP replies to forwarded invites.
+    // Shares the forwarder (which owns the stateless validation) and the same
+    // email content store + thread DB the email processor uses.
+    const rsvpProcessor = new IncomingCalendarRsvpProcessor({
+      emailContentStore: new EmailContentStore(s3),
+      calendarForwarder,
+      threadStore: threadDb,
+      logger,
+    });
 
     const reindexWorker = new ReindexWorker(logger);
 
@@ -472,7 +467,6 @@ export class CompositeRoot {
       outlookProvider,
       adapters: emxAdapters,
       encryptionManager,
-      getProviderToken,
       signalQueue,
       jmapAdapter,
     });
@@ -483,6 +477,8 @@ export class CompositeRoot {
 
     this.logger = logger;
     this.processor = processor;
+    this.rsvpProcessor = rsvpProcessor;
+    this.mailDomain = MAIL_DOMAIN;
     this.onboardingHandler = onboardingHandler;
     this.domainHealthJob = domainHealthJob;
     this.healthcheckJob = healthcheckJob;

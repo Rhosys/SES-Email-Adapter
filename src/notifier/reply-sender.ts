@@ -13,13 +13,12 @@
 // fails DMARC at the recipient and burns our sending reputation on the way.
 // ---------------------------------------------------------------------------
 
-import type { ReplySender, ReplySendError } from "../processor/processor.js";
+import type { ReplySender, ReplySendError } from "../processor/incoming-email-processor.js";
 import type { EmailService } from "../email/email-service.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { ExchangesDatabase } from "../database/exchanges-database.js";
 import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js";
-import { exchangeCredentials } from "../external-exchanges/provider-adapter.js";
-import type { ExternalMailExchange } from "../types/index.js";
+import type { ExternalMailExchange, EmxPlatform } from "../types/index.js";
 import type { Result } from "../errors.js";
 import { ok, err } from "../errors.js";
 import { buildOutboundTags, TAG_HOP_COUNT, MAX_HOP_COUNT } from "../email/ses-tags.js";
@@ -35,7 +34,7 @@ interface ReplySenderDeps {
   emailService: EmailService;
   accountDb: AccountDatabase;
   exchangesDb: ExchangesDatabase;
-  adapters: Record<string, ProviderAdapter>;
+  adapters: Record<EmxPlatform, ProviderAdapter>;
   logger: Logger;
 }
 
@@ -49,7 +48,7 @@ export class ReplySenderService implements ReplySender {
   private readonly emailService: EmailService;
   private readonly accountDb: AccountDatabase;
   private readonly exchangesDb: ExchangesDatabase;
-  private readonly adapters: Record<string, ProviderAdapter>;
+  private readonly adapters: Record<EmxPlatform, ProviderAdapter>;
   private readonly logger: Logger;
 
   constructor(deps: ReplySenderDeps) {
@@ -200,18 +199,16 @@ export class ReplySenderService implements ReplySender {
     if (emxResult.isErr()) return err(emxResult.error);
     const emx = emxResult.value;
 
-    // Exchange-backed but cannot send (deleted/inactive, non-sending platform, or no recorded
-    // identity): the address cannot send as itself. Fall back to SES on a verified domain, or
-    // else apply the platform-fallback decision.
+    // Exchange-backed but cannot send (deleted or not active, or no recorded identity): the
+    // address cannot send as itself. Fall back to SES on a verified domain, or else apply the
+    // platform-fallback decision. Every registered platform can send (sendMessage is required on
+    // the adapter and `adapters` is keyed by every EmxPlatform), so there is no capability check.
     if (!emx || emx.status !== "active") {
       return this.sesOrFallback(accountId, fromAddress, decoratedFrom, allowFallbackToPlatformSending, emx ? `exchange status is ${emx.status}` : "exchange no longer exists");
     }
-    if (!this.adapters[emx.platform]?.sendMessage) {
-      return this.sesOrFallback(accountId, fromAddress, decoratedFrom, allowFallbackToPlatformSending, `${emx.platform} exchanges cannot send`);
-    }
-    if (!exchangeCredentials(emx)) {
-      return this.sesOrFallback(accountId, fromAddress, decoratedFrom, allowFallbackToPlatformSending, "exchange has no linked identity recorded — it predates connection tracking and must be reconnected");
-    }
+    // Whether the exchange can actually mint a token is the adapter's concern, not the router's:
+    // sendViaProvider calls adapter.sendMessage, which resolves the token and returns a failure
+    // (e.g. a missing linked identity) if it can't. The router only decides the route.
     return ok({ kind: "provider", exchange: emx, from: decoratedFrom });
   }
 
@@ -236,8 +233,12 @@ export class ReplySenderService implements ReplySender {
       return ok({ kind: "platform" });
     }
 
-    this.logger.error("Refusing to send: the from-address cannot send as itself (no capable exchange, and this account has not verified the domain for sending through us), and platform fallback is not permitted for this send. Sending via SES anyway would emit mail that fails DMARC at the recipient.", { code: "reply_sender.provider_unavailable", accountId, fromAddress, reason });
-    return err({ kind: "provider_send_rejected", cause: `Cannot send from ${fromAddress}: ${reason}` });
+    // Pass the error itself as the third argument: the logger appends its `reason` to the title
+    // and attaches the full error as structured context, so the title carries the specific
+    // precondition that failed without hand-inlining it here.
+    const sendError = { kind: "from_address_unsendable" as const, reason: `Cannot send from ${fromAddress}: ${reason}` };
+    this.logger.error("Refusing to send: the from-address cannot send as itself, and platform fallback is not permitted for this send. Sending via SES anyway would emit mail that fails DMARC at the recipient.", { code: "reply_sender.provider_unavailable", accountId, fromAddress }, sendError);
+    return err(sendError);
   }
 
   // ---------------------------------------------------------------------------
@@ -248,9 +249,8 @@ export class ReplySenderService implements ReplySender {
     emx: ExternalMailExchange,
     opts: { to: string[]; cc?: string[]; bcc?: string[]; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; headers: Array<{ Name: string; Value: string }> },
   ): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
+    // Keyed by EmxPlatform with sendMessage required — always present, no narrowing needed.
     const adapter = this.adapters[emx.platform];
-    // resolveRoute already established this; narrowing for the type checker.
-    if (!adapter?.sendMessage) return err({ kind: "provider_send_rejected", cause: `${emx.platform} exchanges cannot send` });
 
     const rawMime = buildMimeMessage({
       from: opts.from,
