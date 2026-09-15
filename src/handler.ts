@@ -113,7 +113,21 @@ async function handlerInner(
     for (const record of event.Records) {
       const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
       const messageType = record.messageAttributes?.["messageType"]?.stringValue ?? "unknown";
-      logger.info("SQS message received", { code: "handler.sqs.received", messageId: record.messageId, messageType, receiveCount });
+      // Metadata only — never log record.body, it's untrusted/PII-bearing email content.
+      logger.info("Processing SQS message", {
+        code: "handler.sqs.processing",
+        messageId: record.messageId,
+        receiptHandle: record.receiptHandle,
+        messageType,
+        receiveCount,
+        attributes: record.attributes,
+        messageAttributes: record.messageAttributes,
+        md5OfBody: record.md5OfBody,
+        md5OfMessageAttributes: record.md5OfMessageAttributes,
+        eventSource: record.eventSource,
+        eventSourceARN: record.eventSourceARN,
+        awsRegion: record.awsRegion,
+      });
 
       let body: unknown;
       try {
@@ -125,7 +139,14 @@ async function handlerInner(
       }
 
       const resolvedMessageType = record.messageAttributes?.["messageType"]?.stringValue ?? (body as { sqsMessageAttributeMessageType?: string }).sqsMessageAttributeMessageType;
-      const result = await processSqsRecord(body, resolvedMessageType, receiveCount, record.messageId);
+
+      let result: Result<void, unknown>;
+      try {
+        result = await processSqsRecord(body, resolvedMessageType, receiveCount, record.messageId);
+      } catch (e) {
+        logger.error(`processSqsRecord threw an unhandled exception — isolating to this record so the rest of the batch isn't retried: ${e instanceof Error ? e.message : e}`, { code: "handler.sqs.record_threw", messageId: record.messageId, receiveCount, messageType: resolvedMessageType, error: e });
+        result = err(e);
+      }
 
       if (result.isErr()) {
         if (receiveCount > RETRY_TRACK_THRESHOLD) {
