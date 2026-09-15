@@ -9,7 +9,7 @@ import { buildProxyUid as buildProxyUidRaw } from "../../src/processor/calendar/
 import { generateId, generateAccountId } from "../../src/utils/id.js";
 import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
-import { ok } from "../../src/errors.js";
+import { ok, err, dbError } from "../../src/errors.js";
 import type { Signal, CalendarResponseData } from "../../src/types/index.js";
 import type { CalendarEventData } from "../../src/types/calendar.js";
 
@@ -275,6 +275,29 @@ describe("IncomingCalendarRsvpProcessor — happy path", () => {
     expect(saveCalls).toHaveLength(2);
     const decisions = saveCalls.map((call) => (call[0] as Signal<CalendarResponseData>).data.decision);
     expect(decisions).toEqual(["accepted", "declined"]);
+  });
+
+  it("still attempts every attachment when an earlier one hits an infra error, surfacing the error only at the end", async () => {
+    const proxyUidA = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
+    const proxyUidB = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
+    const emailService = { sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })) } as unknown as EmailService;
+    const saveSignal = vi.fn()
+      .mockResolvedValueOnce(err(dbError(new Error("write failed"))))
+      .mockResolvedValueOnce(ok(undefined));
+    const threadStore = makeThreadStore({ saveSignal });
+    const { processor } = makeProcessor({
+      raw: rawMultiRsvpEmail({ proxyUidA, proxyUidB }),
+      forwarder: makeForwarder(emailService),
+      threadStore,
+    });
+
+    const result = await processor.process(makeMessage());
+
+    // Both attachments were relayed and both attempted to save, even though the first failed.
+    expect(emailService.sendRaw).toHaveBeenCalledTimes(2);
+    expect(saveSignal).toHaveBeenCalledTimes(2);
+    // The (first) error is only surfaced once every attachment has been attempted.
+    expect(result.isErr()).toBe(true);
   });
 });
 

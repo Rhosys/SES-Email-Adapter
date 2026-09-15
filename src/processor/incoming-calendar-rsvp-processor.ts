@@ -16,8 +16,9 @@
 // Every failure short of that resolves to ok(undefined) with a WARN: a message
 // that reached this address but isn't a processable RSVP (no .ics, unparseable,
 // wrong METHOD, forged HMAC, unknown thread) is dropped silently, never retried,
-// never turned into a signal. Only genuine infrastructure errors (S3/DB) return err,
-// aborting any remaining attachments in the same message.
+// never turned into a signal. Every attachment is still attempted even if one hits a
+// genuine infrastructure error (S3/DB) — only after all have run does the first such
+// error get returned as err, so a single failure never stops the rest from being relayed.
 // ---------------------------------------------------------------------------
 
 import { DateTime } from "luxon";
@@ -89,10 +90,15 @@ export class IncomingCalendarRsvpProcessor {
       return ok(undefined);
     }
 
+    // Attempt every attachment even if one hits a genuine infra error — a bundled message
+    // might carry several attendees' replies, and one DB/send failure shouldn't stop the
+    // rest from being relayed and recorded. Surface the first error only after all have run.
+    let firstError: DbError | EmailServiceError | undefined;
     for (const icsBytes of icsAttachments) {
       const result = await this.processOneIcs(icsBytes, recipient);
-      if (result.isErr()) return err(result.error);
+      if (result.isErr() && !firstError) firstError = result.error;
     }
+    if (firstError) return err(firstError);
     return ok(undefined);
   }
 
