@@ -656,14 +656,20 @@ export class ThreadDatabase {
         ExpressionAttributeValues: { ":pk": threadPk(accountId, threadId) },
         ScanIndexForward: false,
       }));
+      // RSVPs are append-only history; "latest" is a wall-clock fact (data.respondedAt), NOT the
+      // gsi1sk (signal-id) scan order. A user who accepts then declines must resolve to "declined"
+      // regardless of which response got the larger sgn- id. Pick the max respondedAt among the
+      // calendar_response signals matching this veventUid.
       const signals = (res.Items ?? []) as unknown[];
-      const responseSignal = signals.find(
-        (s) => {
-          const sig = s as { type?: string; data?: { veventUid?: string } };
-          return sig.type === "calendar_response" && sig.data?.veventUid === veventUid;
-        },
+      const responses = signals.filter((s) => {
+        const sig = s as { type?: string; data?: { veventUid?: string } };
+        return sig.type === "calendar_response" && sig.data?.veventUid === veventUid;
+      }) as unknown as Signal<import("../types/calendar.js").CalendarResponseData>[];
+      const responseSignal = responses.reduce<typeof responses[number] | undefined>(
+        (latest, s) => (latest === undefined || s.data.respondedAt > latest.data.respondedAt ? s : latest),
+        undefined,
       );
-      return ok(responseSignal ? hydrateSignal(responseSignal as unknown as Signal<import("../types/calendar.js").CalendarResponseData>) : null);
+      return ok(responseSignal ? hydrateSignal(responseSignal) : null);
     } catch (e) {
       return err(dbError(e));
     }

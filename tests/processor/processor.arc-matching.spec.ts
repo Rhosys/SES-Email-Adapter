@@ -1,8 +1,8 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ok, err } from "../../src/errors.js";
-import { SignalProcessor } from "../../src/processor/processor.js";
-import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/processor.js";
+import { IncomingEmailProcessor } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/incoming-email-processor.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, mockRecipientAlias } from "./_helpers.js";
 import type { ThreadDatabase } from "../../src/database/thread-database.js";
@@ -178,7 +178,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     mockRecipientAlias(accountDb, DEFAULT_EMAIL_CONFIG);
     const processingDb = makeProcessingDbMock();
-    return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
+    return new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
       ...makeSharedNewDeps(),
       threadDb,
       accountDb,

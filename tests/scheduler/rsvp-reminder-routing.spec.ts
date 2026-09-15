@@ -35,7 +35,8 @@ function makeSqsRecord(body: unknown, messageAttributes?: Record<string, { strin
 /**
  * We test the routing decision in isolation — the handler.ts routing logic
  * reads messageType from record.messageAttributes?.["messageType"]?.stringValue
- * OR falls back to body.sqsMessageAttributeMessageType.
+ * OR falls back to the body.sqsMessageAttributeMessageType field (EventBridge
+ * Scheduler can't set SQS message attributes on its SQS target).
  *
  * Then it validates the payload has the required fields before calling the handler.
  */
@@ -46,7 +47,7 @@ function extractMessageType(record: MinimalSqsRecord, parsedBody: Record<string,
 
 function isValidRsvpReminderPayload(body: unknown): body is RsvpReminderMessage {
   const msg = body as Record<string, unknown>;
-  return Boolean(msg.accountId && msg.signalId && msg.threadId);
+  return Boolean(msg.accountId && msg.calendarSignalId && msg.threadId);
 }
 
 // ---------------------------------------------------------------------------
@@ -55,7 +56,7 @@ function isValidRsvpReminderPayload(body: unknown): body is RsvpReminderMessage 
 
 describe("Handler routing — rsvp_reminder", () => {
   it("routes via SQS message attribute messageType: rsvp_reminder", () => {
-    const body: RsvpReminderMessage = { accountId: "acc-001", signalId: "sgn-001", threadId: "arc-001" };
+    const body: RsvpReminderMessage = { sqsMessageAttributeMessageType: "rsvp_reminder", accountId: "acc-001", calendarSignalId: "sgn-001", threadId: "arc-001" };
     const record = makeSqsRecord(body, {
       messageType: { stringValue: "rsvp_reminder", dataType: "String" },
     });
@@ -67,11 +68,11 @@ describe("Handler routing — rsvp_reminder", () => {
     expect(isValidRsvpReminderPayload(parsed)).toBe(true);
   });
 
-  it("routes via body fallback: sqsMessageAttributeMessageType (no SQS attribute)", () => {
-    const body = {
+  it("routes via body fallback: self-describing messageType (no SQS attribute)", () => {
+    const body: RsvpReminderMessage = {
       sqsMessageAttributeMessageType: "rsvp_reminder",
       accountId: "acc-002",
-      signalId: "sgn-002",
+      calendarSignalId: "sgn-002",
       threadId: "arc-002",
     };
     const record = makeSqsRecord(body); // no messageAttributes
@@ -87,7 +88,7 @@ describe("Handler routing — rsvp_reminder", () => {
     const body = {
       sqsMessageAttributeMessageType: "signal_followup", // wrong in body
       accountId: "acc-003",
-      signalId: "sgn-003",
+      calendarSignalId: "sgn-003",
       threadId: "arc-003",
     };
     const record = makeSqsRecord(body, {
@@ -101,7 +102,7 @@ describe("Handler routing — rsvp_reminder", () => {
   });
 
   it("malformed payload (missing accountId) → validation fails", () => {
-    const body = { sqsMessageAttributeMessageType: "rsvp_reminder", signalId: "sgn-004", threadId: "arc-004" };
+    const body = { sqsMessageAttributeMessageType: "rsvp_reminder", calendarSignalId: "sgn-004", threadId: "arc-004" };
     const record = makeSqsRecord(body);
 
     const parsed = JSON.parse(record.body);
@@ -111,14 +112,14 @@ describe("Handler routing — rsvp_reminder", () => {
     expect(isValidRsvpReminderPayload(parsed)).toBe(false);
   });
 
-  it("malformed payload (missing signalId) → validation fails", () => {
+  it("malformed payload (missing calendarSignalId) → validation fails", () => {
     const body = { sqsMessageAttributeMessageType: "rsvp_reminder", accountId: "acc-005", threadId: "arc-005" };
 
     expect(isValidRsvpReminderPayload(body)).toBe(false);
   });
 
   it("malformed payload (missing threadId) → validation fails", () => {
-    const body = { sqsMessageAttributeMessageType: "rsvp_reminder", accountId: "acc-006", signalId: "sgn-006" };
+    const body = { sqsMessageAttributeMessageType: "rsvp_reminder", accountId: "acc-006", calendarSignalId: "sgn-006" };
 
     expect(isValidRsvpReminderPayload(body)).toBe(false);
   });
@@ -131,7 +132,7 @@ describe("Handler routing — rsvp_reminder", () => {
     it("logs ERROR and continues (no batch failure) on malformed rsvp_reminder", () => {
       const logger = createMockLogger();
       // Simulate what handler.ts does: log error, then continue (no push to failures)
-      const body = { sqsMessageAttributeMessageType: "rsvp_reminder", signalId: "sgn-007" };
+      const body = { sqsMessageAttributeMessageType: "rsvp_reminder", calendarSignalId: "sgn-007" };
 
       if (!isValidRsvpReminderPayload(body)) {
         logger.error("Malformed rsvp_reminder payload — missing required fields. Dropping message.", {

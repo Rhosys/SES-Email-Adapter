@@ -982,7 +982,7 @@ export class AccountDatabase {
    * takeover": if a different account could claim a domain the original account merely
    * soft-deleted, the original owner would be permanently locked out of reviving it via
    * POST. Ownership persists across soft-delete; only routability is affected by status
-   * (see SignalProcessor.resolveAccountIdAndAlias).
+   * (see IncomingEmailProcessor.resolveAccountIdAndAlias).
    */
   async resolveAccountForDomain(domain: string): Promise<Result<string | null, DbError>> {
     const ownerResult = await this.getDomainOwner(domain);

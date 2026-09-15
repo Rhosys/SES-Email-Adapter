@@ -59,4 +59,22 @@ export class MailparserMimeParser {
       return err(dbError(e));
     }
   }
+
+  /**
+   * Extract the raw bytes of the first calendar (text/calendar or .ics) attachment
+   * from a raw MIME message, or null when there is none. Lives here rather than in
+   * a processor because MIME parsing is content parsing — it must stay outside the
+   * src/processor/ boundary that forbids mailparser (ADR 011). Unlike parse(), this
+   * keeps the attachment content (parse() deliberately discards it).
+   */
+  async extractCalendarAttachment(rawEmail: Buffer | string): Promise<Uint8Array | null> {
+    const parsed = await simpleParser(rawEmail);
+    for (const attachment of parsed.attachments) {
+      const isCalendar =
+        attachment.contentType.toLowerCase().startsWith("text/calendar") ||
+        (attachment.filename?.toLowerCase().endsWith(".ics") ?? false);
+      if (isCalendar) return new Uint8Array(attachment.content);
+    }
+    return null;
+  }
 }

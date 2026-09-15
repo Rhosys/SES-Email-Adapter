@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok, err, dbError } from "../src/errors.js";
 import { DraftSendWorker } from "../src/processor/draft-send-worker.js";
 import type { IDraftSendThreadDb } from "../src/processor/draft-send-worker.js";
-import type { ReplySender } from "../src/processor/processor.js";
+import type { ReplySender } from "../src/processor/incoming-email-processor.js";
 import type { DraftSendPayload } from "../src/processor/draft-send-dispatcher.js";
 import type { Signal } from "../src/types/index.js";
 import { createMockLogger } from "./helpers/mock-logger.js";

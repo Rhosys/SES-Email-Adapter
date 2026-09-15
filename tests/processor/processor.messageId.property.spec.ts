@@ -3,8 +3,8 @@ import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 import { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
 import { describe, it, expect, vi } from "vitest";
 import { ok, err } from "neverthrow";
-import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/processor.js";
+import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
@@ -54,7 +54,7 @@ describe("ProcessError on database failure", () => {
     };
   }
 
-  function makeProcessor(store: ReturnType<typeof makeStore>): SignalProcessor {
+  function makeProcessor(store: ReturnType<typeof makeStore>): IncomingEmailProcessor {
     const contentSanitizer: ContentSanitizerClient = {
       invoke: vi.fn().mockReturnValue(Promise.resolve(ok({
         success: true as const,
@@ -93,7 +93,7 @@ describe("ProcessError on database failure", () => {
       deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)),
     };
     const mockLogger = createMockLogger();
-    return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+    return new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...store, contentSanitizer, userCodeExecutor: { invoke: vi.fn(), validateAst: vi.fn(), validateAstBatch: vi.fn() }, emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, classifier, embeddingGenerator, auroraWriter, threadMatcher,
       ruleEvaluator: makeRuleEvaluator3(mockLogger), logger: mockLogger,
       notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

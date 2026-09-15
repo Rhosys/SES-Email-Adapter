@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { assignSystemLabels, getETLD1, type SystemLabelContext } from "../../src/processor/filter.js";
-import { SYSTEM_RULES } from "../../src/processor/processor.js";
+import { SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
 
 function makeCtx(overrides: Partial<SystemLabelContext> = {}): SystemLabelContext {
   return {

@@ -14,7 +14,7 @@ import { threadEmbeddings } from "./schema.js";
 import { dynamo, SIGNALS_TABLE } from "./shared.js";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
-import type { ThreadMatcherPort } from "../processor/processor.js";
+import type { ThreadMatcherPort } from "../processor/incoming-email-processor.js";
 import type { Thread } from "../types/index.js";
 import type { AwsDataApiPgDatabase } from "drizzle-orm/aws-data-api/pg";
 import type { Logger } from "../logger.js";

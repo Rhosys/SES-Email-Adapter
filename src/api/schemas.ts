@@ -417,6 +417,11 @@ export const CalendarEventData = z.object({
   organizerName: z.string().optional(),
   attendees: z.array(CalendarAttendee),
   linkedSignalId: z.string(),
+  // Whether the latest state of this event solicits an RSVP from the user. The client
+  // renders its RSVP control from this flag alone — never from the event type or method.
+  // True only for a scheduling REQUEST with an organizer; false for PUBLISH (informational),
+  // CANCEL (withdrawn), and any event with no organizer to reply to.
+  rsvpable: z.boolean(),
   // Set when a METHOD:CANCEL invite has been received for this event. Presence
   // means cancelled; the current fields are retained so the client can render
   // them struck-through rather than blank. ISO 8601 timestamp of the cancel.
@@ -424,6 +429,14 @@ export const CalendarEventData = z.object({
   // Present only when a later invite changed one or more fields; carries the
   // pre-update values of just the changed fields. Absent for a first invite.
   previousValues: CalendarPreviousValues.optional(),
+  // The account's latest RSVP for this event, resolved across the response history by
+  // respondedAt. Absent when the user has not responded. Lets the client show "you responded"
+  // regardless of which path recorded it (dashboard or native calendar reply) without a second
+  // query. respondedAt is an ISO 8601 timestamp.
+  rsvpResponse: z.object({
+    decision: z.enum(["accepted", "declined", "tentative"]),
+    respondedAt: z.string(),
+  }).optional(),
 }).openapi("CalendarEventData");
 
 export const CalendarResponseData = z.object({

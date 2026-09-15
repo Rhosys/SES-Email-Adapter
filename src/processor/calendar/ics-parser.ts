@@ -184,8 +184,13 @@ function parseVCalendar(icsBytes: Uint8Array): Result<ParsedVCalendar, IcsParseE
   }
 
   // --- Extract METHOD from VCALENDAR level ---
-  // METHOD is not strictly required by RFC 5545 but we need it for routing;
-  // callers fall back to "REQUEST" if missing (common in standalone .ics files).
+  // METHOD is not required by RFC 5545, but iTIP (RFC 5546) routing needs one. Absence of
+  // METHOD means the sender did not assert a scheduling request, so the fallback is the
+  // informational PUBLISH — NOT REQUEST. Only an explicit METHOD:REQUEST is treated as a
+  // solicitation for a reply. A bare .ics attachment (a reservation confirmation, a "here
+  // are the details" event) carries no METHOD; defaulting it to REQUEST wrongly makes it
+  // RSVP-eligible and produces a reply with an empty To. RSVP eligibility is decided later
+  // (calendar-collapse: rsvpable = method === "REQUEST" && organizer present), never here.
   const method = vcalendar.getFirstPropertyValue("method") as string | null;
 
   return ok({ vcalendar, method, rawIcsContent, startTime });
@@ -288,7 +293,8 @@ function buildEventData(vevent: InstanceType<typeof ICAL.Component>, method: str
     ...(organizerCn !== undefined ? { organizerCn } : {}),
     attendees,
     veventUid: uid,
-    method: method ?? "REQUEST",
+    // Absent METHOD → informational PUBLISH. Only an explicit METHOD:REQUEST solicits a reply.
+    method: method ?? "PUBLISH",
     sequence,
     ...(status !== null ? { status } : {}),
     ...(transparency !== null ? { transparency } : {}),

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok, err } from "neverthrow";
-import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ThreadMatcherPort, SqsDispatcher, Notifier, ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
+import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, SqsDispatcher, Notifier, ReplySender, SideEffectPayload } from "../../src/processor/incoming-email-processor.js";
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
@@ -134,8 +134,8 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
   };
 }
 
-function makeProcessor(opts: { store: ReturnType<typeof makeStore>; logger: MockLogger; forwardingService?: IForwardingService }): SignalProcessor {
-  return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+function makeProcessor(opts: { store: ReturnType<typeof makeStore>; logger: MockLogger; forwardingService?: IForwardingService }): IncomingEmailProcessor {
+  return new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
     ...opts.store,
     contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
     classifier: { classify: vi.fn() } as unknown as Pick<SignalClassifier, "classify">,
@@ -179,7 +179,7 @@ describe("processSideEffect — forward dispatches to ForwardingService", () => 
     const forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) };
     const notifier = { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
 
-    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+    const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...store,
       contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,
       classifier: { classify: vi.fn() } as unknown as Pick<SignalClassifier, "classify">,
@@ -305,8 +305,8 @@ describe("processSideEffect — pong eligibility (sender ownership)", () => {
     replySender: ReplySender;
     accessService: { listUsers: ReturnType<typeof vi.fn>; getUserProfile: ReturnType<typeof vi.fn> };
     logger: MockLogger;
-  }): SignalProcessor {
-    return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+  }): IncomingEmailProcessor {
+    return new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       accessService: opts.accessService as never,
       ...opts.store,
       contentSanitizer: { invoke: vi.fn() } as unknown as ContentSanitizerClient,

@@ -20,9 +20,9 @@ import type {
   ProviderFetchError,
   ProviderSendError,
 } from "./provider-adapter.js";
-import { exchangeCredentials } from "./provider-adapter.js";
 import { createVerifier } from "./jwks-verifier.js";
 import { extractMsgId } from "../processor/message-id.js";
+import { getClient as getAuthressClient } from "../api/authress-access.js";
 import type { ExchangesDatabase } from "../database/exchanges-database.js";
 import type { SignalQueue } from "../messaging/signal-queue.js";
 import type { Logger } from "../logger.js";
@@ -57,8 +57,14 @@ interface OutlookProviderDeps {
   db: ExchangesDatabase;
   signalQueue: SignalQueue;
   logger: Logger;
-  getProviderToken: (userId: string, connectionId: string, connectionUserId: string) => Promise<string>;
 }
+
+// Failure modes of resolving a fresh Microsoft access token. `oauth_identity_missing` is a
+// self-generated refusal (the exchange predates connection tracking and must be reconnected), so
+// it carries a `reason`; `oauth_token_fetch_failed` wraps a thrown Authress error as `cause`.
+type GetTokenError =
+  | { kind: "oauth_identity_missing"; reason: string }
+  | { kind: "oauth_token_fetch_failed"; cause: unknown };
 
 // ---------------------------------------------------------------------------
 // Implementation
@@ -71,14 +77,12 @@ export class OutlookProvider implements ProviderAdapter {
   private readonly db: ExchangesDatabase;
   private readonly signalQueue: SignalQueue;
   private readonly logger: Logger;
-  private readonly getProviderToken: OutlookProviderDeps["getProviderToken"];
   private readonly azureAdClientId: string;
 
   constructor(deps: OutlookProviderDeps) {
     this.db = deps.db;
     this.signalQueue = deps.signalQueue;
     this.logger = deps.logger;
-    this.getProviderToken = deps.getProviderToken;
     this.azureAdClientId = process.env["AZURE_AD_CLIENT_ID"] ?? "";
     this.verifier = createVerifier({
       jwksUrl: "https://login.microsoftonline.com/common/discovery/v2.0/keys",
@@ -104,23 +108,30 @@ export class OutlookProvider implements ProviderAdapter {
   }
 
   // ---------------------------------------------------------------------------
-  // Credential resolution — shared by every method below activate()
+  // Token resolution — every method other than activate() needs a fresh token first
   // ---------------------------------------------------------------------------
 
   /**
-   * Resolves a fresh access token for `emx`, from the identity coordinates recorded on it at
-   * connect time. The one thing every ProviderAdapter method other than `activate` needs
-   * before it can do anything else, so it lives here rather than being re-derived per call
-   * site — the previous design left that to each caller, which is how `getConnectionCredentials`
-   * ended up invoked with the wrong id in more than one place.
+   * Mints a fresh Microsoft access token from the linked-identity coordinates. Takes only those
+   * three fields (an `emx` satisfies the shape) — never the whole exchange, since nothing else
+   * on it bears on the token. Owns the "no linked identity → must reconnect" refusal internally
+   * so no caller has to re-check it; that branch is a definite, non-transient failure (ERROR),
+   * while a thrown Authress fetch is logged WARN and its severity decided by the caller.
    */
-  private async resolveToken(emx: ExternalMailExchange): Promise<Result<string, { cause: unknown }>> {
-    const credentials = exchangeCredentials(emx);
-    if (!credentials) return err({ cause: "Exchange has no linked identity recorded — it predates connection tracking and must be reconnected by the user." });
+  private async getToken(identity: { userId?: string; connectionId?: string; connectionUserId?: string }): Promise<Result<string, GetTokenError>> {
+    if (!identity.userId || !identity.connectionId || !identity.connectionUserId) {
+      const error = { kind: "oauth_identity_missing" as const, reason: "Exchange has no linked identity recorded — it predates connection tracking and must be reconnected by the user." };
+      this.logger.error("Outlook token resolution failed — the exchange has no linked identity.", { code: "emx.outlook.oauth_identity_missing" }, error);
+      return err(error);
+    }
     try {
-      return ok(await this.getProviderToken(credentials.userId, credentials.connectionId, credentials.connectionUserId));
+      const client = getAuthressClient();
+      const response = await client.connections.getConnectionCredentials(identity.connectionId, identity.userId, identity.connectionUserId);
+      return ok(response.data.accessToken);
     } catch (e) {
-      return err({ cause: e });
+      const error = { kind: "oauth_token_fetch_failed" as const, cause: e };
+      this.logger.warn("Outlook token resolution failed — Authress credential fetch threw.", { code: "emx.outlook.oauth_token_fetch_failed" }, error);
+      return err(error);
     }
   }
 
@@ -130,12 +141,9 @@ export class OutlookProvider implements ProviderAdapter {
 
   async activate(_emx: ExternalMailExchange, identity?: ActivationIdentity): Promise<Result<ActivationResult, ProviderActivationError>> {
     if (!identity) return err({ kind: "provider_activation_failed", cause: "Missing linked identity for activation" });
-    let token: string;
-    try {
-      token = await this.getProviderToken(identity.userId, identity.connectionId, identity.connectionUserId);
-    } catch (e) {
-      return err({ kind: "provider_activation_failed", cause: e });
-    }
+    const tokenResult = await this.getToken(identity);
+    if (tokenResult.isErr()) return err({ kind: "provider_activation_failed", cause: tokenResult.error });
+    const token = tokenResult.value;
     try {
       let deltaLink = "";
       let nextLink: string | null = `${GRAPH_API}/me/mailFolders/inbox/messages/delta?$select=id`;
@@ -195,10 +203,10 @@ export class OutlookProvider implements ProviderAdapter {
   }
 
   async renew(emx: ExternalMailExchange): Promise<Result<void, ProviderRenewalError>> {
-    const tokenResult = await this.resolveToken(emx);
+    const tokenResult = await this.getToken(emx);
     if (tokenResult.isErr()) {
-      this.logger.error("Outlook renewal failed", { code: "emx.outlook.renewal_failed", emxId: emx.id, cause: tokenResult.error.cause });
-      return err({ kind: "provider_renewal_failed", cause: tokenResult.error.cause });
+      this.logger.error("Outlook renewal failed — could not resolve a token.", { code: "emx.outlook.renewal_failed", emxId: emx.id }, tokenResult.error);
+      return err({ kind: "provider_renewal_failed", cause: tokenResult.error });
     }
     const token = tokenResult.value;
     try {
@@ -229,8 +237,8 @@ export class OutlookProvider implements ProviderAdapter {
   }
 
   async deactivate(emx: ExternalMailExchange): Promise<Result<void, ProviderDeactivationError>> {
-    const tokenResult = await this.resolveToken(emx);
-    if (tokenResult.isErr()) return err({ kind: "provider_deactivation_failed", cause: tokenResult.error.cause });
+    const tokenResult = await this.getToken(emx);
+    if (tokenResult.isErr()) return err({ kind: "provider_deactivation_failed", cause: tokenResult.error });
     const token = tokenResult.value;
     try {
       const response = await fetch(`${GRAPH_API}/subscriptions/${emx.providerSubscriptionId}`, {
@@ -251,8 +259,8 @@ export class OutlookProvider implements ProviderAdapter {
   }
 
   async fetchMessage(providerMessageId: string, emx: ExternalMailExchange): Promise<Result<RawMimeResult, ProviderFetchError>> {
-    const tokenResult = await this.resolveToken(emx);
-    if (tokenResult.isErr()) return err({ kind: "provider_fetch_failed", cause: tokenResult.error.cause });
+    const tokenResult = await this.getToken(emx);
+    if (tokenResult.isErr()) return err({ kind: "provider_fetch_failed", cause: tokenResult.error });
     const token = tokenResult.value;
     try {
       const metaResp = await fetch(`${GRAPH_API}/me/messages/${providerMessageId}?$select=receivedDateTime`, {
@@ -303,8 +311,8 @@ export class OutlookProvider implements ProviderAdapter {
    * Requires the `Mail.Send` scope on the linked connection.
    */
   async sendMessage(rawMime: Uint8Array, emx: ExternalMailExchange): Promise<Result<SendResult, ProviderSendError>> {
-    const tokenResult = await this.resolveToken(emx);
-    if (tokenResult.isErr()) return err({ kind: "provider_send_failed", cause: tokenResult.error.cause });
+    const tokenResult = await this.getToken(emx);
+    if (tokenResult.isErr()) return err({ kind: "provider_send_failed", cause: tokenResult.error });
     const token = tokenResult.value;
     try {
       // Graph accepts a full MIME message as the request body when the content type says so.

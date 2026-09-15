@@ -3,10 +3,10 @@ import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 import { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok } from "neverthrow";
-import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
+import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps } from "./_shared-new-deps.js";
-import type { ThreadMatcherPort, RuleEvaluator, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, RuleEvaluator, InboundSignalMessage, SqsDispatcher } from "../../src/processor/incoming-email-processor.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { CtxLike } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
@@ -159,7 +159,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 }
 
 function buildProcessor(threadDb: ReturnType<typeof makeThreadDbMock>, accountDb: ReturnType<typeof makeAccountDbMock>, processingDb: ReturnType<typeof makeProcessingDbMock>, threadMatcher: ThreadMatcherPort, classifier: Pick<SignalClassifier, "classify">, logger: MockLogger, ruleEvaluator: RuleEvaluator) {
-  return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
+  return new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
     ...makeSharedNewDeps(),
     threadDb,
     accountDb,

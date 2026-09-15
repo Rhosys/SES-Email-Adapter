@@ -222,10 +222,12 @@ export function coerceWorkflowData(
               ...ctx,
             });
           } else {
+            const unsupported = unsupportedLocales(localeHints);
             logger.track(`Classifier returned unparseable date value "${raw}" — nullified.`, {
               code: "classifier.date_parse_failed",
               field: field.name,
               value: raw,
+              ...(unsupported.length > 0 ? { unsupportedLocaleHints: unsupported } : {}),
               ...ctx,
             });
           }
@@ -325,7 +327,49 @@ function withAbbrevMonthPeriod(formats: string[]): string[] {
 const DATE_FORMATS_WITH_YEAR = withWeekdayPrefix(withAbbrevMonthPeriod(BASE_DATE_FORMATS_WITH_YEAR));
 const DATE_FORMATS_YEARFREE = withWeekdayPrefix(withAbbrevMonthPeriod(BASE_DATE_FORMATS_YEARFREE));
 
-const TIME_SUFFIXES = ["", " HH:mm", " h:mm a", " 'at' HH:mm", " 'at' h:mm a"];
+/**
+ * Trailing time connectors by base language subtag — the mirror image of
+ * `DATE_CONNECTORS_BY_LANG` below (which handles a connector introducing the
+ * DATE portion when time comes first). These introduce the TIME portion when
+ * the date comes first, e.g. German "3 Januar 2027 um 18:00", French "1
+ * février 2027 à 18:00". Same words as `LEADING_TIME_CONNECTOR` since a
+ * connector reads the same whichever side it falls on.
+ */
+const TRAILING_TIME_CONNECTOR_WORDS = ["at", "um", "à", "a las", "alle", "om"];
+
+const TIME_SUFFIXES = [
+  "",
+  " HH:mm",
+  " h:mm a",
+  ...TRAILING_TIME_CONNECTOR_WORDS.flatMap(word => [` '${word}' HH:mm`, ` '${word}' h:mm a`]),
+  // Comma before the time, and a dot instead of a colon (e.g. "Oct 27, 2026, 18.30").
+  ", HH.mm",
+];
+
+/** Ordinal day suffixes ("1st", "2nd", "3rd", "10th") — luxon's `d` token needs a bare number. */
+const ORDINAL_DAY_SUFFIX = /(\d)(?:st|nd|rd|th)\b/gi;
+
+/**
+ * Non-English ordinal day markers, tried unconditionally like `ORDINAL_DAY_SUFFIX`
+ * above — same safety property: each pattern only matches its own language's
+ * literal marker, so it's a no-op everywhere else. French "1er"/"2ème", Spanish/
+ * Italian "1º"/"2ª"/"3°", and German's ordinal period ("3. Januar" → "3 Januar",
+ * only stripped when followed by whitespace so "03.02.2027" is untouched).
+ */
+const FR_ORDINAL_SUFFIX = /(\d)(?:er|re|ème)\b/gi;
+const ES_IT_ORDINAL_SUFFIX = /(\d)[ºª°]/g;
+const DE_ORDINAL_PERIOD = /(\d)\.(?=\s)/g;
+
+/**
+ * Dutch ordinal suffix ("3e januari" → "3 januari"). Unlike the markers above,
+ * a bare "e" straight after a digit is not safely a no-op elsewhere (e.g.
+ * scientific notation "3e10"), so this is only applied when "nl" is an actual
+ * locale hint rather than tried unconditionally.
+ */
+const NL_ORDINAL_SUFFIX = /(\d)e\b/gi;
+
+/** A trailing parenthesized timezone abbreviation, e.g. "(CEST)", "(GMT)". */
+const TRAILING_ZONE_ABBREVIATION = /\s*\([A-Za-z]{2,5}\)\s*$/;
 
 /** Pattern to detect slash-separated numeric dates (e.g. 01/02/2025, 1/2/25). */
 const SLASH_DATE_PATTERN = /\d+\/\d+/;
@@ -472,6 +516,25 @@ const DATE_CONNECTORS_BY_LANG: Record<string, string[]> = {
 };
 
 /**
+ * Base language subtags this file has explicit ordinal/connector support for
+ * (mirrors `DATE_CONNECTORS_BY_LANG`'s keys). A locale hint outside this set on
+ * a date that still failed to parse is a coverage-gap signal worth surfacing in
+ * TRACK logs — the same way this file's own fr/de/nl support was discovered.
+ */
+const SUPPORTED_DATE_LOCALES = new Set(Object.keys(DATE_CONNECTORS_BY_LANG));
+
+/**
+ * Returns the base language subtags from `localeHints` that this file has no
+ * explicit ordinal/connector support for. Used to flag date-parse failures
+ * that may be a genuine locale coverage gap rather than a malformed value.
+ */
+function unsupportedLocales(localeHints: string[]): string[] {
+  return [...new Set(localeHints.map(h => h.split("-")[0]!.toLowerCase()))].filter(
+    lang => !SUPPORTED_DATE_LOCALES.has(lang),
+  );
+}
+
+/**
  * Leading time connectors that introduce the TIME portion when it comes first
  * (German "um 17:00", French "à 14:30"). Stripped from the front before reorder
  * so the residual time token is clean. English "at" is handled by TIME_SUFFIXES.
@@ -577,10 +640,23 @@ export function coerceDate(
 
   // Reorder time-first phrasings ("9:30 a.m. on February 1") into date-first,
   // then normalize dotted meridiem (a.m. → am) so luxon's `a` token matches, then
-  // strip locale time noise (e.g. "Uhr", "o'clock") for format-based parsing.
+  // strip locale time noise (e.g. "Uhr", "o'clock") and a trailing zone abbreviation
+  // (e.g. "(CEST)") for format-based parsing. Ordinal day suffixes ("3rd", "10th")
+  // and the non-standard "Sept" abbreviation are normalized to forms luxon's `d`/`MMM`
+  // tokens accept.
   const reordered = reorderTimeFirst(trimmed, localeHints);
   const normalized = reordered.replace(DOTTED_MERIDIEM, " $1m");
-  const cleaned = normalized.replace(LOCALE_TIME_NOISE, "").trim();
+  const hintedLangs = new Set(localeHints.map(h => h.split("-")[0]!.toLowerCase()));
+  let cleaned = normalized
+    .replace(LOCALE_TIME_NOISE, "")
+    .replace(TRAILING_ZONE_ABBREVIATION, "")
+    .replace(ORDINAL_DAY_SUFFIX, "$1")
+    .replace(FR_ORDINAL_SUFFIX, "$1")
+    .replace(ES_IT_ORDINAL_SUFFIX, "$1")
+    .replace(DE_ORDINAL_PERIOD, "$1")
+    .replace(/\bSept\b/gi, "Sep");
+  if (hintedLangs.has("nl")) cleaned = cleaned.replace(NL_ORDINAL_SUFFIX, "$1");
+  cleaned = cleaned.trim();
   const input = cleaned || trimmed;
 
   // 2. Try human-readable formats with year + time variants

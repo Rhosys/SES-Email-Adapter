@@ -677,3 +677,107 @@ describe("parseIcs — malformed input rejection", () => {
     expect(result._unsafeUnwrapErr().reason).toMatch(/^Malformed iCal structure:/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// METHOD fallback: no METHOD + no ORGANIZER → PUBLISH (informational), not REQUEST
+//
+// Reproduces a real reservation-confirmation .ics (lunchgate/spatie generator):
+// a bare VEVENT with no METHOD at VCALENDAR level, no ORGANIZER, and no ATTENDEE.
+// Defaulting this to REQUEST wrongly makes it RSVP-eligible and produces a reply
+// with an empty To. Per RFC 5546 a REQUEST requires ORGANIZER, so with none present
+// the correct classification is PUBLISH.
+// ---------------------------------------------------------------------------
+
+describe("parseIcs — METHOD fallback by ORGANIZER presence", () => {
+  it("classifies a bare VEVENT with no METHOD and no ORGANIZER as PUBLISH", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:spatie/icalendar-generator",
+      "BEGIN:VEVENT",
+      "UID:6aa3dd28a1eae",
+      "DTSTAMP:20260911T105120Z",
+      "DTSTART:20260925T121500Z",
+      "DTEND:20260925T141500Z",
+      "SUMMARY:Reservation at tibits Winterthur",
+      "LOCATION:Oberer Graben 48\\, 8400 Winterthur",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+
+    const result = parseIcs(toBytes(ics));
+
+    expect(result.isOk()).toBe(true);
+    const { calendarData } = result._unsafeUnwrap();
+    expect(calendarData.method).toBe("PUBLISH");
+    expect(calendarData.organizer).toBe("");
+    expect(calendarData.attendees).toEqual([]);
+  });
+
+  it("defaults to PUBLISH when METHOD is absent even if an ORGANIZER is present", () => {
+    // Absence of METHOD means the sender did not assert a scheduling request. A standalone
+    // .ics carrying event details (with an organizer) is informational, not a solicitation
+    // for a reply. Only an explicit METHOD:REQUEST is RSVP-eligible.
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Test//Test//EN",
+      "BEGIN:VEVENT",
+      "UID:standalone-with-organizer",
+      "DTSTART:20260925T121500Z",
+      "DTEND:20260925T141500Z",
+      "SUMMARY:Standalone invite",
+      "ORGANIZER;CN=Alice:mailto:alice@example.com",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+
+    const result = parseIcs(toBytes(ics));
+
+    expect(result.isOk()).toBe(true);
+    const { calendarData } = result._unsafeUnwrap();
+    expect(calendarData.method).toBe("PUBLISH");
+    expect(calendarData.organizer).toBe("alice@example.com");
+  });
+
+  it("honors an explicit METHOD:REQUEST", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Test//Test//EN",
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:explicit-request",
+      "DTSTART:20260925T121500Z",
+      "SUMMARY:Real invite",
+      "ORGANIZER;CN=Alice:mailto:alice@example.com",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+
+    const result = parseIcs(toBytes(ics));
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().calendarData.method).toBe("REQUEST");
+  });
+
+  it("honors an explicit METHOD even when no ORGANIZER is present", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Test//Test//EN",
+      "METHOD:PUBLISH",
+      "BEGIN:VEVENT",
+      "UID:explicit-publish",
+      "DTSTART:20260925T121500Z",
+      "SUMMARY:Published event",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\r\n");
+
+    const result = parseIcs(toBytes(ics));
+
+    expect(result.isOk()).toBe(true);
+    expect(result._unsafeUnwrap().calendarData.method).toBe("PUBLISH");
+  });
+});

@@ -36,6 +36,13 @@ const DIFFED_FIELDS = ["title", "description", "startTime", "endTime", "location
 export interface CalendarEnrichment {
   cancelledAt?: string;
   previousValues?: CalendarPreviousValues;
+  // Whether the collapsed (latest) state of this event solicits an RSVP from the user.
+  // True only when the winning signal is a scheduling REQUEST carrying an ORGANIZER to
+  // reply to. A PUBLISH (informational), a CANCEL (withdrawn), a REPLY/COUNTER, or a
+  // REQUEST with no organizer are all non-rsvpable. This is the single authoritative
+  // eligibility signal the client renders its RSVP control from — the client never sees
+  // `method` and never reasons about iTIP semantics.
+  rsvpable: boolean;
 }
 
 export interface CalendarCollapseResult {
@@ -111,14 +118,21 @@ export function collapseCalendarSignals(calendarSignals: Signal<CalendarEventDat
       if (signal.id !== winner.id) superseded.add(signal.id);
     }
 
-    const enrichment: CalendarEnrichment = {};
+    // Cancellation is a property of the WINNER, not of "does a CANCEL exist somewhere in
+    // the group". A CANCEL followed by a later REQUEST (higher SEQUENCE, or same SEQUENCE
+    // with a later createdAt) reinstates the event — RFC 5546 requires SEQUENCE to increment
+    // on each revision, so orderInGroup ranks the reinstating REQUEST as the winner. The
+    // event is cancelled only when the latest state itself is a CANCEL. The winner keeps its
+    // display fields so the client can strike them through rather than blank them.
+    const winnerIsCancel = winner.data.method === "CANCEL";
+    // rsvpable is the single eligibility rule: the latest state must be a scheduling REQUEST
+    // with an organizer to reply to. A cancelled winner is a CANCEL, so it is never rsvpable.
+    const enrichment: CalendarEnrichment = {
+      rsvpable: winner.data.method.toUpperCase() === "REQUEST" && !!winner.data.organizer,
+    };
 
-    // Cancellation: any CANCEL in the group cancels the event. Use the latest CANCEL's
-    // createdAt as cancelledAt; the winner keeps its display fields so the client can
-    // strike them through rather than blank them.
-    const latestCancel = ordered.filter(s => s.data.method === "CANCEL").pop();
-    if (latestCancel) {
-      enrichment.cancelledAt = latestCancel.createdAt;
+    if (winnerIsCancel) {
+      enrichment.cancelledAt = winner.createdAt;
       if (!prior) {
         orphans.push({
           veventUid, signalId: winner.id, method: winner.data.method, sequence: winner.data.sequence,
@@ -130,7 +144,7 @@ export function collapseCalendarSignals(calendarSignals: Signal<CalendarEventDat
     // Update diff: only when the winner is an update (sequence > 0) and not a cancellation.
     // A prior snapshot in the loaded set is required to compute the diff; its absence is an
     // orphan (best-effort: emit the current values with no arrows).
-    if (!latestCancel && winner.data.sequence > 0) {
+    if (!winnerIsCancel && winner.data.sequence > 0) {
       if (prior) {
         const previousValues = diffPreviousValues(prior.data, winner.data, winner.createdAt);
         if (previousValues) enrichment.previousValues = previousValues;

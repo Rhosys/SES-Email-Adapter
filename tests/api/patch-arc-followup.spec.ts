@@ -175,7 +175,8 @@ function makeAuditDb() {
 
 function makeSchedulerClient(): { [K in keyof SchedulerClient]: ReturnType<typeof vi.fn> } {
   return {
-    createFollowup: vi.fn().mockResolvedValue(ok(undefined)),
+    createFollowupSchedule: vi.fn().mockResolvedValue(ok(undefined)),
+    createRsvpReminderSchedule: vi.fn().mockResolvedValue(ok(undefined)),
     deleteFollowup: vi.fn().mockResolvedValue(ok(undefined)),
     getSchedule: vi.fn().mockResolvedValue(ok(null)),
   };
@@ -242,7 +243,7 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
   // followupAt alone (no status change) → schedule created, arc unchanged
   // -------------------------------------------------------------------------
 
-  it("followupAt alone → schedule created, thread status unchanged", async () => {
+  it("followupAt alone → thread archived (snooze implies leaving the active list) and schedule created", async () => {
     const arc = makeThread({ status: "active" });
     threadDb.getThread.mockResolvedValue(ok(arc));
 
@@ -250,12 +251,13 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
     const res = await req(app, "PATCH", `${A}/threads/${ARC_ID}`, { body: { followupAt: futureDate } });
 
     expect(res.status).toBe(200);
-    // thread status should remain active (updateArc called with original status)
+    // Setting a future followupAt without an explicit status archives the thread so it leaves the
+    // active list; the followup wake-up reactivates it when it fires.
     expect(threadDb.updateThread).toHaveBeenCalledWith(
-      TEST_ACCOUNT_ID, ARC_ID, "active", arc.lastSignalAt, { followupAt: futureDate },
+      TEST_ACCOUNT_ID, ARC_ID, "archived", arc.lastSignalAt, { followupAt: futureDate },
     );
     // Schedule should be created
-    expect(schedulerClient.createFollowup).toHaveBeenCalledWith(
+    expect(schedulerClient.createFollowupSchedule).toHaveBeenCalledWith(
       expect.objectContaining({
         accountId: TEST_ACCOUNT_ID,
         threadId: ARC_ID,
@@ -282,7 +284,7 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
     expect(threadDb.updateThread).toHaveBeenCalledWith(
       TEST_ACCOUNT_ID, ARC_ID, "archived", arc.lastSignalAt, { followupAt: futureDate },
     );
-    expect(schedulerClient.createFollowup).toHaveBeenCalledWith(
+    expect(schedulerClient.createFollowupSchedule).toHaveBeenCalledWith(
       expect.objectContaining({
         accountId: TEST_ACCOUNT_ID,
         threadId: ARC_ID,
@@ -303,7 +305,7 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
     const res = await req(app, "PATCH", `${A}/threads/${ARC_ID}`, { body: { followupAt: pastDate } });
 
     expect(res.status).toBe(400);
-    expect(schedulerClient.createFollowup).not.toHaveBeenCalled();
+    expect(schedulerClient.createFollowupSchedule).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
@@ -324,7 +326,7 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
     const res = await req(app, "PATCH", `${A}/threads/${ARC_ID}`, { body: { followupAt: beyondRetention } });
 
     expect(res.status).toBe(400);
-    expect(schedulerClient.createFollowup).not.toHaveBeenCalled();
+    expect(schedulerClient.createFollowupSchedule).not.toHaveBeenCalled();
 
     vi.useRealTimers();
   });
@@ -336,7 +338,7 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
   it("schedule creation failure with status change → 500 and arc not mutated", async () => {
     const arc = makeThread({ status: "active" });
     threadDb.getThread.mockResolvedValue(ok(arc));
-    schedulerClient.createFollowup.mockResolvedValue(err(dbError("Scheduler API failure")));
+    schedulerClient.createFollowupSchedule.mockResolvedValue(err(dbError("Scheduler API failure")));
 
     const futureDate = new Date(Date.now() + 3600_000).toISOString();
     const res = await req(app, "PATCH", `${A}/threads/${ARC_ID}`, {
@@ -351,7 +353,7 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
   it("schedule creation failure without status change → 500, thread not mutated", async () => {
     const arc = makeThread({ status: "active" });
     threadDb.getThread.mockResolvedValue(ok(arc));
-    schedulerClient.createFollowup.mockResolvedValue(err(dbError("Scheduler throttled")));
+    schedulerClient.createFollowupSchedule.mockResolvedValue(err(dbError("Scheduler throttled")));
 
     const futureDate = new Date(Date.now() + 3600_000).toISOString();
     const res = await req(app, "PATCH", `${A}/threads/${ARC_ID}`, {
@@ -421,20 +423,20 @@ describe("PATCH /accounts/:accountId/threads/:id — followupAt handling", () =>
         expect(res.status).toBe(expectedStatus);
 
         if (expectedStatus === 400) {
-          expect(schedulerClient.createFollowup).not.toHaveBeenCalled();
+          expect(schedulerClient.createFollowupSchedule).not.toHaveBeenCalled();
           expect(signalQueue.send).not.toHaveBeenCalled();
         } else if (offsetFromNow <= 900_000) {
           // Near-future: goes through SQS delay path
           expect(signalQueue.send).toHaveBeenCalledOnce();
-          expect(schedulerClient.createFollowup).not.toHaveBeenCalled();
+          expect(schedulerClient.createFollowupSchedule).not.toHaveBeenCalled();
         } else {
           // Far-future: goes through EventBridge Scheduler
-          expect(schedulerClient.createFollowup).toHaveBeenCalledOnce();
+          expect(schedulerClient.createFollowupSchedule).toHaveBeenCalledOnce();
           expect(signalQueue.send).not.toHaveBeenCalled();
         }
 
         // Reset mock for next iteration
-        schedulerClient.createFollowup.mockClear();
+        schedulerClient.createFollowupSchedule.mockClear();
         signalQueue.send.mockClear();
         threadDb.getThread.mockClear();
         threadDb.updateThread.mockClear();

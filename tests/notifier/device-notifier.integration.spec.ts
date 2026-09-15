@@ -1,10 +1,10 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok } from "neverthrow";
-import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
+import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "../processor/_shared-new-deps.js";
-import type { ThreadMatcherPort, SqsDispatcher, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
+import type { ThreadMatcherPort, SqsDispatcher, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/incoming-email-processor.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "../processor/_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier } from "../../src/classifier/classifier.js";
@@ -213,14 +213,14 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
 
 describe("DeviceNotifier wiring: processor invokes notifier with urgency", () => {
   let notifier: Notifier;
-  let processor: SignalProcessor;
+  let processor: IncomingEmailProcessor;
   let mockLogger: MockLogger;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockLogger = createMockLogger();
     notifier = makeNotifier();
-    processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
+    processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
       ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined) } as never,
@@ -335,7 +335,7 @@ describe("DeviceNotifier wiring: handler instantiates with correct dependencies"
     expect(typeof FcmDeliverer.prototype.deliver).toBe("function");
   });
 
-  it("DeviceNotifier is a required (non-optional) field in SignalProcessorOptions", () => {
+  it("DeviceNotifier is a required (non-optional) field in IncomingEmailProcessorOptions", () => {
     // TypeScript enforces this at compile time — this test verifies at runtime
     // that the processor cannot be constructed without a notifier
     const mockLogger = createMockLogger();
@@ -344,7 +344,7 @@ describe("DeviceNotifier wiring: handler instantiates with correct dependencies"
     // At runtime, we verify the processor uses the notifier by checking
     // that processSideEffect calls it.
     const notifier = makeNotifier();
-    const processor = new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
+    const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
       ...makeSharedNewDeps(),
       ...makeStore(),
       contentSanitizer: makeContentSanitizer(), emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined) } as never,

@@ -42,7 +42,7 @@ function cal(overrides: {
 describe("collapseCalendarSignals", () => {
   it("single invite: winner with no enrichment, nothing superseded, no orphans", () => {
     const result = collapseCalendarSignals([cal({ id: "s1" })]);
-    expect(result.winners.get("s1")).toEqual({});
+    expect(result.winners.get("s1")).toEqual({ rsvpable: true });
     expect(result.superseded.size).toBe(0);
     expect(result.orphans).toEqual([]);
   });
@@ -59,6 +59,7 @@ describe("collapseCalendarSignals", () => {
     expect(result.superseded.has("s1")).toBe(true);
     expect(result.winners.has("s2")).toBe(true);
     expect(result.winners.get("s2")).toEqual({
+      rsvpable: true,
       previousValues: { changedAt: "2025-03-16T09:00:00Z", startTime: "2025-03-15T10:00:00Z" },
     });
     expect(result.orphans).toEqual([]);
@@ -69,7 +70,7 @@ describe("collapseCalendarSignals", () => {
     const update = cal({ id: "s2", sequence: 1, createdAt: "2025-03-16T09:00:00Z" }); // identical display fields
 
     const result = collapseCalendarSignals([invite, update]);
-    expect(result.winners.get("s2")).toEqual({});
+    expect(result.winners.get("s2")).toEqual({ rsvpable: true });
     expect(result.orphans).toEqual([]);
   });
 
@@ -78,7 +79,7 @@ describe("collapseCalendarSignals", () => {
 
     const result = collapseCalendarSignals([update]);
 
-    expect(result.winners.get("s2")).toEqual({});
+    expect(result.winners.get("s2")).toEqual({ rsvpable: true });
     expect(result.orphans).toEqual([
       { veventUid: "uid-1", signalId: "s2", method: "REQUEST", sequence: 3, reason: "update_without_prior" },
     ]);
@@ -91,7 +92,7 @@ describe("collapseCalendarSignals", () => {
     const result = collapseCalendarSignals([invite, cancel]);
 
     expect(result.superseded.has("s1")).toBe(true);
-    expect(result.winners.get("s2")).toEqual({ cancelledAt: "2025-03-16T09:00:00Z" });
+    expect(result.winners.get("s2")).toEqual({ rsvpable: false, cancelledAt: "2025-03-16T09:00:00Z" });
     expect(result.orphans).toEqual([]);
   });
 
@@ -100,7 +101,7 @@ describe("collapseCalendarSignals", () => {
 
     const result = collapseCalendarSignals([cancel]);
 
-    expect(result.winners.get("s2")).toEqual({ cancelledAt: "2025-03-16T09:00:00Z" });
+    expect(result.winners.get("s2")).toEqual({ rsvpable: false, cancelledAt: "2025-03-16T09:00:00Z" });
     expect(result.orphans).toEqual([
       { veventUid: "uid-1", signalId: "s2", method: "CANCEL", sequence: 0, reason: "cancellation_without_prior" },
     ]);
@@ -115,7 +116,7 @@ describe("collapseCalendarSignals", () => {
 
     expect(result.superseded.has("s1")).toBe(true);
     expect(result.superseded.has("s2")).toBe(true);
-    expect(result.winners.get("s3")).toEqual({ cancelledAt: "2025-03-17T09:00:00Z" });
+    expect(result.winners.get("s3")).toEqual({ rsvpable: false, cancelledAt: "2025-03-17T09:00:00Z" });
   });
 
   it("groups independent events by veventUid, each collapsed separately", () => {
@@ -129,6 +130,7 @@ describe("collapseCalendarSignals", () => {
     expect(result.winners.has("a2")).toBe(true);
     expect(result.winners.has("b1")).toBe(true);
     expect(result.winners.get("a2")).toEqual({
+      rsvpable: true,
       previousValues: { changedAt: "2025-03-16T09:00:00Z", location: "Room A" },
     });
     expect(result.orphans).toEqual([]);
@@ -143,7 +145,41 @@ describe("collapseCalendarSignals", () => {
     expect(result.winners.has("s2")).toBe(true);
     expect(result.superseded.has("s1")).toBe(true);
     expect(result.winners.get("s2")).toEqual({
+      rsvpable: true,
       previousValues: { changedAt: "2025-03-17T09:00:00Z", title: "Standup" },
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // Reinstatement + rsvpable: cancellation is a property of the WINNER, not of
+  // "a CANCEL exists". A later REQUEST after a CANCEL revives the event.
+  // -------------------------------------------------------------------------
+
+  it("reinstatement: a REQUEST after a CANCEL revives the event — not cancelled, rsvpable", () => {
+    const invite = cal({ id: "s1", sequence: 0, createdAt: "2025-03-15T09:00:00Z" });
+    const cancel = cal({ id: "s2", method: "CANCEL", sequence: 1, createdAt: "2025-03-16T09:00:00Z" });
+    const reinstate = cal({ id: "s3", method: "REQUEST", sequence: 2, createdAt: "2025-03-17T09:00:00Z" });
+
+    const result = collapseCalendarSignals([invite, cancel, reinstate]);
+
+    expect(result.superseded.has("s1")).toBe(true);
+    expect(result.superseded.has("s2")).toBe(true);
+    expect(result.winners.get("s3")).toEqual({ rsvpable: true });
+  });
+
+  it("rsvpable is false when the winner is a REQUEST with no organizer", () => {
+    const invite = cal({ id: "s1", sequence: 0, data: { organizer: "" } });
+
+    const result = collapseCalendarSignals([invite]);
+
+    expect(result.winners.get("s1")).toEqual({ rsvpable: false });
+  });
+
+  it("rsvpable is false for a PUBLISH winner (informational event)", () => {
+    const publish = cal({ id: "s1", method: "PUBLISH", sequence: 0, data: { organizer: "" } });
+
+    const result = collapseCalendarSignals([publish]);
+
+    expect(result.winners.get("s1")).toEqual({ rsvpable: false });
   });
 });

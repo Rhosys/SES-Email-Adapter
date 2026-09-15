@@ -1,8 +1,8 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { ok, err } from "../../src/errors.js";
-import { SignalProcessor } from "../../src/processor/processor.js";
-import type { ThreadMatcherPort, InboundSignalMessage, SqsDispatcher } from "../../src/processor/processor.js";
+import { IncomingEmailProcessor } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage, SqsDispatcher } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
@@ -113,7 +113,8 @@ function makeArcMatcher(): ThreadMatcherPort {
 
 function makeSchedulerClientMock(): { [K in keyof SchedulerClient]: ReturnType<typeof vi.fn> } {
   return {
-    createFollowup: vi.fn().mockResolvedValue(ok(undefined)),
+    createFollowupSchedule: vi.fn().mockResolvedValue(ok(undefined)),
+    createRsvpReminderSchedule: vi.fn().mockResolvedValue(ok(undefined)),
     deleteFollowup: vi.fn().mockResolvedValue(ok(undefined)),
     getSchedule: vi.fn().mockResolvedValue(ok(null)),
   };
@@ -157,7 +158,7 @@ function buildProcessor(opts: {
   contentSanitizer?: ContentSanitizerClient;
   threadMatcher?: ThreadMatcherPort;
   icsContent?: string;
-}): SignalProcessor {
+}): IncomingEmailProcessor {
   const { mockLogger, threadDb, schedulerClient, contentSanitizer, threadMatcher, icsContent } = opts;
 
   // When ICS content is provided, mock ContentStore.getObject to return the bytes
@@ -177,7 +178,7 @@ function buildProcessor(opts: {
   const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
   applyCtx(accountDb, DEFAULT_CTX);
 
-  return new SignalProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
+  return new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
     threadDb: threadDb ?? makeThreadDbMock(),
     accountDb,
     processingDb: makeProcessingDbMock(),
@@ -238,8 +239,11 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
 
       await processor.processInbound(makeMessage("msg-cal-future"), 1);
 
-      expect(schedulerClient.createFollowup).toHaveBeenCalledTimes(2);
-      const call = schedulerClient.createFollowup.mock.calls[0]![0];
+      // A REQUEST invite schedules a day-of reminder (createFollowupSchedule) and an RSVP reminder
+      // (createRsvpReminderSchedule) — one call each, on separate methods.
+      expect(schedulerClient.createFollowupSchedule).toHaveBeenCalledOnce();
+      expect(schedulerClient.createRsvpReminderSchedule).toHaveBeenCalledOnce();
+      const call = schedulerClient.createFollowupSchedule.mock.calls[0]![0];
       expect(call.accountId).toBe(TEST_ACCOUNT_ID);
       expect(call.suffix).toBe("calendar.20250715");
       // Fire time should be 08:00 UTC on the event day
@@ -267,7 +271,8 @@ describe("Feature: signal-followup-scheduler, Calendar scheduling integration", 
 
       await processor.processInbound(makeMessage("msg-cal-past"), 1);
 
-      expect(schedulerClient.createFollowup).not.toHaveBeenCalled();
+      expect(schedulerClient.createFollowupSchedule).not.toHaveBeenCalled();
+      expect(schedulerClient.createRsvpReminderSchedule).not.toHaveBeenCalled();
     });
   });
 
@@ -377,8 +382,8 @@ describe("Feature: signal-followup-scheduler, Property 4: Calendar schedule fire
 
     await processor.processInbound(makeMessage(`msg-prop4-${startTime}`), 1);
 
-    expect(schedulerClient.createFollowup).toHaveBeenCalled();
-    const call = schedulerClient.createFollowup.mock.calls[0]![0];
+    expect(schedulerClient.createFollowupSchedule).toHaveBeenCalled();
+    const call = schedulerClient.createFollowupSchedule.mock.calls[0]![0];
     expect(call.fireAt).toBe(expectedFireAt);
     expect(call.suffix).toBe(expectedSuffix);
   });
@@ -409,7 +414,8 @@ describe("Feature: signal-followup-scheduler, Property 4: Calendar schedule fire
 
     await processor.processInbound(makeMessage(`msg-prop4-past-${startTime}`), 1);
 
-    expect(schedulerClient.createFollowup).not.toHaveBeenCalled();
+    expect(schedulerClient.createFollowupSchedule).not.toHaveBeenCalled();
+    expect(schedulerClient.createRsvpReminderSchedule).not.toHaveBeenCalled();
   });
 });
 
@@ -466,8 +472,8 @@ describe("Feature: signal-followup-scheduler, Property 5: Fire time floor — ne
 
     await processor.processInbound(makeMessage(`msg-prop5-safe-${startTime}`), 1);
 
-    expect(schedulerClient.createFollowup).toHaveBeenCalled();
-    const call = schedulerClient.createFollowup.mock.calls[0]![0];
+    expect(schedulerClient.createFollowupSchedule).toHaveBeenCalled();
+    const call = schedulerClient.createFollowupSchedule.mock.calls[0]![0];
     expect(call.fireAt).toBe(expectedFireAt);
     // Verify fire time is >= now
     expect(new Date(call.fireAt).getTime()).toBeGreaterThanOrEqual(new Date(now).getTime());
@@ -500,9 +506,10 @@ describe("Feature: signal-followup-scheduler, Property 5: Fire time floor — ne
 
     await processor.processInbound(makeMessage(`msg-prop5-sameday-${startTime}`), 1);
 
-    // Schedule IS created — the implementation relies on EventBridge to fire immediately
-    expect(schedulerClient.createFollowup).toHaveBeenCalledOnce();
-    const call = schedulerClient.createFollowup.mock.calls[0]![0];
+    // Day-of schedule IS created — the implementation relies on EventBridge to fire immediately.
+    // A same-day event is within 24h, so no RSVP reminder is scheduled.
+    expect(schedulerClient.createFollowupSchedule).toHaveBeenCalledOnce();
+    const call = schedulerClient.createFollowupSchedule.mock.calls[0]![0];
     expect(call.fireAt).toBe(expectedFireAt);
   });
 
@@ -531,6 +538,7 @@ describe("Feature: signal-followup-scheduler, Property 5: Fire time floor — ne
 
     await processor.processInbound(makeMessage(`msg-prop5-past-${startTime}`), 1);
 
-    expect(schedulerClient.createFollowup).not.toHaveBeenCalled();
+    expect(schedulerClient.createFollowupSchedule).not.toHaveBeenCalled();
+    expect(schedulerClient.createRsvpReminderSchedule).not.toHaveBeenCalled();
   });
 });

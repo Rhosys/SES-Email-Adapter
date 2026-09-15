@@ -3,8 +3,8 @@ import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 import { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok, err } from "neverthrow";
-import { SignalProcessor, SYSTEM_RULES } from "../../src/processor/processor.js";
-import type { ThreadMatcherPort, InboundSignalMessage, SqsDispatcher, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/processor.js";
+import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage, SqsDispatcher, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
@@ -254,7 +254,7 @@ function makeExistingArc(overrides: Partial<Thread> = {}): Thread {
 // Validates: Requirements 1.1, 1.2, 2.1, 2.2, 3.3, 4.1, 4.2
 // ---------------------------------------------------------------------------
 
-describe("SignalProcessor integration: end-to-end retry flow", () => {
+describe("IncomingEmailProcessor integration: end-to-end retry flow", () => {
   let threadDb: ReturnType<typeof makeThreadDbMock>;
   let accountDb: ReturnType<typeof makeAccountDbMock>;
   let processingDb: ReturnType<typeof makeProcessingDbMock>;
@@ -269,7 +269,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
   let forwardingService: IForwardingService;
   let replySender: ReplySender;
   let mockLogger: MockLogger;
-  let processor: SignalProcessor;
+  let processor: IncomingEmailProcessor;
   let resourceDb: { saveResource: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
@@ -287,7 +287,7 @@ describe("SignalProcessor integration: end-to-end retry flow", () => {
     forwardingService = makeForwarder();
     replySender = makeReplySender();
     resourceDb = { saveResource: vi.fn().mockResolvedValue(ok({ status: "active" })) };
-    processor = new SignalProcessor({ resourceDb: resourceDb as never, ...makeSharedNewDeps(),
+    processor = new IncomingEmailProcessor({ resourceDb: resourceDb as never, ...makeSharedNewDeps(),
       threadDb, accountDb, processingDb,
       contentSanitizer, emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://signed-url"), getContent: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://signed-url") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://signed-url"), getContent: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://post-url", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://signed-url") } as never,
       classifier,

@@ -3,7 +3,7 @@ import type { Signal } from "../types/index.js";
 import type { DbError, Result } from "../errors.js";
 import { ok, err } from "../errors.js";
 import type { Logger } from "../logger.js";
-import type { ReplySender, ReplySendError } from "./processor.js";
+import type { ReplySender, ReplySendError } from "./incoming-email-processor.js";
 import type { DraftSendPayload } from "./draft-send-dispatcher.js";
 import { buildSignalGsi3pk } from "./message-id.js";
 import { parseHopCount } from "../email/ses-tags.js";
@@ -19,6 +19,7 @@ const PERMANENT_SEND_ERRORS = new Set<ReplySendError["kind"]>([
   "permanent_ses_error",
   "provider_send_rejected",
   "provider_send_scope_missing",
+  "from_address_unsendable",
   "invalid_argument",
   "loop_guard_tripped",
 ]);
@@ -30,6 +31,8 @@ function describeSendFailure(error: ReplySendError): string {
       return "Your connected mailbox has not granted permission to send email. Reconnect the mailbox to allow sending.";
     case "provider_send_rejected":
       return `The mail provider rejected this message: ${String(error.cause).slice(0, 256)}`;
+    case "from_address_unsendable":
+      return `This address cannot send email right now: ${error.reason.slice(0, 256)}`;
     case "permanent_ses_error":
       return `Rejected by the mail service: ${error.errorName}`;
     default:
