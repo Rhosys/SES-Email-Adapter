@@ -6,6 +6,7 @@ import { zParse } from "./validate.js";
 import { toApiThread, toApiSignal, withResolvedContentUrls } from "./signal-transforms.js";
 import { deriveGroupingKey } from "../grouping-key.js";
 import { handlePostApprovalCalendar } from "../processor/calendar/post-approval-handler.js";
+import { extractCalendarEvents } from "../processor/calendar/calendar-event-extraction.js";
 import { resolveRetention } from "../retention.js";
 import { buildActiveThread } from "../thread-factory.js";
 import { isEmailSignal } from "../types/index.js";
@@ -192,8 +193,19 @@ export class SignalsApi {
       const accountRetention = accountResult.isOk() ? accountResult.value?.retentionDuration : undefined;
       const effectiveRetention = resolveRetention(accountRetention ? { retentionDuration: accountRetention } : {}, null);
 
+      // Detect calendar attachments now (before the thread's single create/update write below)
+      // so the system:calendar label — if this signal turns out to carry one — lands in that
+      // SAME write instead of a second updateThread call to the same item right after.
+      const calendarExtraction = postApprovalCalendarDeps
+        ? await extractCalendarEvents(signal.data.attachments ?? [], postApprovalCalendarDeps.contentStore, logger)
+        : null;
+      const needsCalendarLabel = !!calendarExtraction && calendarExtraction.validEvents.length > 0;
+
       if (matchedThread) {
-        const updateResult = await threadDb.updateThread(accountId, matchedThread.id, "active", signal.data.receivedAt, { retentionDuration: effectiveRetention });
+        const labels = needsCalendarLabel && !matchedThread.labels.includes("system:calendar")
+          ? [...matchedThread.labels, "system:calendar"]
+          : undefined;
+        const updateResult = await threadDb.updateThread(accountId, matchedThread.id, "active", signal.data.receivedAt, { retentionDuration: effectiveRetention, ...(labels ? { labels } : {}) });
         if (updateResult.isErr()) { logger.error("Failed to update thread for quarantine approval.", { code: "api.quarantine_response.update_thread_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
         thread = updateResult.value;
       } else {
@@ -208,6 +220,7 @@ export class SignalsApi {
           retentionDuration: effectiveRetention,
           groupingKey: groupingKey ?? undefined,
         });
+        if (needsCalendarLabel) thread.labels = ["system:calendar"];
         const createResult = await threadDb.createThread(thread);
         if (createResult.isErr()) { logger.error("Failed to create thread for quarantine approval.", { code: "api.quarantine_response.create_thread_failed", error: createResult.error }); return err(c, 500, "Internal Server Error"); }
       }
@@ -223,7 +236,7 @@ export class SignalsApi {
       if (postApprovalCalendarDeps) {
         const approvedSignal: Signal = { ...signal, status: "active", threadId: thread.id };
         try {
-          await handlePostApprovalCalendar(approvedSignal, thread, postApprovalCalendarDeps);
+          await handlePostApprovalCalendar(approvedSignal, thread, postApprovalCalendarDeps, calendarExtraction);
         } catch (e) {
           logger.warn("Post-approval calendar handler threw unexpectedly.", {
             code: "api.quarantine_response.calendar_error",

@@ -10,13 +10,13 @@
 import { DateTime } from "luxon";
 import type { ContentStore } from "../../content-store.js";
 
-import type { Signal, Thread, Attachment } from "../../types/index.js";
+import type { Signal, Thread } from "../../types/index.js";
 import type { CalendarEventData, CalendarInviteInvalidData } from "../../types/calendar.js";
 import type { ThreadDatabase } from "../../database/thread-database.js";
 import type { AccountDatabase } from "../../database/account-database.js";
 import type { Logger } from "../../logger.js";
 import { generateId } from "../../utils/id.js";
-import { extractCalendarEvents } from "./calendar-event-extraction.js";
+import type { CalendarAttachmentExtractionResult } from "./calendar-event-extraction.js";
 import { buildCalendarSignalLookupId } from "./signal-lookup.js";
 import type { CalendarForwarder } from "./calendar-forwarder.js";
 
@@ -36,19 +36,22 @@ export interface PostApprovalCalendarHandlerDeps {
  * After a quarantined email signal is approved and placed on a thread,
  * process any .ics attachment and forward the calendar invite.
  *
+ * Takes the extraction the caller already ran (before the thread's single
+ * create/update write, so the system:calendar label could be folded into that
+ * one write instead of a second update to the same item) rather than fetching
+ * and parsing attachments itself.
+ *
  * Best-effort: failures are logged but do not fail the approval.
  */
 export async function handlePostApprovalCalendar(
   signal: Signal,
   thread: Thread,
   deps: PostApprovalCalendarHandlerDeps,
+  extraction: CalendarAttachmentExtractionResult | null,
 ): Promise<void> {
   const { threadDb, accountDb, contentStore, calendarForwarder, logger } = deps;
   const accountId = signal.accountId;
 
-  // Check for calendar attachments
-  const attachments: Attachment[] = signal.data.attachments ?? [];
-  const extraction = await extractCalendarEvents(attachments, contentStore, logger);
   if (!extraction) return;
 
   logger.trackPoint("post_approval_calendar_start", { signalId: signal.id, threadId: thread.id });
@@ -159,19 +162,8 @@ export async function handlePostApprovalCalendar(
       continue;
     }
 
-    // Apply system:calendar label to the thread (idempotent across the loop)
-    if (!thread.labels.includes("system:calendar")) {
-      thread.labels = [...thread.labels, "system:calendar"];
-      const updateResult = await threadDb.updateThread(accountId, thread.id, thread.status, thread.lastSignalAt!, { labels: thread.labels });
-      if (updateResult.isErr()) {
-        logger.warn("Post-approval calendar: failed to apply system:calendar label.", {
-          code: "processor.post_approval_calendar.label_failed",
-          accountId,
-          threadId: thread.id,
-          error: updateResult.error,
-        });
-      }
-    }
+    // system:calendar was already folded into the thread's single create/update write by the
+    // caller (signalsApi.ts, before this handler runs) — nothing to apply here.
 
     logger.info("Post-approval calendar: processed and forwarded.", {
       code: "processor.post_approval_calendar.complete",

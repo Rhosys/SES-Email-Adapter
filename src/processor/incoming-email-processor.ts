@@ -43,6 +43,7 @@ import { isReplyTargetSafe } from "./reply-target-validator.js";
 import { BillingHandler } from "../billing/billing-handler.js";
 import type { HandlerRegistry } from "../workflow/registry.js";
 import { extractCalendarEvents } from "./calendar/calendar-event-extraction.js";
+import type { CalendarAttachmentExtractionResult } from "./calendar/calendar-event-extraction.js";
 import { buildCalendarSignalLookupId } from "./calendar/signal-lookup.js";
 import { CalendarForwarder } from "./calendar/calendar-forwarder.js";
 import type { CalendarEventData, CalendarInviteInvalidData } from "../types/calendar.js";
@@ -1537,6 +1538,16 @@ export class IncomingEmailProcessor {
       if (!thread.labels.includes(label)) thread.labels = [...thread.labels, label];
     }
 
+    // Detect calendar attachments now (before the single thread write below) so the
+    // system:calendar label — if this signal turns out to carry one — lands in the SAME
+    // write as every other label/field change, instead of a second updateThread call to
+    // the same item right after. Deferred until past the block/quarantine short-circuits
+    // above so a message that never reaches the thread never pays for the S3 fetch + parse.
+    const calendarExtraction = await extractCalendarEvents(signalShell.data.attachments ?? [], this.contentStore, this.logger);
+    if (calendarExtraction && calendarExtraction.validEvents.length > 0 && !thread.labels.includes("system:calendar")) {
+      thread.labels = [...thread.labels, "system:calendar"];
+    }
+
     const signalUrgency = outcome.urgency ?? thread.urgency ?? "normal";
     if (!matchedThread) thread.urgency = signalUrgency;
 
@@ -1643,7 +1654,7 @@ export class IncomingEmailProcessor {
 
     // 12b. Calendar attachment processing — detect .ics, parse, create calendar signal
     // Unexpected exceptions propagate to the caller (SQS retry). Only IcsParseError is caught.
-    await this.processCalendarAttachment(signal, thread, accountId, ttl);
+    await this.processCalendarAttachment(signal, thread, accountId, calendarExtraction, ttl);
 
     // 13. S3 retention — best-effort (idempotent, failure means default lifecycle applies instead of plan-specific)
     await this.attemptS3Retention(signal, billingPlan, thread);
@@ -1773,26 +1784,20 @@ export class IncomingEmailProcessor {
   /**
    * Detect and process calendar (.ics) attachments on an email signal.
    *
-   * Extracts every VEVENT from every calendar attachment on the signal, collapses
-   * them by event identity (UID, or UID+RECURRENCE-ID for occurrence exceptions),
-   * and creates one calendar signal per distinct event (source: "signal",
-   * type: "calendar_event"), each with its own raw .ics stored as an S3 attachment.
-   * Applies the system:calendar label to the thread once, regardless of how many
-   * events were found.
+   * Takes the extraction the caller already ran (before the thread's single write, so the
+   * system:calendar label could be folded into that one write instead of a second update
+   * to the same item) and turns it into signals: creates one calendar signal per distinct
+   * event (source: "signal", type: "calendar_event"), each with its own raw .ics stored as
+   * an S3 attachment, plus a calendar_invite_invalid signal per rejected attachment.
    *
    * A REPLY/COUNTER attachment with no matching invite in the same batch can't be
    * turned into a full calendar_event on its own and is skipped (see
    * `collapseCalendarEvents`); a REPLY/COUNTER alongside a matching invite instead
    * updates that invite's attendee PARTSTAT.
    *
-   * On parse rejection (IcsParseError): creates a calendar_invite_invalid signal with reason,
-   * one per rejected attachment.
-   *
    * On unexpected crash: does NOT catch — lets the exception propagate so SQS retries naturally.
    */
-  private async processCalendarAttachment(signal: Signal, thread: Thread, accountId: string, ttl?: number): Promise<void> {
-    const attachments = signal.data.attachments ?? [];
-    const extraction = await extractCalendarEvents(attachments, this.contentStore, this.logger);
+  private async processCalendarAttachment(signal: Signal, thread: Thread, accountId: string, extraction: CalendarAttachmentExtractionResult | null, ttl?: number): Promise<void> {
     if (!extraction) return;
 
     for (const invalid of extraction.invalidAttachments) {
@@ -1867,14 +1872,9 @@ export class IncomingEmailProcessor {
         continue;
       }
 
-      // Apply system:calendar label to the thread (idempotent across the loop)
-      if (!thread.labels.includes("system:calendar")) {
-        thread.labels = [...thread.labels, "system:calendar"];
-        const updateResult = await this.threadDb.updateThread(accountId, thread.id, thread.status, thread.lastSignalAt!, { labels: thread.labels });
-        if (updateResult.isErr()) {
-          this.logger.warn("Failed to apply system:calendar label to thread.", { code: "processor.calendar.label_failed", signal, thread, error: updateResult.error });
-        }
-      }
+      // system:calendar was already folded into the thread's single write by the caller
+      // (see the calendarExtraction computation above the updateThread/saveThread call) —
+      // nothing to apply here.
 
       // Schedule a day-of reminder if event startTime is in the future
       if (calendarData.startTime) {
