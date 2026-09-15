@@ -43,7 +43,8 @@ import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
 import { isReplyTargetSafe } from "./reply-target-validator.js";
 import { BillingHandler } from "../billing/billing-handler.js";
 import type { HandlerRegistry } from "../workflow/registry.js";
-import { findCalendarAttachment, parseIcs } from "./calendar/ics-parser.js";
+import { extractCalendarEvents } from "./calendar/calendar-event-extraction.js";
+import type { CalendarAttachmentExtractionResult } from "./calendar/calendar-event-extraction.js";
 import { buildCalendarSignalLookupId } from "./calendar/signal-lookup.js";
 import { CalendarForwarder } from "./calendar/calendar-forwarder.js";
 import type { CalendarEventData, CalendarInviteInvalidData } from "../types/calendar.js";
@@ -1542,6 +1543,16 @@ export class IncomingEmailProcessor {
       if (!thread.labels.includes(label)) thread.labels = [...thread.labels, label];
     }
 
+    // Detect calendar attachments now (before the single thread write below) so the
+    // system:calendar label — if this signal turns out to carry one — lands in the SAME
+    // write as every other label/field change, instead of a second updateThread call to
+    // the same item right after. Deferred until past the block/quarantine short-circuits
+    // above so a message that never reaches the thread never pays for the S3 fetch + parse.
+    const calendarExtraction = await extractCalendarEvents(signalShell.data.attachments ?? [], this.contentStore, this.logger);
+    if (calendarExtraction && calendarExtraction.validEvents.length > 0 && !thread.labels.includes("system:calendar")) {
+      thread.labels = [...thread.labels, "system:calendar"];
+    }
+
     const signalUrgency = outcome.urgency ?? thread.urgency ?? "normal";
     if (!matchedThread) thread.urgency = signalUrgency;
 
@@ -1648,7 +1659,7 @@ export class IncomingEmailProcessor {
 
     // 12b. Calendar attachment processing — detect .ics, parse, create calendar signal
     // Unexpected exceptions propagate to the caller (SQS retry). Only IcsParseError is caught.
-    await this.processCalendarAttachment(signal, thread, accountId, ttl);
+    await this.processCalendarAttachment(signal, thread, accountId, calendarExtraction, ttl);
 
     // 13. S3 retention — best-effort (idempotent, failure means default lifecycle applies instead of plan-specific)
     await this.attemptS3Retention(signal, billingPlan, thread);
@@ -1778,28 +1789,23 @@ export class IncomingEmailProcessor {
   /**
    * Detect and process calendar (.ics) attachments on an email signal.
    *
-   * On valid parse: creates a calendar signal (source: "signal", type: "calendar_event"),
-   * stores raw .ics as S3 attachment, applies system:calendar label to the thread.
+   * Takes the extraction the caller already ran (before the thread's single write, so the
+   * system:calendar label could be folded into that one write instead of a second update
+   * to the same item) and turns it into signals: creates one calendar signal per distinct
+   * event (source: "signal", type: "calendar_event"), each with its own raw .ics stored as
+   * an S3 attachment, plus a calendar_invite_invalid signal per rejected attachment.
    *
-   * On parse rejection (IcsParseError): creates a calendar_invite_invalid signal with reason.
+   * A REPLY/COUNTER attachment with no matching invite in the same batch can't be
+   * turned into a full calendar_event on its own and is skipped (see
+   * `collapseCalendarEvents`); a REPLY/COUNTER alongside a matching invite instead
+   * updates that invite's attendee PARTSTAT.
    *
    * On unexpected crash: does NOT catch — lets the exception propagate so SQS retries naturally.
    */
-  private async processCalendarAttachment(signal: Signal, thread: Thread, accountId: string, ttl?: number): Promise<void> {
-    const attachments = signal.data.attachments ?? [];
-    const calendarAttachment = findCalendarAttachment(attachments, this.logger);
-    if (!calendarAttachment) return;
+  private async processCalendarAttachment(signal: Signal, thread: Thread, accountId: string, extraction: CalendarAttachmentExtractionResult | null, ttl?: number): Promise<void> {
+    if (!extraction) return;
 
-    this.logger.trackPoint("calendar_attachment_found", { filename: calendarAttachment.filename, mimeType: calendarAttachment.mimeType });
-
-    // Fetch .ics bytes from content store
-    const icsBytes = await this.contentStore.getContent(calendarAttachment.s3Key);
-
-    // Parse .ics
-    const parseResult = parseIcs(new Uint8Array(icsBytes));
-
-    if (parseResult.isErr()) {
-      // Parse rejection — create calendar_invite_invalid signal
+    for (const invalid of extraction.invalidAttachments) {
       const invalidId = generateId("sgn-");
       const invalidTimestamp = DateTime.utc().toISO()!;
       const invalidSignal: Signal<CalendarInviteInvalidData> = {
@@ -1814,7 +1820,7 @@ export class IncomingEmailProcessor {
         createdAt: invalidTimestamp,
         ...(ttl !== undefined ? { ttl } : {}),
         data: {
-          reason: parseResult.error.reason,
+          reason: invalid.reason,
           linkedSignalId: signal.id,
         },
       };
@@ -1822,131 +1828,126 @@ export class IncomingEmailProcessor {
       if (saveInvalidResult.isErr()) {
         this.logger.warn("Failed to save calendar_invite_invalid signal.", { code: "system_signal.write_failed", signal, thread, accountId, type: "calendar_invite_invalid", error: saveInvalidResult.error });
       }
-      this.logger.warn("Calendar attachment rejected by ICS parser.", { code: "processor.calendar.parse_rejected", signal, thread, reason: parseResult.error.reason });
-      return;
+      this.logger.warn("Calendar attachment rejected by ICS parser.", { code: "processor.calendar.parse_rejected", signal, thread, reason: invalid.reason, filename: invalid.attachment.filename });
     }
 
-    // Valid parse — create calendar signal
-    const { calendarData, rawIcsContent } = parseResult.value;
-    const calendarSignalId = generateId("sgn-");
-    const calendarTimestamp = DateTime.utc().toISO()!;
-    const signalLookupId = buildCalendarSignalLookupId(calendarData.organizer, calendarData.veventUid);
+    let hasCalendarForward = signal.data.matchedRules?.some(r => r.actions.some(a => a.type === "forwardCalendarInvite")) ?? false;
 
-    // The .ics ORGANIZER is optional and many transactional invites (reservations,
-    // ticket confirmations) omit it, leaving both organizer and organizerCn blank so
-    // the card has no name to show. When the email was classified as an event, fall
-    // back to the extracted event name as the display organizer. This is display-only:
-    // signalLookupId above still keys on the real (possibly empty) .ics organizer, so
-    // event-group keying stays stable across invite/update/cancel snapshots.
-    const eventNameFallback =
-      signal.data.workflowData.workflow === "events" ? signal.data.workflowData.eventName : undefined;
-    const organizerCn = calendarData.organizerCn ?? (calendarData.organizer ? undefined : eventNameFallback);
+    for (const { data: calendarData, rawIcsContent } of extraction.validEvents) {
+      const calendarSignalId = generateId("sgn-");
+      const calendarTimestamp = DateTime.utc().toISO()!;
+      const signalLookupId = buildCalendarSignalLookupId(calendarData.organizer, calendarData.veventUid, calendarData.recurrenceId);
 
-    // Store raw .ics as S3 attachment on the calendar signal
-    const icsS3Key = `content/accounts/${accountId}/calendar/${calendarSignalId}/invite.ics`;
-    await this.contentStore.saveIcsContentAsCalendar(icsS3Key, rawIcsContent);
+      // The .ics ORGANIZER is optional and many transactional invites (reservations,
+      // ticket confirmations) omit it, leaving both organizer and organizerCn blank so
+      // the card has no name to show. When the email was classified as an event, fall
+      // back to the extracted event name as the display organizer. This is display-only:
+      // signalLookupId above still keys on the real (possibly empty) .ics organizer, so
+      // event-group keying stays stable across invite/update/cancel snapshots.
+      const eventNameFallback =
+        signal.data.workflowData.workflow === "events" ? signal.data.workflowData.eventName : undefined;
+      const organizerCn = calendarData.organizerCn ?? (calendarData.organizer ? undefined : eventNameFallback);
 
-    // Build calendar signal with linkedSignalId pointing to the email signal
-    const calendarSignal: Signal<CalendarEventData> = {
-      id: calendarSignalId,
-      signalLookupId,
-      threadId: thread.id,
-      accountId,
-      source: "signal",
-      type: "calendar_event",
-      status: "active",
-      labels: [],
-      createdAt: calendarTimestamp,
-      ...(ttl !== undefined ? { ttl } : {}),
-      data: {
-        ...calendarData,
-        ...(organizerCn !== undefined ? { organizerCn } : {}),
-        linkedSignalId: signal.id,
-      },
-    };
+      // Store raw .ics as S3 attachment on the calendar signal
+      const icsS3Key = `content/accounts/${accountId}/calendar/${calendarSignalId}/invite.ics`;
+      await this.contentStore.saveIcsContentAsCalendar(icsS3Key, rawIcsContent);
 
-    const saveCalResult = await this.threadDb.saveSignal(calendarSignal);
-    if (saveCalResult.isErr()) {
-      this.logger.warn("Failed to save calendar_event signal.", { code: "system_signal.write_failed", signal, thread, accountId, type: "calendar_event", error: saveCalResult.error });
-      return;
-    }
+      // Build calendar signal with linkedSignalId pointing to the email signal
+      const calendarSignal: Signal<CalendarEventData> = {
+        id: calendarSignalId,
+        signalLookupId,
+        threadId: thread.id,
+        accountId,
+        source: "signal",
+        type: "calendar_event",
+        status: "active",
+        labels: [],
+        createdAt: calendarTimestamp,
+        ...(ttl !== undefined ? { ttl } : {}),
+        data: {
+          ...calendarData,
+          ...(organizerCn !== undefined ? { organizerCn } : {}),
+          linkedSignalId: signal.id,
+        },
+      };
 
-    // Apply system:calendar label to the thread
-    if (!thread.labels.includes("system:calendar")) {
-      thread.labels = [...thread.labels, "system:calendar"];
-      const updateResult = await this.threadDb.updateThread(accountId, thread.id, thread.status, thread.lastSignalAt!, { labels: thread.labels });
-      if (updateResult.isErr()) {
-        this.logger.warn("Failed to apply system:calendar label to thread.", { code: "processor.calendar.label_failed", signal, thread, error: updateResult.error });
+      const saveCalResult = await this.threadDb.saveSignal(calendarSignal);
+      if (saveCalResult.isErr()) {
+        this.logger.warn("Failed to save calendar_event signal.", { code: "system_signal.write_failed", signal, thread, accountId, type: "calendar_event", error: saveCalResult.error });
+        continue;
       }
-    }
 
-    // Schedule a day-of reminder if event startTime is in the future
-    if (calendarData.startTime) {
-      const eventStart = DateTime.fromISO(calendarData.startTime, { zone: "utc" });
-      const now = DateTime.utc();
-      if (eventStart.isValid && eventStart > now) {
-        const fireAt = eventStart.startOf("day").set({ hour: 8 }).toISO()!;
-        const suffix = `calendar.${eventStart.toFormat("yyyyMMdd")}`;
-        const scheduleResult = await this.schedulerClient.createFollowupSchedule({
-          accountId,
-          threadId: thread.id,
-          scheduleKeyId: calendarSignalId,
-          fireAt,
-          suffix,
-        });
-        if (scheduleResult.isErr()) {
-          this.logger.error(`Failed to create calendar day-of schedule: ${scheduleResult.error.message}`, { code: "processor.calendar.schedule_failed", signal, thread, calendarSignalId, fireAt, error: scheduleResult.error });
+      // system:calendar was already folded into the thread's single write by the caller
+      // (see the calendarExtraction computation above the updateThread/saveThread call) —
+      // nothing to apply here.
+
+      // Schedule a day-of reminder if event startTime is in the future
+      if (calendarData.startTime) {
+        const eventStart = DateTime.fromISO(calendarData.startTime, { zone: "utc" });
+        const now = DateTime.utc();
+        if (eventStart.isValid && eventStart > now) {
+          const fireAt = eventStart.startOf("day").set({ hour: 8 }).toISO()!;
+          const suffix = `calendar.${eventStart.toFormat("yyyyMMdd")}`;
+          const scheduleResult = await this.schedulerClient.createFollowupSchedule({
+            accountId,
+            threadId: thread.id,
+            scheduleKeyId: calendarSignalId,
+            fireAt,
+            suffix,
+          });
+          if (scheduleResult.isErr()) {
+            this.logger.error(`Failed to create calendar day-of schedule: ${scheduleResult.error.message}`, { code: "processor.calendar.schedule_failed", signal, thread, calendarSignalId, fireAt, error: scheduleResult.error });
+          }
         }
       }
-    }
 
-    // Schedule an RSVP reminder 24h before event start (only for REQUEST invites)
-    if (calendarData.method?.toUpperCase() === "REQUEST") {
-      if (!calendarData.startTime) {
-        this.logger.warn("Calendar REQUEST missing startTime — skipping RSVP schedule.", { code: "processor.calendar.rsvp_missing_start_time", signal, thread });
-      } else {
-        const eventStart = DateTime.fromISO(calendarData.startTime, { zone: "utc" });
-        if (!eventStart.isValid) {
-          this.logger.warn("Calendar REQUEST has invalid startTime — skipping RSVP schedule.", { code: "processor.calendar.rsvp_invalid_start_time", signal, thread, startTime: calendarData.startTime });
+      // Schedule an RSVP reminder 24h before event start (only for REQUEST invites)
+      if (calendarData.method?.toUpperCase() === "REQUEST") {
+        if (!calendarData.startTime) {
+          this.logger.warn("Calendar REQUEST missing startTime — skipping RSVP schedule.", { code: "processor.calendar.rsvp_missing_start_time", signal, thread });
         } else {
-          const now = DateTime.utc();
-          const reminderTime = eventStart.minus({ hours: RSVP_REMINDER_HOURS_BEFORE });
-          if (reminderTime > now) {
-            const fireAt = reminderTime.toISO()!;
-            const suffix = `rsvp.${eventStart.toFormat("yyyyMMdd")}`;
-            const rsvpResult = await this.schedulerClient.createRsvpReminderSchedule({
-              accountId,
-              threadId: thread.id,
-              calendarSignalId,
-              fireAt,
-              suffix,
-            });
-            if (rsvpResult.isErr()) {
-              this.logger.error(`Failed to create RSVP reminder schedule: ${rsvpResult.error.message}`, {
-                code: "processor.calendar.rsvp_schedule_failed",
-                signal, thread, calendarSignalId, fireAt,
-                error: rsvpResult.error,
+          const eventStart = DateTime.fromISO(calendarData.startTime, { zone: "utc" });
+          if (!eventStart.isValid) {
+            this.logger.warn("Calendar REQUEST has invalid startTime — skipping RSVP schedule.", { code: "processor.calendar.rsvp_invalid_start_time", signal, thread, startTime: calendarData.startTime });
+          } else {
+            const now = DateTime.utc();
+            const reminderTime = eventStart.minus({ hours: RSVP_REMINDER_HOURS_BEFORE });
+            if (reminderTime > now) {
+              const fireAt = reminderTime.toISO()!;
+              const suffix = `rsvp.${eventStart.toFormat("yyyyMMdd")}`;
+              const rsvpResult = await this.schedulerClient.createRsvpReminderSchedule({
+                accountId,
+                threadId: thread.id,
+                calendarSignalId,
+                fireAt,
+                suffix,
               });
+              if (rsvpResult.isErr()) {
+                this.logger.error(`Failed to create RSVP reminder schedule: ${rsvpResult.error.message}`, {
+                  code: "processor.calendar.rsvp_schedule_failed",
+                  signal, thread, calendarSignalId, fireAt,
+                  error: rsvpResult.error,
+                });
+              }
             }
           }
         }
       }
-    }
 
-    // Inject forwardCalendarInvite action into the signal's matchedRules so the
-    // side-effect handler triggers forwarding. The system rule (SR-19) won't match
-    // on the first signal because the label is applied after rule evaluation.
-    const existingRules = signal.data.matchedRules ?? [];
-    const hasCalendarForward = existingRules.some(r => r.actions.some(a => a.type === "forwardCalendarInvite"));
-    if (!hasCalendarForward) {
-      signal.data.matchedRules = [
-        ...existingRules,
-        { ruleId: "SR-19", actions: [{ type: "forwardCalendarInvite" }], labelsAdded: [] },
-      ];
-    }
+      // Inject forwardCalendarInvite action into the signal's matchedRules (once) so the
+      // side-effect handler triggers forwarding. The system rule (SR-19) won't match
+      // on the first signal because the label is applied after rule evaluation.
+      if (!hasCalendarForward) {
+        signal.data.matchedRules = [
+          ...(signal.data.matchedRules ?? []),
+          { ruleId: "SR-19", actions: [{ type: "forwardCalendarInvite" }], labelsAdded: [] },
+        ];
+        hasCalendarForward = true;
+      }
 
-    this.logger.info("Calendar signal created from .ics attachment.", { code: "processor.calendar.signal_created", accountId, threadId: thread.id, signalId: signal.id, calendarSignalId, method: calendarData.method, veventUid: calendarData.veventUid });
-    this.logger.trackPoint("calendar_signal_created", { calendarSignalId });
+      this.logger.info("Calendar signal created from .ics attachment.", { code: "processor.calendar.signal_created", accountId, threadId: thread.id, signalId: signal.id, calendarSignalId, method: calendarData.method, veventUid: calendarData.veventUid, recurrenceId: calendarData.recurrenceId });
+      this.logger.trackPoint("calendar_signal_created", { calendarSignalId });
+    }
   }
 
   // ---------------------------------------------------------------------------

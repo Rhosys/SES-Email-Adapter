@@ -2,6 +2,7 @@ import type { IForwardingService } from "../../../src/forwarding/forwarding-serv
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { handlePostApprovalCalendar } from "../../../src/processor/calendar/post-approval-handler.js";
 import type { PostApprovalCalendarHandlerDeps } from "../../../src/processor/calendar/post-approval-handler.js";
+import { extractCalendarEvents } from "../../../src/processor/calendar/calendar-event-extraction.js";
 import type { Signal, Thread, Attachment } from "../../../src/types/index.js";
 import type { ThreadDatabase } from "../../../src/database/thread-database.js";
 import type { AccountDatabase } from "../../../src/database/account-database.js";
@@ -140,6 +141,13 @@ function makeDeps(overrides: Partial<PostApprovalCalendarHandlerDeps> = {}): Pos
   };
 }
 
+// The extraction is now run by the caller (signalsApi.ts, before the thread's single
+// create/update write) rather than inside handlePostApprovalCalendar itself — mirror that here.
+async function runPostApprovalCalendar(signal: Signal, thread: Thread, deps: PostApprovalCalendarHandlerDeps): Promise<void> {
+  const extraction = await extractCalendarEvents(signal.data.attachments ?? [], deps.contentStore, deps.logger);
+  await handlePostApprovalCalendar(signal, thread, deps, extraction);
+}
+
 // ---------------------------------------------------------------------------
 // Tests — Requirement 16.1: Approved quarantined signal triggers forwarding
 // ---------------------------------------------------------------------------
@@ -154,7 +162,7 @@ describe("handlePostApprovalCalendar — triggers forwarding on approval", () =>
     const calendarForwarder = makeCalendarForwarder(emailService);
     const deps = makeDeps({ threadDb, accountDb, calendarForwarder });
 
-    await handlePostApprovalCalendar(signal, arc, deps);
+    await runPostApprovalCalendar(signal, arc, deps);
 
     // Calendar signal was saved
     expect(threadDb.saveSignal).toHaveBeenCalledOnce();
@@ -177,7 +185,7 @@ describe("handlePostApprovalCalendar — triggers forwarding on approval", () =>
     const threadDb = makeArcDb();
     const deps = makeDeps({ threadDb });
 
-    await handlePostApprovalCalendar(signal, arc, deps);
+    await runPostApprovalCalendar(signal, arc, deps);
 
     expect(threadDb.saveSignal).not.toHaveBeenCalled();
   });
@@ -196,7 +204,7 @@ describe("handlePostApprovalCalendar — uses same construction rules as normal 
     const accountDb = makeAccountDb("real-calendar@gmail.com");
     const deps = makeDeps({ accountDb, calendarForwarder });
 
-    await handlePostApprovalCalendar(signal, arc, deps);
+    await runPostApprovalCalendar(signal, arc, deps);
 
     const emailSend = emailService.sendRaw as ReturnType<typeof vi.fn>;
     expect(emailSend).toHaveBeenCalledOnce();
@@ -204,16 +212,18 @@ describe("handlePostApprovalCalendar — uses same construction rules as normal 
     expect(sendArgs.to).toEqual(["real-calendar@gmail.com"]);
   });
 
-  it("applies system:calendar label to the arc", async () => {
+  it("does not touch thread labels itself — the caller folds system:calendar into its own single write", async () => {
+    // signalsApi.ts computes the extraction and applies the label as part of the thread's
+    // one create/update write BEFORE calling this handler, so two separate writes to the
+    // same thread item aren't needed. See tests/api for the label-application coverage.
     const signal = makeSignal();
     const arc = makeThread({ labels: [] });
     const threadDb = makeArcDb();
     const deps = makeDeps({ threadDb });
 
-    await handlePostApprovalCalendar(signal, arc, deps);
+    await runPostApprovalCalendar(signal, arc, deps);
 
-    expect(threadDb.updateThread).toHaveBeenCalledOnce();
-    expect(arc.labels).toContain("system:calendar");
+    expect(threadDb.updateThread).not.toHaveBeenCalled();
   });
 
   it("creates calendar_invite_invalid signal when .ics is malformed", async () => {
@@ -223,7 +233,7 @@ describe("handlePostApprovalCalendar — uses same construction rules as normal 
     const contentStore = makeContentStore("NOT A VALID ICS FILE");
     const deps = makeDeps({ threadDb, contentStore });
 
-    await handlePostApprovalCalendar(signal, arc, deps);
+    await runPostApprovalCalendar(signal, arc, deps);
 
     expect(threadDb.saveSignal).toHaveBeenCalledOnce();
     const savedSignal = (threadDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0];
@@ -240,7 +250,7 @@ describe("handlePostApprovalCalendar — uses same construction rules as normal 
     const calendarForwarder = makeCalendarForwarder(emailService);
     const deps = makeDeps({ accountDb, calendarForwarder });
 
-    await handlePostApprovalCalendar(signal, arc, deps);
+    await runPostApprovalCalendar(signal, arc, deps);
 
     // Calendar signal is still created (forwarding is a separate concern)
     const threadDb = deps.threadDb as unknown as { saveSignal: ReturnType<typeof vi.fn> };
