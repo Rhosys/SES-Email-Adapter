@@ -10,6 +10,8 @@
 // sanitizer boundary (see docs/adr/011-content-sanitizer-security-boundary.md).
 // ---------------------------------------------------------------------------
 
+import { splitAddressList } from "./address.js";
+
 export interface MimeMessageOptions {
   from: string;
   to: string;
@@ -78,7 +80,7 @@ function encodeUnstructured(value: string): string {
 function encodeAddressList(value: string): string {
   const clean = sanitizeHeaderValue(value);
   if (ASCII_PRINTABLE.test(clean)) return clean;
-  return clean.split(",").map((entry) => {
+  return splitAddressList(clean).map((entry) => {
     const trimmed = entry.trim();
     const match = /^(.*?)\s*<([^>]+)>$/.exec(trimmed);
     if (!match) return ASCII_PRINTABLE.test(trimmed) ? trimmed : encodeWord(trimmed);
