@@ -32,7 +32,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
   };
 }
 
-const MESSAGE: FollowupMessage = { messageType: "signal_followup", accountId: ACCOUNT_ID, threadId: ARC_ID };
+const MESSAGE: FollowupMessage = { sqsMessageAttributeMessageType: "signal_followup", accountId: ACCOUNT_ID, threadId: ARC_ID };
 
 // ---------------------------------------------------------------------------
 // Setup

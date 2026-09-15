@@ -78,7 +78,7 @@ describe("EventBridgeSchedulerClient", () => {
       const calls = schedulerMock.commandCalls(CreateScheduleCommand);
       const targetInput = JSON.parse(calls[0]!.args[0].input.Target!.Input!);
       expect(targetInput).toEqual({
-        messageType: "signal_followup",
+        sqsMessageAttributeMessageType: "signal_followup",
         accountId: "acc-123",
         threadId: "arc-789",
       });
@@ -151,7 +151,7 @@ describe("EventBridgeSchedulerClient", () => {
       expect(calls[0]!.args[0].input.Name).toBe("acc-123.sgn-cal-evt-001.rsvp.20250802");
       const targetInput = JSON.parse(calls[0]!.args[0].input.Target!.Input!);
       expect(targetInput).toEqual({
-        messageType: "rsvp_reminder",
+        sqsMessageAttributeMessageType: "rsvp_reminder",
         accountId: "acc-123",
         threadId: "arc-789",
         calendarSignalId: "sgn-cal-evt-001",

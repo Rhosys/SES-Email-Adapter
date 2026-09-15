@@ -257,7 +257,7 @@ export class ThreadsApi {
         // EventBridge Scheduler for anything beyond that threshold.
         if (deltaMs <= 900_000) {
           const delaySeconds = Math.max(0, Math.ceil(deltaMs / 1000));
-          const sqsResult = await signalQueue.send("signal_followup", { messageType: "signal_followup", accountId, threadId: thread.id }, { delaySeconds });
+          const sqsResult = await signalQueue.send("signal_followup", { sqsMessageAttributeMessageType: "signal_followup", accountId, threadId: thread.id }, { delaySeconds });
           if (sqsResult.isErr()) {
             logger.error(`Failed to enqueue near-future followup: ${sqsResult.error.message}`, { code: "api.thread.followup_sqs_failed", error: sqsResult.error });
             return err(c, 500, "Failed to schedule followup");
