@@ -138,7 +138,7 @@ async function handlerInner(
         continue;
       }
 
-      const resolvedMessageType = record.messageAttributes?.["messageType"]?.stringValue ?? (body as { sqsMessageAttributeMessageType?: string }).sqsMessageAttributeMessageType;
+      const resolvedMessageType = record.messageAttributes?.["messageType"]?.stringValue ?? (body as { messageType?: string }).messageType;
 
       let result: Result<void, unknown>;
       try {
@@ -210,7 +210,7 @@ async function processSqsRecord(
 
   if (messageType === MSG_TYPE_RSVP_REMINDER) {
     const message = body as RsvpReminderMessage;
-    if (!message.accountId || !message.signalId || !message.threadId) {
+    if (!message.accountId || !message.calendarSignalId || !message.threadId) {
       logger.error("Malformed rsvp_reminder payload — missing required fields. Dropping message.", { code: "handler.sqs.malformed_rsvp_reminder", sqsMessageId });
       return ok(undefined);
     }

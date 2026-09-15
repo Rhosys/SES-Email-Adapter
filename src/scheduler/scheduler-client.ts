@@ -11,6 +11,8 @@ import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { buildScheduleName } from "./schedule-name.js";
+import type { FollowupMessage } from "./followup-handler.js";
+import type { RsvpReminderMessage } from "./rsvp-reminder.js";
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -19,15 +21,24 @@ import { buildScheduleName } from "./schedule-name.js";
 export interface FollowupScheduleParams {
   accountId: string;
   threadId: string;
-  /** The ID used in the schedule name — threadId for snooze (one per thread), signalId for calendar (one per event). */
+  /** ID used in the schedule name — the threadId, so there is one followup schedule per thread. */
   scheduleKeyId: string;
   fireAt: string;   // ISO 8601
   suffix: string;   // schedule name suffix
-  sqsMessageAttributeMessageType: string; // body-level routing discriminator (e.g. "signal_followup", "rsvp_reminder")
+}
+
+export interface RsvpReminderScheduleParams {
+  accountId: string;
+  threadId: string;
+  /** The calendar_event signal this reminder is for — one veventUid per signal. Also the schedule-name key. */
+  calendarSignalId: string;
+  fireAt: string;   // ISO 8601
+  suffix: string;   // schedule name suffix
 }
 
 export interface SchedulerClient {
-  createFollowup(params: FollowupScheduleParams): Promise<Result<void, DbError>>;
+  createFollowupSchedule(params: FollowupScheduleParams): Promise<Result<void, DbError>>;
+  createRsvpReminderSchedule(params: RsvpReminderScheduleParams): Promise<Result<void, DbError>>;
   deleteFollowup(scheduleName: string): Promise<Result<void, DbError>>;
   getSchedule(scheduleName: string): Promise<Result<{ name: string; scheduleExpression: string } | null, DbError>>;
 }
@@ -51,17 +62,45 @@ export class EventBridgeSchedulerClient implements SchedulerClient {
     this.logger = deps.logger;
   }
 
-  async createFollowup(params: FollowupScheduleParams): Promise<Result<void, DbError>> {
-    const scheduleName = buildScheduleName(params.accountId, params.scheduleKeyId, params.suffix);
-    const fireAt = params.fireAt.replace(/Z$/, "").replace(/\.\d+$/, "");
+  async createFollowupSchedule(params: FollowupScheduleParams): Promise<Result<void, DbError>> {
+    const payload: FollowupMessage = {
+      messageType: "signal_followup",
+      accountId: params.accountId,
+      threadId: params.threadId,
+    };
+    return this.createSchedule(params.accountId, params.scheduleKeyId, params.suffix, params.fireAt, payload);
+  }
+
+  async createRsvpReminderSchedule(params: RsvpReminderScheduleParams): Promise<Result<void, DbError>> {
+    const payload: RsvpReminderMessage = {
+      messageType: "rsvp_reminder",
+      accountId: params.accountId,
+      threadId: params.threadId,
+      calendarSignalId: params.calendarSignalId,
+    };
+    return this.createSchedule(params.accountId, params.calendarSignalId, params.suffix, params.fireAt, payload);
+  }
+
+  // Shared EventBridge Scheduler mechanics: build the one-shot schedule, and on a
+  // ConflictException (the schedule already exists — a re-snooze) update it in place.
+  private async createSchedule(
+    accountId: string,
+    scheduleKeyId: string,
+    suffix: string,
+    fireAtIso: string,
+    payload: FollowupMessage | RsvpReminderMessage,
+  ): Promise<Result<void, DbError>> {
+    const scheduleName = buildScheduleName(accountId, scheduleKeyId, suffix);
+    const fireAt = fireAtIso.replace(/Z$/, "").replace(/\.\d+$/, "");
     const scheduleExpression = `at(${fireAt})`;
+    const input = JSON.stringify(payload);
 
     this.logger.warn("CreateSchedule — expensive API call", {
       code: "scheduler.create",
       scheduleName,
-      accountId: params.accountId,
-      threadId: params.threadId,
-      fireAt: params.fireAt,
+      accountId,
+      threadId: payload.threadId,
+      fireAt: fireAtIso,
     });
 
     try {
@@ -75,11 +114,7 @@ export class EventBridgeSchedulerClient implements SchedulerClient {
         Target: {
           Arn: this.queueArn,
           RoleArn: this.roleArn,
-          Input: JSON.stringify({
-            sqsMessageAttributeMessageType: params.sqsMessageAttributeMessageType,
-            accountId: params.accountId,
-            threadId: params.threadId,
-          }),
+          Input: input,
         },
       }));
       this.logger.info("Schedule created", { code: "scheduler.created", scheduleName });
@@ -98,11 +133,7 @@ export class EventBridgeSchedulerClient implements SchedulerClient {
             Target: {
               Arn: this.queueArn,
               RoleArn: this.roleArn,
-              Input: JSON.stringify({
-                sqsMessageAttributeMessageType: params.sqsMessageAttributeMessageType,
-                accountId: params.accountId,
-                threadId: params.threadId,
-              }),
+              Input: input,
             },
           }));
           this.logger.info("Schedule updated (re-snooze)", { code: "scheduler.updated", scheduleName });

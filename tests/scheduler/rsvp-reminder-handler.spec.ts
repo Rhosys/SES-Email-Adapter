@@ -24,7 +24,7 @@ const FUTURE_START = "2099-07-15T14:00:00Z";
 /** A start time guaranteed to be in the past (year 2020). */
 const PAST_START = "2020-01-01T08:00:00Z";
 
-const MESSAGE: RsvpReminderMessage = { accountId: ACCOUNT_ID, signalId: SIGNAL_ID, threadId: ARC_ID };
+const MESSAGE: RsvpReminderMessage = { messageType: "rsvp_reminder", accountId: ACCOUNT_ID, calendarSignalId: SIGNAL_ID, threadId: ARC_ID };
 
 function makeCalendarSignal(overrides: Partial<{ startTime: string; veventUid: string }> = {}): Signal {
   const data: CalendarEventData = {
@@ -106,7 +106,7 @@ function setup() {
 
 describe("RsvpReminderHandler", () => {
   describe("Property 2: Fire-time notification decision", () => {
-    it("Row 1: signal missing → discard (TRACK signal_missing)", async () => {
+    it("Row 1: signal missing → discard (ERROR signal_missing)", async () => {
       const { handler, threadDb, notifier, logger } = setup();
       threadDb.getSignalById.mockResolvedValue(ok(null));
 
@@ -116,9 +116,10 @@ describe("RsvpReminderHandler", () => {
       expect(threadDb.getLatestCalendarResponse).not.toHaveBeenCalled();
       expect(notifier.notify).not.toHaveBeenCalled();
 
-      const trackCalls = logger.calls.filter((c) => c.method === "track");
-      expect(trackCalls).toHaveLength(1);
-      expect(trackCalls[0]!.context).toMatchObject({ code: "rsvp_reminder.signal_missing" });
+      // A scheduled reminder pointing at a missing calendar signal is a data-integrity fault, not a benign discard.
+      const errorCalls = logger.calls.filter((c) => c.method === "error");
+      expect(errorCalls).toHaveLength(1);
+      expect(errorCalls[0]!.context).toMatchObject({ code: "rsvp_reminder.signal_missing" });
     });
 
     it("Row 2: event passed → discard (TRACK event_passed)", async () => {

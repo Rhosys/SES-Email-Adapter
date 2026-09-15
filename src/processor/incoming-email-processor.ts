@@ -1882,13 +1882,12 @@ export class IncomingEmailProcessor {
       if (eventStart.isValid && eventStart > now) {
         const fireAt = eventStart.startOf("day").set({ hour: 8 }).toISO()!;
         const suffix = `calendar.${eventStart.toFormat("yyyyMMdd")}`;
-        const scheduleResult = await this.schedulerClient.createFollowup({
+        const scheduleResult = await this.schedulerClient.createFollowupSchedule({
           accountId,
           threadId: thread.id,
           scheduleKeyId: calendarSignalId,
           fireAt,
           suffix,
-          sqsMessageAttributeMessageType: "signal_followup",
         });
         if (scheduleResult.isErr()) {
           this.logger.error(`Failed to create calendar day-of schedule: ${scheduleResult.error.message}`, { code: "processor.calendar.schedule_failed", signal, thread, calendarSignalId, fireAt, error: scheduleResult.error });
@@ -1910,13 +1909,12 @@ export class IncomingEmailProcessor {
           if (reminderTime > now) {
             const fireAt = reminderTime.toISO()!;
             const suffix = `rsvp.${eventStart.toFormat("yyyyMMdd")}`;
-            const rsvpResult = await this.schedulerClient.createFollowup({
+            const rsvpResult = await this.schedulerClient.createRsvpReminderSchedule({
               accountId,
               threadId: thread.id,
-              scheduleKeyId: calendarSignalId,
+              calendarSignalId,
               fireAt,
               suffix,
-              sqsMessageAttributeMessageType: "rsvp_reminder",
             });
             if (rsvpResult.isErr()) {
               this.logger.error(`Failed to create RSVP reminder schedule: ${rsvpResult.error.message}`, {
