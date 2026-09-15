@@ -4,16 +4,21 @@
 // A message addressed to {threadId}@{accountId}.{serviceDomain} is NOT a normal
 // inbound email: it is an RSVP to an invite WE forwarded, coming back from the
 // attendee's calendar app. It creates no email signal, has no classification, no
-// thread-matching. Its job is narrow: fetch the raw message, pull the .ics (MIME
-// parsing delegated to MailparserMimeParser, outside this boundary per ADR 011), ask
-// CalendarForwarder to validate it (stateless: METHOD:REPLY + PARTSTAT + proxy-UID
-// HMAC), then — only on success — look up the thread, relay the RSVP back to the
-// organizer under the alias, and record a calendar_response signal.
+// thread-matching. Its job is narrow: fetch the raw message, pull every .ics part
+// on it (MIME parsing delegated to MailparserMimeParser, outside this boundary per
+// ADR 011 — a forwarding client can bundle more than one calendar attachment onto a
+// single message, e.g. an assistant relaying several attendees' replies together),
+// and process each independently: ask CalendarForwarder to validate it (stateless:
+// METHOD:REPLY + PARTSTAT + proxy-UID HMAC), then — only on success — look up the
+// thread, relay the RSVP back to the organizer under the alias, and record a
+// calendar_response signal.
 //
 // Every failure short of that resolves to ok(undefined) with a WARN: a message
 // that reached this address but isn't a processable RSVP (no .ics, unparseable,
 // wrong METHOD, forged HMAC, unknown thread) is dropped silently, never retried,
-// never turned into a signal. Only genuine infrastructure errors (S3/DB) return err.
+// never turned into a signal. Every attachment is still attempted even if one hits a
+// genuine infrastructure error (S3/DB) — only after all have run does the first such
+// error get returned as err, so a single failure never stops the rest from being relayed.
 // ---------------------------------------------------------------------------
 
 import { DateTime } from "luxon";
@@ -70,9 +75,13 @@ export class IncomingCalendarRsvpProcessor {
   async process(msg: InboundSignalMessage): Promise<Result<void, DbError | EmailServiceError>> {
     const recipient = msg.destination[0] ?? "";
 
-    // --- 1. Fetch raw MIME + extract the .ics part ---
-    const icsBytes = await this.extractIcsBytes(msg.s3Key);
-    if (!icsBytes) {
+    // --- 1. Fetch raw MIME + extract every .ics part ---
+    // A forwarding calendar client can bundle more than one calendar attachment onto a
+    // single message (e.g. an assistant relaying several attendees' replies together, or
+    // a client that restates the invite alongside the reply) — process each independently
+    // so none are silently dropped.
+    const icsAttachments = await this.extractIcsAttachments(msg.s3Key);
+    if (icsAttachments.length === 0) {
       this.logger.warn("Calendar RSVP: no calendar attachment on message — dropping.", {
         code: "processor.calendar_response.no_ics",
         recipient,
@@ -81,6 +90,34 @@ export class IncomingCalendarRsvpProcessor {
       return ok(undefined);
     }
 
+    // Attempt every attachment even if one hits a genuine infra error — a bundled message
+    // might carry several attendees' replies, and one DB/send failure shouldn't stop the
+    // rest from being relayed and recorded. Every failure is logged as it happens (so none
+    // are lost even though only the first is returned); the first error is surfaced only
+    // after all attachments have been attempted, so SQS retries the whole message.
+    let firstError: DbError | EmailServiceError | undefined;
+    for (const icsBytes of icsAttachments) {
+      const result = await this.processOneIcs(icsBytes, recipient);
+      if (result.isErr()) {
+        // TransientSesError carries no `message` field, so log the whole typed error rather
+        // than interpolate one that might not exist.
+        this.logger.error("Calendar RSVP: failed to process attachment.", {
+          code: "processor.calendar_response.attachment_failed",
+          recipient,
+          compositeMailMessageId: msg.compositeMailMessageId,
+          error: result.error,
+        });
+        if (!firstError) firstError = result.error;
+      }
+    }
+    if (firstError) return err(firstError);
+    return ok(undefined);
+  }
+
+  private async processOneIcs(
+    icsBytes: Uint8Array,
+    recipient: string,
+  ): Promise<Result<void, DbError | EmailServiceError>> {
     // --- 2. Parse the .ics ---
     const parseResult = parseIcs(icsBytes);
     if (parseResult.isErr()) {
@@ -184,12 +221,12 @@ export class IncomingCalendarRsvpProcessor {
   }
 
   /**
-   * Fetch the raw inbound MIME from S3 and return the bytes of its first
-   * text/calendar (or .ics) part, or null when none is present. MIME parsing lives
-   * in MailparserMimeParser (outside src/processor/) per ADR 011.
+   * Fetch the raw inbound MIME from S3 and return the bytes of every
+   * text/calendar (or .ics) part present. MIME parsing lives in
+   * MailparserMimeParser (outside src/processor/) per ADR 011.
    */
-  private async extractIcsBytes(s3Key: string): Promise<Uint8Array | null> {
+  private async extractIcsAttachments(s3Key: string): Promise<Uint8Array[]> {
     const rawMime = await this.emailContentStore.getRawEmail(s3Key);
-    return this.mimeParser.extractCalendarAttachment(Buffer.from(rawMime));
+    return this.mimeParser.extractCalendarAttachments(Buffer.from(rawMime));
   }
 }

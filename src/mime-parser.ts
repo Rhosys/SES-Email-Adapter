@@ -68,13 +68,27 @@ export class MailparserMimeParser {
    * keeps the attachment content (parse() deliberately discards it).
    */
   async extractCalendarAttachment(rawEmail: Buffer | string): Promise<Uint8Array | null> {
+    const attachments = await this.extractCalendarAttachments(rawEmail);
+    return attachments[0] ?? null;
+  }
+
+  /**
+   * Extract the raw bytes of EVERY calendar (text/calendar or .ics) attachment on a
+   * raw MIME message. A forwarding calendar client (an assistant relaying several
+   * attendees' RSVPs, or a client that bundles the reply alongside a restated
+   * invite) can deliver more than one calendar part on a single message — the
+   * single-attachment extractCalendarAttachment() would silently process only the
+   * first and drop the rest. Order matches attachment order in the message.
+   */
+  async extractCalendarAttachments(rawEmail: Buffer | string): Promise<Uint8Array[]> {
     const parsed = await simpleParser(rawEmail);
+    const calendarAttachments: Uint8Array[] = [];
     for (const attachment of parsed.attachments) {
       const isCalendar =
         attachment.contentType.toLowerCase().startsWith("text/calendar") ||
         (attachment.filename?.toLowerCase().endsWith(".ics") ?? false);
-      if (isCalendar) return new Uint8Array(attachment.content);
+      if (isCalendar) calendarAttachments.push(new Uint8Array(attachment.content));
     }
-    return null;
+    return calendarAttachments;
   }
 }

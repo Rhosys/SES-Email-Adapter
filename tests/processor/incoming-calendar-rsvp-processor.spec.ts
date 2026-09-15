@@ -9,7 +9,7 @@ import { buildProxyUid as buildProxyUidRaw } from "../../src/processor/calendar/
 import { generateId, generateAccountId } from "../../src/utils/id.js";
 import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
-import { ok } from "../../src/errors.js";
+import { ok, err, dbError } from "../../src/errors.js";
 import type { Signal, CalendarResponseData } from "../../src/types/index.js";
 import type { CalendarEventData } from "../../src/types/calendar.js";
 
@@ -71,6 +71,62 @@ function rawRsvpEmail(opts: { proxyUid: string; method?: string; partstat?: stri
     'Content-Disposition: attachment; filename="invite.ics"',
     "",
     ics,
+    "",
+    `--${boundary}--`,
+    "",
+  ].join("\r\n");
+  return new Uint8Array(Buffer.from(message, "utf8"));
+}
+
+/**
+ * A forwarded digest: two independent REPLY .ics attachments on one message (e.g. an
+ * assistant relaying two attendees' RSVPs together). Each is a full, independently
+ * valid multipart calendar part with its own proxy UID.
+ */
+function rawMultiRsvpEmail(opts: { proxyUidA: string; proxyUidB: string }): Uint8Array {
+  const buildIcsPart = (proxyUid: string, partstat: string) => [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Test//Test//EN",
+    "METHOD:REPLY",
+    "BEGIN:VEVENT",
+    `UID:${proxyUid}`,
+    "SEQUENCE:1",
+    "DTSTART:20250315T100000Z",
+    "DTEND:20250315T110000Z",
+    "SUMMARY:Team Standup",
+    `ORGANIZER;CN=Alice Smith:mailto:${ORGANIZER}`,
+    `ATTENDEE;PARTSTAT=${partstat}:mailto:${RECIPIENT}`,
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
+
+  const boundary = "mixed_boundary_multi";
+  const message = [
+    `From: ${ORGANIZER}`,
+    `To: ${RECIPIENT}`,
+    "Subject: Re: Team Standup (forwarded replies)",
+    "MIME-Version: 1.0",
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=UTF-8",
+    "",
+    "Forwarding both replies.",
+    "",
+    `--${boundary}`,
+    'Content-Type: text/calendar; method=REPLY; charset=UTF-8; name="reply-a.ics"',
+    "Content-Transfer-Encoding: 7bit",
+    'Content-Disposition: attachment; filename="reply-a.ics"',
+    "",
+    buildIcsPart(opts.proxyUidA, "ACCEPTED"),
+    "",
+    `--${boundary}`,
+    'Content-Type: text/calendar; method=REPLY; charset=UTF-8; name="reply-b.ics"',
+    "Content-Transfer-Encoding: 7bit",
+    'Content-Disposition: attachment; filename="reply-b.ics"',
+    "",
+    buildIcsPart(opts.proxyUidB, "DECLINED"),
     "",
     `--${boundary}--`,
     "",
@@ -199,6 +255,114 @@ describe("IncomingCalendarRsvpProcessor — happy path", () => {
     expect(saved.accountId).toBe(VALID_ACC_ID);
     expect(saved.data.decision).toBe("accepted");
     expect(saved.data.veventUid).toBe(ORIGINAL_UID);
+  });
+
+  it("records a second, separate RSVP-reply email for the same event as its own signal (a changed mind, not a duplicate)", async () => {
+    // Two DISTINCT inbound emails (their own S3 key / SQS message in production) for the SAME
+    // event and attendee — e.g. the user accepted, then later declined from their calendar app.
+    // Each is its own process() call; there is no per-event idempotency that would drop the
+    // second because "we already have a response for this veventUid". recordRsvpResponse is
+    // append-only (see rsvp-response-recorder.ts) and getLatestCalendarResponse resolves
+    // "current" by max(respondedAt), so both must be saved and the later one must win on read.
+    const proxyUid = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
+    const emailService = { sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })) } as unknown as EmailService;
+    const threadStore = makeThreadStore();
+    const forwarder = makeForwarder(emailService);
+    const logger = createMockLogger();
+    const processor = new IncomingCalendarRsvpProcessor({
+      emailContentStore: makeContentStore(rawRsvpEmail({ proxyUid, partstat: "ACCEPTED" })),
+      calendarForwarder: forwarder,
+      threadStore,
+      logger,
+    });
+
+    const firstResult = await processor.process(makeMessage());
+    expect(firstResult.isOk()).toBe(true);
+
+    // A later, separate email arrives changing the decision — same event, same attendee.
+    const laterProcessor = new IncomingCalendarRsvpProcessor({
+      emailContentStore: makeContentStore(rawRsvpEmail({ proxyUid, partstat: "DECLINED" })),
+      calendarForwarder: forwarder,
+      threadStore,
+      logger,
+    });
+    const secondResult = await laterProcessor.process(makeMessage());
+    expect(secondResult.isOk()).toBe(true);
+
+    // Both were relayed to the organizer and both were recorded — nothing was dropped as a dupe.
+    expect(emailService.sendRaw).toHaveBeenCalledTimes(2);
+    const saveCalls = (threadStore.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
+    expect(saveCalls).toHaveLength(2);
+    const decisions = saveCalls.map((call) => (call[0] as Signal<CalendarResponseData>).data.decision);
+    expect(decisions).toEqual(["accepted", "declined"]);
+    // Both signals share the same veventUid — same event, two records in its RSVP history.
+    expect(saveCalls.every((call) => (call[0] as Signal<CalendarResponseData>).data.veventUid === ORIGINAL_UID)).toBe(true);
+  });
+
+  it("processes every calendar attachment on a message that bundles multiple replies", async () => {
+    const proxyUidA = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
+    const proxyUidB = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
+    const emailService = { sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })) } as unknown as EmailService;
+    const { processor, threadStore } = makeProcessor({
+      raw: rawMultiRsvpEmail({ proxyUidA, proxyUidB }),
+      forwarder: makeForwarder(emailService),
+    });
+
+    const result = await processor.process(makeMessage());
+
+    expect(result.isOk()).toBe(true);
+    expect(emailService.sendRaw).toHaveBeenCalledTimes(2);
+
+    const saveCalls = (threadStore.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
+    expect(saveCalls).toHaveLength(2);
+    const decisions = saveCalls.map((call) => (call[0] as Signal<CalendarResponseData>).data.decision);
+    expect(decisions).toEqual(["accepted", "declined"]);
+  });
+
+  it("still attempts every attachment when an earlier one hits an infra error, surfacing the error only at the end", async () => {
+    const proxyUidA = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
+    const proxyUidB = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
+    const emailService = { sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })) } as unknown as EmailService;
+    const saveSignal = vi.fn()
+      .mockResolvedValueOnce(err(dbError(new Error("write failed"))))
+      .mockResolvedValueOnce(ok(undefined));
+    const threadStore = makeThreadStore({ saveSignal });
+    const { processor } = makeProcessor({
+      raw: rawMultiRsvpEmail({ proxyUidA, proxyUidB }),
+      forwarder: makeForwarder(emailService),
+      threadStore,
+    });
+
+    const result = await processor.process(makeMessage());
+
+    // Both attachments were relayed and both attempted to save, even though the first failed.
+    expect(emailService.sendRaw).toHaveBeenCalledTimes(2);
+    expect(saveSignal).toHaveBeenCalledTimes(2);
+    // The (first) error is only surfaced once every attachment has been attempted.
+    expect(result.isErr()).toBe(true);
+  });
+
+  it("logs every failed attachment, not only the one surfaced as the returned error", async () => {
+    const proxyUidA = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
+    const proxyUidB = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
+    const emailService = { sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })) } as unknown as EmailService;
+    // BOTH attachments fail to save — only returning the first error must not mean the
+    // second failure goes unlogged and silently disappears.
+    const saveSignal = vi.fn()
+      .mockResolvedValueOnce(err(dbError(new Error("write failed A"))))
+      .mockResolvedValueOnce(err(dbError(new Error("write failed B"))));
+    const threadStore = makeThreadStore({ saveSignal });
+    const { processor, logger } = makeProcessor({
+      raw: rawMultiRsvpEmail({ proxyUidA, proxyUidB }),
+      forwarder: makeForwarder(emailService),
+      threadStore,
+    });
+
+    const result = await processor.process(makeMessage());
+
+    expect(result.isErr()).toBe(true);
+    const failureLogs = logger.calls.filter(c => c.method === "error" && c.context?.code === "processor.calendar_response.attachment_failed");
+    expect(failureLogs).toHaveLength(2);
   });
 });
 
