@@ -32,6 +32,7 @@ function makeSignal(overrides: { data?: Partial<Signal["data"]> } & Partial<Omit
       from: { address: "me@example.com" },
       to: [{ address: "recipient@example.com" }],
       cc: [],
+      bcc: [],
       subject: "Hello",
       textBody: "Hi there",
       attachments: [],
@@ -114,8 +115,8 @@ describe("DraftSendWorker", () => {
 
     expect(result.isOk()).toBe(true);
     expect(replySender.sendReply).toHaveBeenCalledWith({
-      to: ["recipient@example.com"],
-      from: "me@example.com",
+      to: [{ address: "recipient@example.com" }],
+      from: { address: "me@example.com" },
       subject: "Hello",
       body: "Hi there",
       accountId: "acct-001",
@@ -187,17 +188,42 @@ describe("DraftSendWorker", () => {
     });
   });
 
-  it("passes multiple recipients as separate addresses in the to field", async () => {
+  it("passes all recipients through to the reply sender as separate entries, names included", async () => {
     vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({
-      data: { to: [{ address: "a@example.com" }, { address: "b@example.com" }] },
+      data: { to: [{ address: "a@example.com", name: "Ada" }, { address: "b@example.com" }] },
     })));
 
     const result = await worker.process(PAYLOAD);
 
     expect(result.isOk()).toBe(true);
     expect(replySender.sendReply).toHaveBeenCalledWith(
-      expect.objectContaining({ to: ["a@example.com", "b@example.com"] }),
+      expect.objectContaining({ to: [{ address: "a@example.com", name: "Ada" }, { address: "b@example.com" }] }),
     );
+  });
+
+  it("passes cc and bcc through to the reply sender when the draft has them", async () => {
+    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({
+      data: {
+        cc: [{ address: "cc@example.com", name: "Cc Person" }],
+        bcc: [{ address: "bcc@example.com" }],
+      },
+    })));
+
+    const result = await worker.process(PAYLOAD);
+
+    expect(result.isOk()).toBe(true);
+    expect(replySender.sendReply).toHaveBeenCalledWith(expect.objectContaining({
+      cc: [{ address: "cc@example.com", name: "Cc Person" }],
+      bcc: [{ address: "bcc@example.com" }],
+    }));
+  });
+
+  it("omits cc and bcc from the reply-sender call when the draft has none", async () => {
+    const result = await worker.process(PAYLOAD);
+
+    expect(result.isOk()).toBe(true);
+    expect(replySender.sendReply).toHaveBeenCalledWith(expect.not.objectContaining({ cc: expect.anything() }));
+    expect(replySender.sendReply).toHaveBeenCalledWith(expect.not.objectContaining({ bcc: expect.anything() }));
   });
 
   it("returns err on transient SES error so SQS retries", async () => {

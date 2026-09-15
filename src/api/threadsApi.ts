@@ -227,7 +227,10 @@ export class ThreadsApi {
       if (body.urgency !== undefined) fields.urgency = body.urgency;
       if (body.labels !== undefined) fields.labels = body.labels;
       if (body.followupAt !== undefined) fields.followupAt = body.followupAt;
-      const status = body.status ?? thread.status;
+      // A followup (snooze) implies the thread should leave the active list. Unless the caller
+      // explicitly sets a status, setting a future followupAt archives the thread; the followup
+      // wake-up reactivates it when it fires.
+      const status = body.status ?? (body.followupAt ? "archived" : thread.status);
       const lastSignalAt = body.lastSignalAt ?? thread.lastSignalAt;
 
       if (body.followupAt) {
@@ -243,7 +246,7 @@ export class ThreadsApi {
         }
       }
 
-      const statusChanged = body.status !== undefined && body.status !== thread.status;
+      const statusChanged = status !== thread.status;
 
       if (body.followupAt) {
         const followupTime = new Date(body.followupAt).getTime();
@@ -254,15 +257,15 @@ export class ThreadsApi {
         // EventBridge Scheduler for anything beyond that threshold.
         if (deltaMs <= 900_000) {
           const delaySeconds = Math.max(0, Math.ceil(deltaMs / 1000));
-          const sqsResult = await signalQueue.send("signal_followup", { accountId, threadId: thread.id }, { delaySeconds });
+          const sqsResult = await signalQueue.send("signal_followup", { sqsMessageAttributeMessageType: "signal_followup", accountId, threadId: thread.id }, { delaySeconds });
           if (sqsResult.isErr()) {
             logger.error(`Failed to enqueue near-future followup: ${sqsResult.error.message}`, { code: "api.thread.followup_sqs_failed", error: sqsResult.error });
             return err(c, 500, "Failed to schedule followup");
           }
         } else {
-          const scheduleResult = await schedulerClient.createFollowup({
+          const scheduleResult = await schedulerClient.createFollowupSchedule({
             accountId, threadId: thread.id, scheduleKeyId: thread.id, fireAt: body.followupAt,
-            suffix: "followup", sqsMessageAttributeMessageType: "signal_followup",
+            suffix: "followup",
           });
           if (scheduleResult.isErr()) {
             logger.error(`Failed to create followup schedule: ${scheduleResult.error.message}`, { code: "api.thread.followup_schedule_failed", error: scheduleResult.error });

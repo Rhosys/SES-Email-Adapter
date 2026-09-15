@@ -534,6 +534,172 @@ describe("coerceWorkflowData", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Date fields — real-world formats seen in production TRACK logs, currently
+  // nullified. TDD: these must parse (no TRACK log) once implemented.
+  // -------------------------------------------------------------------------
+
+  describe("date fields — production formats currently unparseable", () => {
+    const travelCtx = { ...ctx, workflow: "travel" };
+    const base = { workflow: "travel", travelType: "flight", provider: "Swiss" };
+
+    it("parses an ordinal day with year: 'February 3rd, 2027'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "February 3rd, 2027" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBe("2027-02-03");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses an ordinal day without year: 'September 10th'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "September 10th" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBe("2025-09-10");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses a comma-separated dotted time: 'Oct 27, 2026, 18.30'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "Oct 27, 2026, 18.30" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBe("2026-10-27T18:30");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses a comma-separated dotted time: 'Oct 27, 2026, 09.00'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "Oct 27, 2026, 09.00" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBe("2026-10-27T09:00");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses 'Sept' month abbreviation with a trailing zone abbreviation: 'Wednesday, 30 Sept 2026 18:00 (CEST)'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "Wednesday, 30 Sept 2026 18:00 (CEST)" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBe("2026-09-30T18:00");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses 'Sept' month abbreviation with a trailing zone abbreviation: 'Wednesday, 30 Sept 2026 21:00 (CEST)'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "Wednesday, 30 Sept 2026 21:00 (CEST)" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBe("2026-09-30T21:00");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Date fields — non-English ordinal suffixes and trailing time connectors,
+  // closing the locale coverage gap flagged in review on PR #109.
+  // -------------------------------------------------------------------------
+
+  describe("date fields — non-English ordinal suffixes and time connectors", () => {
+    const travelCtx = { ...ctx, workflow: "travel" };
+    const base = { workflow: "travel", travelType: "flight", provider: "Swiss" };
+
+    it("parses a French ordinal day: '1er février 2027'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "1er février 2027" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["fr"], "skip");
+      expect(result.departureDate).toBe("2027-02-01");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses a French trailing time connector 'à': '1 février 2027 à 18:00'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "1 février 2027 à 18:00" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["fr"], "skip");
+      expect(result.departureDate).toBe("2027-02-01T18:00");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses a German ordinal-period day: '3. Januar 2027'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "3. Januar 2027" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["de"], "skip");
+      expect(result.departureDate).toBe("2027-01-03");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses a German trailing time connector 'um': '3 Januar 2027 um 18:00'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "3 Januar 2027 um 18:00" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["de"], "skip");
+      expect(result.departureDate).toBe("2027-01-03T18:00");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses a Dutch ordinal day: '3e januari 2027' (only stripped when 'nl' is hinted)", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "3e januari 2027" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["nl"], "skip");
+      expect(result.departureDate).toBe("2027-01-03");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+
+    it("parses a Dutch trailing time connector 'om': '3 januari 2027 om 18:00'", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "3 januari 2027 om 18:00" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["nl"], "skip");
+      expect(result.departureDate).toBe("2027-01-03T18:00");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Date fields — TRACK coverage-gap signal for locale hints we don't yet
+  // support (outside DATE_CONNECTORS_BY_LANG's en/de/fr/es/it/nl). Lets
+  // production TRACK logs tell us which locale to add next, the same way
+  // this file's own fr/de/nl support was originally discovered.
+  // -------------------------------------------------------------------------
+
+  describe("date fields — unsupported locale hint coverage signal", () => {
+    const travelCtx = { ...ctx, workflow: "travel" };
+    const base = { workflow: "travel", travelType: "flight", provider: "Swiss" };
+
+    it("unparseable date with an unsupported locale hint → TRACK names the unsupported locale", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "not a date at all" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["pl"], "skip");
+      expect(result.departureDate).toBeNull();
+
+      const track = logger.calls.find(c => c.method === "track");
+      expect(track).toBeDefined();
+      expect(track!.context).toEqual(expect.objectContaining({
+        code: "classifier.date_parse_failed",
+        field: "departureDate",
+        unsupportedLocaleHints: ["pl"],
+      }));
+    });
+
+    it("unparseable date with a mix of supported and unsupported hints → only the unsupported ones are named", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "not a date at all" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["de", "pl"], "skip");
+      expect(result.departureDate).toBeNull();
+
+      const track = logger.calls.find(c => c.method === "track");
+      expect(track!.context).toEqual(expect.objectContaining({
+        unsupportedLocaleHints: ["pl"],
+      }));
+    });
+
+    it("unparseable date with only supported locale hints → no unsupportedLocaleHints field", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "not a date at all" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["de"], "skip");
+      expect(result.departureDate).toBeNull();
+
+      const track = logger.calls.find(c => c.method === "track");
+      expect(track!.context).not.toHaveProperty("unsupportedLocaleHints");
+    });
+
+    it("unparseable date with no locale hints → no unsupportedLocaleHints field", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "not a date at all" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBeNull();
+
+      const track = logger.calls.find(c => c.method === "track");
+      expect(track!.context).not.toHaveProperty("unsupportedLocaleHints");
+    });
+
+    it("successfully parsed date with an unsupported locale hint → no TRACK at all", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "February 3rd, 2027" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["pl"], "skip");
+      expect(result.departureDate).toBe("2027-02-03");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // isAmbiguousSlashSkip predicate
   // -------------------------------------------------------------------------
 

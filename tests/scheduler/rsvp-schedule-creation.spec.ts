@@ -88,7 +88,8 @@ function makeContentSanitizer(): ContentSanitizerClient {
 
 function makeSchedulerClientMock(): { [K in keyof SchedulerClient]: ReturnType<typeof vi.fn> } {
   return {
-    createFollowup: vi.fn().mockResolvedValue(ok(undefined)),
+    createFollowupSchedule: vi.fn().mockResolvedValue(ok(undefined)),
+    createRsvpReminderSchedule: vi.fn().mockResolvedValue(ok(undefined)),
     deleteFollowup: vi.fn().mockResolvedValue(ok(undefined)),
     getSchedule: vi.fn().mockResolvedValue(ok(null)),
   };
@@ -225,15 +226,12 @@ describe("Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation gu
       expect(result.isOk(), `processInbound failed: ${result.isErr() ? (result.error as { message?: string }).message ?? result.error.kind : ""}`).toBe(true);
 
       // Find the RSVP schedule creation call (suffix starts with "rsvp.")
-      const rsvpCalls = schedulerClient.createFollowup.mock.calls.filter(
-        (c: Array<{ suffix: string }>) => c[0]!.suffix.startsWith("rsvp."),
-      );
+      const rsvpCalls = schedulerClient.createRsvpReminderSchedule.mock.calls;
       expect(rsvpCalls).toHaveLength(1);
 
       const call = rsvpCalls[0]![0];
       expect(call.fireAt).toBe(expectedFireAt);
       expect(call.suffix).toBe(expectedSuffix);
-      expect(call.sqsMessageAttributeMessageType).toBe("rsvp_reminder");
       expect(call.accountId).toBe(TEST_ACCOUNT_ID);
     });
   });
@@ -261,9 +259,7 @@ describe("Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation gu
       await processor.processInbound(makeMessage(`msg-rsvp-skip-${startTime}`), 1);
 
       // No RSVP schedule call (may still have day-of calendar schedule)
-      const rsvpCalls = schedulerClient.createFollowup.mock.calls.filter(
-        (c: Array<{ suffix: string }>) => c[0]!.suffix.startsWith("rsvp."),
-      );
+      const rsvpCalls = schedulerClient.createRsvpReminderSchedule.mock.calls;
       expect(rsvpCalls).toHaveLength(0);
     });
   });
@@ -290,9 +286,7 @@ describe("Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation gu
 
       await processor.processInbound(makeMessage(`msg-rsvp-method-${method}`), 1);
 
-      const rsvpCalls = schedulerClient.createFollowup.mock.calls.filter(
-        (c: Array<{ suffix: string }>) => c[0]!.suffix.startsWith("rsvp."),
-      );
+      const rsvpCalls = schedulerClient.createRsvpReminderSchedule.mock.calls;
       expect(rsvpCalls).toHaveLength(0);
     });
   });
@@ -315,9 +309,7 @@ describe("Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation gu
 
       await processor.processInbound(makeMessage(`msg-rsvp-case-${method}`), 1);
 
-      const rsvpCalls = schedulerClient.createFollowup.mock.calls.filter(
-        (c: Array<{ suffix: string }>) => c[0]!.suffix.startsWith("rsvp."),
-      );
+      const rsvpCalls = schedulerClient.createRsvpReminderSchedule.mock.calls;
       expect(rsvpCalls).toHaveLength(1);
     });
   });
@@ -351,9 +343,7 @@ describe("Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation gu
 
       await processor.processInbound(makeMessage("msg-rsvp-no-dtstart"), 1);
 
-      const rsvpCalls = schedulerClient.createFollowup.mock.calls.filter(
-        (c: Array<{ suffix: string }>) => c[0]!.suffix.startsWith("rsvp."),
-      );
+      const rsvpCalls = schedulerClient.createRsvpReminderSchedule.mock.calls;
       expect(rsvpCalls).toHaveLength(0);
 
       const warnLogs = mockLogger.calls.filter(c => c.method === "warn" && c.context?.code === "processor.calendar.rsvp_missing_start_time");
@@ -375,9 +365,7 @@ describe("Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation gu
 
       await processor.processInbound(makeMessage("msg-rsvp-suffix-utc"), 1);
 
-      const rsvpCalls = schedulerClient.createFollowup.mock.calls.filter(
-        (c: Array<{ suffix: string }>) => c[0]!.suffix.startsWith("rsvp."),
-      );
+      const rsvpCalls = schedulerClient.createRsvpReminderSchedule.mock.calls;
       expect(rsvpCalls).toHaveLength(1);
       expect(rsvpCalls[0]![0].suffix).toBe("rsvp.20250101");
     });
@@ -390,9 +378,7 @@ describe("Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation gu
 
       await processor.processInbound(makeMessage("msg-rsvp-suffix-eod"), 1);
 
-      const rsvpCalls = schedulerClient.createFollowup.mock.calls.filter(
-        (c: Array<{ suffix: string }>) => c[0]!.suffix.startsWith("rsvp."),
-      );
+      const rsvpCalls = schedulerClient.createRsvpReminderSchedule.mock.calls;
       expect(rsvpCalls).toHaveLength(1);
       expect(rsvpCalls[0]![0].suffix).toBe("rsvp.20250615");
     });

@@ -15,6 +15,11 @@ export interface IcsParseResult {
   rawIcsContent: string;
 }
 
+export interface IcsEventsParseResult {
+  events: CalendarEventData[];
+  rawIcsContent: string;
+}
+
 export interface IcsParseError {
   reason: string;
 }
@@ -119,17 +124,22 @@ function icalTimeToIso(time: unknown): string | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// parseIcs
+// parseIcs / parseIcsEvents
 // ---------------------------------------------------------------------------
 
-const MAX_VEVENTS = 100;
+interface ParsedVCalendar {
+  vcalendar: InstanceType<typeof ICAL.Component>;
+  method: string | null;
+  rawIcsContent: string;
+  startTime: number;
+}
 
 /**
- * Shared preamble for both parseIcs and parseIcsEvents: size limit, jCal parse,
- * nesting/VTIMEZONE-bomb checks, VALARM stripping. Returns the parsed VCALENDAR
- * component plus its (alarm-stripped) VEVENTs, or a typed parse error.
+ * Shared jCal parse + validation: size limit, malformed-structure/nesting-depth
+ * checks, VTIMEZONE bomb check, and VALARM stripping. Used by both the
+ * single-event and all-events entry points below.
  */
-function parseVcalendar(icsBytes: Uint8Array): Result<{ vcalendar: InstanceType<typeof ICAL.Component>; vevents: InstanceType<typeof ICAL.Component>[]; rawIcsContent: string; startTime: number }, IcsParseError> {
+function parseVCalendar(icsBytes: Uint8Array): Result<ParsedVCalendar, IcsParseError> {
   // --- Size limit ---
   if (icsBytes.byteLength > MAX_FILE_SIZE) {
     return err({ reason: "File exceeds 1 MB size limit" });
@@ -173,19 +183,24 @@ function parseVcalendar(icsBytes: Uint8Array): Result<{ vcalendar: InstanceType<
     vevent.removeAllSubcomponents("valarm");
   }
 
-  if (vevents.length === 0) {
-    return err({ reason: "Malformed iCal structure: no VEVENT component found" });
-  }
+  // --- Extract METHOD from VCALENDAR level ---
+  // METHOD is not required by RFC 5545, but iTIP (RFC 5546) routing needs one. Absence of
+  // METHOD means the sender did not assert a scheduling request, so the fallback is the
+  // informational PUBLISH — NOT REQUEST. Only an explicit METHOD:REQUEST is treated as a
+  // solicitation for a reply. A bare .ics attachment (a reservation confirmation, a "here
+  // are the details" event) carries no METHOD; defaulting it to REQUEST wrongly makes it
+  // RSVP-eligible and produces a reply with an empty To. RSVP eligibility is decided later
+  // (calendar-collapse: rsvpable = method === "REQUEST" && organizer present), never here.
+  const method = vcalendar.getFirstPropertyValue("method") as string | null;
 
-  return ok({ vcalendar, vevents, rawIcsContent, startTime });
+  return ok({ vcalendar, method, rawIcsContent, startTime });
 }
 
 /**
- * Builds CalendarEventData for a single VEVENT. Shared by parseIcs (first event only)
- * and parseIcsEvents (every event in the file).
+ * Extracts structured CalendarEventData from a single VEVENT component.
+ * Pure function — no I/O.
  */
-function buildCalendarEventData(vevent: InstanceType<typeof ICAL.Component>, method: string | null): CalendarEventData {
-  // --- Extract VEVENT properties ---
+function buildEventData(vevent: InstanceType<typeof ICAL.Component>, method: string | null): CalendarEventData {
   const title = (vevent.getFirstPropertyValue("summary") as string | null) ?? "";
   const description = vevent.getFirstPropertyValue("description") as string | null;
   const location = vevent.getFirstPropertyValue("location") as string | null;
@@ -294,22 +309,22 @@ function buildCalendarEventData(vevent: InstanceType<typeof ICAL.Component>, met
 }
 
 /**
- * Parses raw .ics bytes into structured CalendarEventData for the FIRST VEVENT only.
+ * Parses raw .ics bytes into structured CalendarEventData from its first VEVENT.
  *
  * Enforces size/complexity limits, strips VALARM, sanitizes URLs.
  * Pure function — no I/O.
- *
- * Used by single-event consumers (the RSVP-reply relay, the post-approval sender) where
- * exactly one VEVENT is the entire contract (an iTIP REPLY/REQUEST carries one event). For
- * an inbound invite email that may bundle several events, use parseIcsEvents instead.
  */
 export function parseIcs(icsBytes: Uint8Array): Result<IcsParseResult, IcsParseError> {
-  const preamble = parseVcalendar(icsBytes);
-  if (preamble.isErr()) return err(preamble.error);
-  const { vcalendar, vevents, rawIcsContent, startTime } = preamble.value;
+  const parsed = parseVCalendar(icsBytes);
+  if (parsed.isErr()) return err(parsed.error);
+  const { vcalendar, method, rawIcsContent, startTime } = parsed.value;
 
-  const method = vcalendar.getFirstPropertyValue("method") as string | null;
-  const calendarData = buildCalendarEventData(vevents[0]!, method);
+  const vevent = vcalendar.getFirstSubcomponent("vevent");
+  if (!vevent) {
+    return err({ reason: "Malformed iCal structure: no VEVENT component found" });
+  }
+
+  const calendarData = buildEventData(vevent, method);
 
   // --- Output size limit ---
   const serialized = JSON.stringify(calendarData);
@@ -326,32 +341,29 @@ export function parseIcs(icsBytes: Uint8Array): Result<IcsParseResult, IcsParseE
 }
 
 /**
- * Parses raw .ics bytes into structured CalendarEventData for EVERY VEVENT present.
+ * Parses raw .ics bytes into structured CalendarEventData for EVERY VEVENT
+ * component present (a single .ics can carry a master recurring event plus
+ * RECURRENCE-ID exceptions, or unrelated events entirely).
  *
- * A forwarded invite email can legitimately carry more than one event in one .ics
- * (e.g. a multi-session offsite, or several proposed time options bundled together) —
- * this is the entry point for inbound invite ingestion, which must create one
- * calendar_event signal per event rather than silently keeping only the first.
- * VEVENTs beyond MAX_VEVENTS are silently truncated, mirroring the attendee cap.
- * Enforces the same size/complexity limits as parseIcs, per event.
+ * Enforces size/complexity limits, strips VALARM, sanitizes URLs.
+ * Pure function — no I/O.
  */
-export function parseIcsEvents(icsBytes: Uint8Array): Result<{ events: CalendarEventData[]; rawIcsContent: string }, IcsParseError> {
-  const preamble = parseVcalendar(icsBytes);
-  if (preamble.isErr()) return err(preamble.error);
-  const { vcalendar, vevents, rawIcsContent, startTime } = preamble.value;
+export function parseIcsEvents(icsBytes: Uint8Array): Result<IcsEventsParseResult, IcsParseError> {
+  const parsed = parseVCalendar(icsBytes);
+  if (parsed.isErr()) return err(parsed.error);
+  const { vcalendar, method, rawIcsContent, startTime } = parsed.value;
 
-  const method = vcalendar.getFirstPropertyValue("method") as string | null;
-  const events: CalendarEventData[] = [];
-  for (const vevent of vevents.slice(0, MAX_VEVENTS)) {
-    const calendarData = buildCalendarEventData(vevent, method);
+  const vevents = vcalendar.getAllSubcomponents("vevent");
+  if (vevents.length === 0) {
+    return err({ reason: "Malformed iCal structure: no VEVENT component found" });
+  }
 
-    // --- Output size limit (per event) ---
-    const serialized = JSON.stringify(calendarData);
-    if (Buffer.byteLength(serialized, "utf8") > MAX_OUTPUT_SIZE) {
-      return err({ reason: "Parsed calendar data exceeds 100 KB limit" });
-    }
+  const events = vevents.map((vevent) => buildEventData(vevent, method));
 
-    events.push(calendarData);
+  // --- Output size limit ---
+  const serialized = JSON.stringify(events);
+  if (Buffer.byteLength(serialized, "utf8") > MAX_OUTPUT_SIZE) {
+    return err({ reason: "Parsed calendar data exceeds 100 KB limit" });
   }
 
   // --- Post-parse timeout check ---
@@ -372,51 +384,137 @@ function isCalendarAttachment(attachment: Attachment): boolean {
 }
 
 /**
- * Determines whether an attachment's MIME type includes a METHOD parameter,
- * indicating it was sent as an iMIP calendar message (e.g. text/calendar; method=REQUEST).
- */
-function hasMethodParameter(attachment: Attachment): boolean {
-  return /;\s*method=/i.test(attachment.mimeType);
-}
-
-/**
- * Detects the calendar attachment to parse from a signal's attachment list.
+ * Finds every calendar attachment on a signal's attachment list.
  *
- * Detection rules:
- * - An attachment is a calendar attachment if it has MIME type `text/calendar` OR filename ending in `.ics`
- * - When multiple calendar attachments exist, select the first one with a METHOD parameter in its MIME type
- * - If none has METHOD, fall back to the first calendar attachment
- * - Logs TRACK when multiple calendar attachments found
- * - Returns null if no calendar attachment is found
+ * An attachment is a calendar attachment if it has MIME type `text/calendar` OR
+ * filename ending in `.ics`. Every match is returned — none are discarded — so
+ * the caller can extract and merge events across all of them (see
+ * `collapseCalendarEvents`). Logs TRACK when more than one is found.
  */
-export function findCalendarAttachment(attachments: Attachment[], logger: Logger): Attachment | null {
+export function findCalendarAttachments(attachments: Attachment[], logger: Logger): Attachment[] {
   const calendarAttachments = attachments.filter(isCalendarAttachment);
 
-  if (calendarAttachments.length === 0) return null;
-
   if (calendarAttachments.length > 1) {
-    logger.track("Multiple calendar attachments found on signal. Selecting by METHOD priority.", {
-      code: "ics_parser.multiple_calendar_attachments",
-      count: calendarAttachments.length,
-    });
+    logger.track(
+      `Multiple calendar attachments found on signal (${calendarAttachments.length}). Extracting events from all of them.`,
+      {
+        code: "ics_parser.multiple_calendar_attachments",
+        count: calendarAttachments.length,
+        candidates: calendarAttachments.map((a) => ({ filename: a.filename, mimeType: a.mimeType })),
+      },
+    );
   }
 
-  // Priority: first attachment with a METHOD parameter in its MIME type
-  const withMethod = calendarAttachments.find(hasMethodParameter);
-  if (withMethod !== undefined) return withMethod;
+  return calendarAttachments;
+}
 
-  // Fallback: first calendar attachment (guaranteed to exist since length > 0)
-  return calendarAttachments[0] ?? null;
+// ---------------------------------------------------------------------------
+// Event grouping / collapse
+// ---------------------------------------------------------------------------
+
+const REPLY_LIKE_METHODS = new Set(["REPLY", "COUNTER"]);
+
+export interface CalendarEventRecord {
+  event: CalendarEventData;
+  rawIcsContent: string;
+}
+
+export interface CollapsedCalendarEvent {
+  key: string;
+  data: CalendarEventData;
+  rawIcsContent: string;
+}
+
+export interface CollapseCalendarEventsResult {
+  collapsed: CollapsedCalendarEvent[];
+  // REPLY/COUNTER groups with no accompanying REQUEST/CANCEL/PUBLISH record in the
+  // same batch — there's no base snapshot to attach the attendee status to, so
+  // no calendar_event can be built from them here.
+  skippedReplyOnly: number;
+}
+
+/** Grouping key: RECURRENCE-ID exceptions are distinct from their master series. */
+function eventGroupKey(event: CalendarEventData): string {
+  return event.recurrenceId ? `${event.veventUid}::${event.recurrenceId}` : event.veventUid;
 }
 
 /**
- * Returns every calendar (text/calendar or .ics) attachment on a signal's attachment
- * list, in order. Unlike findCalendarAttachment (which picks the single best one by
- * METHOD priority, for consumers that only ever act on one), this is for inbound
- * invite ingestion: a forwarded email can carry more than one calendar attachment
- * (e.g. an assistant relaying several event options), and each should become its
- * own calendar_event signal(s) rather than only the highest-priority one.
+ * Groups extracted VEVENTs (potentially from multiple .ics attachments on one
+ * signal) by event identity (UID, or UID+RECURRENCE-ID for occurrence
+ * exceptions), then collapses each group down to the one CalendarEventData
+ * snapshot that should become that event's calendar_event signal:
+ *
+ * - Any CANCEL record in the group cancels the event (status set to CANCELLED).
+ * - Otherwise the highest-SEQUENCE REQUEST/PUBLISH record wins as the snapshot.
+ * - REPLY/COUNTER records never become the snapshot themselves — they only
+ *   overlay their attendee's PARTSTAT onto the winning snapshot's attendees.
+ * - A group made up entirely of REPLY/COUNTER records (no REQUEST/CANCEL/PUBLISH
+ *   in this same batch to carry title/organizer/start/etc.) can't produce a
+ *   valid calendar_event and is skipped — reported via `skippedReplyOnly` and a
+ *   TRACK log so it's visible rather than silently dropped.
  */
-export function findCalendarAttachments(attachments: Attachment[]): Attachment[] {
-  return attachments.filter(isCalendarAttachment);
+export function collapseCalendarEvents(records: CalendarEventRecord[], logger: Logger): CollapseCalendarEventsResult {
+  const groups = new Map<string, CalendarEventRecord[]>();
+  for (const record of records) {
+    const key = eventGroupKey(record.event);
+    const group = groups.get(key);
+    if (group) {
+      group.push(record);
+      continue;
+    }
+    groups.set(key, [record]);
+  }
+
+  const collapsed: CollapsedCalendarEvent[] = [];
+  let skippedReplyOnly = 0;
+
+  for (const [key, group] of groups) {
+    const fullRecords = group.filter((r) => !REPLY_LIKE_METHODS.has(r.event.method));
+    const replyRecords = group.filter((r) => REPLY_LIKE_METHODS.has(r.event.method));
+
+    if (fullRecords.length === 0) {
+      skippedReplyOnly++;
+      logger.track("REPLY/COUNTER calendar record has no matching invite in this batch; cannot build a calendar_event from it alone.", {
+        code: "ics_parser.reply_only_group_skipped",
+        key,
+        veventUid: group[0]!.event.veventUid,
+        count: replyRecords.length,
+      });
+      continue;
+    }
+
+    const winnerRecord = [...fullRecords].sort((a, b) => a.event.sequence - b.event.sequence).at(-1)!;
+    const cancelled = fullRecords.some((r) => r.event.method === "CANCEL");
+
+    if (group.length > 1) {
+      logger.track(`Calendar event ${key} assembled from ${group.length} record(s) across attachments; collapsed to one signal.`, {
+        code: "ics_parser.multiple_records_collapsed",
+        key,
+        veventUid: winnerRecord.event.veventUid,
+        recordCount: group.length,
+        cancelled,
+      });
+    }
+
+    let attendees = winnerRecord.event.attendees;
+    for (const reply of replyRecords) {
+      for (const incoming of reply.event.attendees) {
+        if (!incoming.partstat) continue;
+        const idx = attendees.findIndex((a) => a.address.toLowerCase() === incoming.address.toLowerCase());
+        if (idx === -1) continue;
+        if (attendees === winnerRecord.event.attendees) attendees = [...attendees];
+        attendees[idx] = { ...attendees[idx]!, partstat: incoming.partstat };
+      }
+    }
+
+    const data: CalendarEventData = {
+      ...winnerRecord.event,
+      attendees,
+      ...(cancelled ? { status: "CANCELLED" } : {}),
+    };
+
+    collapsed.push({ key, data, rawIcsContent: winnerRecord.rawIcsContent });
+  }
+
+  return { collapsed, skippedReplyOnly };
 }

@@ -8,6 +8,7 @@ import type { TransientSesError, PermanentSesError, InvalidArgumentError, Result
 import { permanentSesError } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { sanitizeTagName, sanitizeTagValue } from "./tag-sanitizer.js";
+import { addressDomain } from "./address.js";
 
 export type EmailServiceError = TransientSesError | InvalidArgumentError | PermanentSesError;
 
@@ -109,7 +110,7 @@ export class EmailService {
    * - Customer tenant → from address must NOT be on our mail domain
    */
   private validateTenantDomainAlignment(accountId: string, fromAddress: string): Result<null, InvalidArgumentError> {
-    const fromDomain = fromAddress.split("@").pop()?.replace(/>$/, "") ?? "";
+    const fromDomain = addressDomain(fromAddress);
     const isPlatformTenant = accountId === this.platformTenantName || accountId === "SYSTEM";
     const isOurDomain = fromDomain === this.mailDomain || fromDomain.endsWith(`.${this.mailDomain}`);
 

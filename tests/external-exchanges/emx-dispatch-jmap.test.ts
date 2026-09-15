@@ -79,7 +79,7 @@ describe("dispatch worker delegates renewal to the adapter", () => {
     const result = await worker.dispatch();
 
     expect(result.isOk()).toBe(true);
-    expect(mockJmapAdapter.renew).toHaveBeenCalledWith(emx);
+    expect(mockJmapAdapter.renew).toHaveBeenCalledWith(emx, {});
   });
 });
 

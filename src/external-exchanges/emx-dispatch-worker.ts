@@ -15,6 +15,8 @@ interface EmxDispatchWorkerDeps {
 export interface EmxDispatchPayload {
   emxId?: string;
   accountId?: string;
+  // Set by a UI-driven PATCH to the exchange record — see ProviderAdapter.renew.
+  includeOverlap?: boolean;
 }
 
 export class EmxDispatchWorker {
@@ -41,7 +43,7 @@ export class EmxDispatchWorker {
         this.logger.info("emx_dispatch: targeted exchange not active, skipping", { code: "emx.dispatch.targeted_skip", emxId: payload.emxId, status: emx?.status });
         return ok(undefined);
       }
-      await this.processExchange(emx);
+      await this.processExchange(emx, payload.includeOverlap);
       return ok(undefined);
     }
 
@@ -64,7 +66,7 @@ export class EmxDispatchWorker {
     return ok(undefined);
   }
 
-  private async processExchange(emx: import("../types/index.js").ExternalMailExchange): Promise<void> {
+  private async processExchange(emx: import("../types/index.js").ExternalMailExchange, includeOverlap?: boolean): Promise<void> {
     const adapter = this.adapters[emx.platform];
     if (!adapter) {
       this.logger.warn("emx_dispatch: no adapter for platform", { code: "emx.dispatch.no_adapter", platform: emx.platform, emxId: emx.id });
@@ -74,7 +76,7 @@ export class EmxDispatchWorker {
     // Adapters resolve their own credentials from `emx` and own all DB writes (cursor, timing,
     // failure tracking) internally — a missing or unusable identity surfaces as a renewal
     // failure below, same as any other renewal problem, rather than a separate check here.
-    const renewResult = await adapter.renew(emx);
+    const renewResult = await adapter.renew(emx, includeOverlap !== undefined ? { includeOverlap } : {});
     if (renewResult.isErr()) {
       this.logger.error(`emx_dispatch: renewal failed: ${renewResult.error.cause}`, { code: "emx.dispatch.renewal_failed", emxId: emx.id, platform: emx.platform, error: renewResult.error });
       return;

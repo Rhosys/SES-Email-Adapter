@@ -129,8 +129,8 @@ export class ExternalExchangesApi {
 
 
     /** Trigger immediate dispatch for a specific exchange — awaited with error logging */
-    const triggerDispatch = async (targetAccountId: string, emxId: string) => {
-      const result = await signalQueue.send("emx_dispatch", { emxId, accountId: targetAccountId });
+    const triggerDispatch = async (targetAccountId: string, emxId: string, includeOverlap?: boolean) => {
+      const result = await signalQueue.send("emx_dispatch", { emxId, accountId: targetAccountId, includeOverlap });
       if (result.isErr()) {
         logger.warn("Failed to enqueue emx_dispatch", { code: "api.emx.dispatch_enqueue_failed", emxId, error: result.error });
       }
@@ -536,7 +536,7 @@ export class ExternalExchangesApi {
         if (imapReactivateResult.isErr()) { logger.error("Failed to reactivate IMAP exchange", { code: "api.emx.patch.imap.reactivate_failed", accountId, emxId, error: imapReactivateResult.error }); return err(c, 500, "Internal Server Error"); }
       }
 
-      await triggerDispatch(accountId, emxId);
+      await triggerDispatch(accountId, emxId, true);
       const freshResult = await exchangesDb.getExternalExchange(accountId, emxId);
       logger.info("IMAP exchange patched", { code: "api.emx.patch.imap.done", accountId, emxId, previousStatus: emx.status, reactivated: emx.status === "activation_failed" });
       if (freshResult.isOk() && freshResult.value) { return c.json(serializeEmx(freshResult.value), 200); }
