@@ -222,10 +222,12 @@ export function coerceWorkflowData(
               ...ctx,
             });
           } else {
+            const unsupported = unsupportedLocales(localeHints);
             logger.track(`Classifier returned unparseable date value "${raw}" — nullified.`, {
               code: "classifier.date_parse_failed",
               field: field.name,
               value: raw,
+              ...(unsupported.length > 0 ? { unsupportedLocaleHints: unsupported } : {}),
               ...ctx,
             });
           }
@@ -512,6 +514,25 @@ const DATE_CONNECTORS_BY_LANG: Record<string, string[]> = {
   it: ["il"],
   nl: ["op"],
 };
+
+/**
+ * Base language subtags this file has explicit ordinal/connector support for
+ * (mirrors `DATE_CONNECTORS_BY_LANG`'s keys). A locale hint outside this set on
+ * a date that still failed to parse is a coverage-gap signal worth surfacing in
+ * TRACK logs — the same way this file's own fr/de/nl support was discovered.
+ */
+const SUPPORTED_DATE_LOCALES = new Set(Object.keys(DATE_CONNECTORS_BY_LANG));
+
+/**
+ * Returns the base language subtags from `localeHints` that this file has no
+ * explicit ordinal/connector support for. Used to flag date-parse failures
+ * that may be a genuine locale coverage gap rather than a malformed value.
+ */
+function unsupportedLocales(localeHints: string[]): string[] {
+  return [...new Set(localeHints.map(h => h.split("-")[0]!.toLowerCase()))].filter(
+    lang => !SUPPORTED_DATE_LOCALES.has(lang),
+  );
+}
 
 /**
  * Leading time connectors that introduce the TIME portion when it comes first

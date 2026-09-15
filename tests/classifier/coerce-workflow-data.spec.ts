@@ -638,6 +638,68 @@ describe("coerceWorkflowData", () => {
   });
 
   // -------------------------------------------------------------------------
+  // Date fields — TRACK coverage-gap signal for locale hints we don't yet
+  // support (outside DATE_CONNECTORS_BY_LANG's en/de/fr/es/it/nl). Lets
+  // production TRACK logs tell us which locale to add next, the same way
+  // this file's own fr/de/nl support was originally discovered.
+  // -------------------------------------------------------------------------
+
+  describe("date fields — unsupported locale hint coverage signal", () => {
+    const travelCtx = { ...ctx, workflow: "travel" };
+    const base = { workflow: "travel", travelType: "flight", provider: "Swiss" };
+
+    it("unparseable date with an unsupported locale hint → TRACK names the unsupported locale", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "not a date at all" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["pl"], "skip");
+      expect(result.departureDate).toBeNull();
+
+      const track = logger.calls.find(c => c.method === "track");
+      expect(track).toBeDefined();
+      expect(track!.context).toEqual(expect.objectContaining({
+        code: "classifier.date_parse_failed",
+        field: "departureDate",
+        unsupportedLocaleHints: ["pl"],
+      }));
+    });
+
+    it("unparseable date with a mix of supported and unsupported hints → only the unsupported ones are named", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "not a date at all" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["de", "pl"], "skip");
+      expect(result.departureDate).toBeNull();
+
+      const track = logger.calls.find(c => c.method === "track");
+      expect(track!.context).toEqual(expect.objectContaining({
+        unsupportedLocaleHints: ["pl"],
+      }));
+    });
+
+    it("unparseable date with only supported locale hints → no unsupportedLocaleHints field", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "not a date at all" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["de"], "skip");
+      expect(result.departureDate).toBeNull();
+
+      const track = logger.calls.find(c => c.method === "track");
+      expect(track!.context).not.toHaveProperty("unsupportedLocaleHints");
+    });
+
+    it("unparseable date with no locale hints → no unsupportedLocaleHints field", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "not a date at all" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
+      expect(result.departureDate).toBeNull();
+
+      const track = logger.calls.find(c => c.method === "track");
+      expect(track!.context).not.toHaveProperty("unsupportedLocaleHints");
+    });
+
+    it("successfully parsed date with an unsupported locale hint → no TRACK at all", () => {
+      const data: Record<string, unknown> = { ...base, departureDate: "February 3rd, 2027" };
+      const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, ["pl"], "skip");
+      expect(result.departureDate).toBe("2027-02-03");
+      expect(logger.calls.some(c => c.method === "track")).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // isAmbiguousSlashSkip predicate
   // -------------------------------------------------------------------------
 
