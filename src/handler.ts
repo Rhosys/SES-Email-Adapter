@@ -138,7 +138,10 @@ async function handlerInner(
         continue;
       }
 
-      const resolvedMessageType = record.messageAttributes?.["messageType"]?.stringValue ?? (body as { messageType?: string }).messageType;
+      // Body-level fallback: EventBridge Scheduler can't set SQS message attributes,
+      // so scheduled messages (emx_dispatch, digest_dispatch, signal_followup, rsvp_reminder)
+      // embed the routing type in the body as `sqsMessageAttributeMessageType` instead.
+      const resolvedMessageType = record.messageAttributes?.["messageType"]?.stringValue ?? (body as { sqsMessageAttributeMessageType?: string }).sqsMessageAttributeMessageType;
 
       let result: Result<void, unknown>;
       try {

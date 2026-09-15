@@ -24,7 +24,7 @@ const FUTURE_START = "2099-07-15T14:00:00Z";
 /** A start time guaranteed to be in the past (year 2020). */
 const PAST_START = "2020-01-01T08:00:00Z";
 
-const MESSAGE: RsvpReminderMessage = { messageType: "rsvp_reminder", accountId: ACCOUNT_ID, calendarSignalId: SIGNAL_ID, threadId: ARC_ID };
+const MESSAGE: RsvpReminderMessage = { sqsMessageAttributeMessageType: "rsvp_reminder", accountId: ACCOUNT_ID, calendarSignalId: SIGNAL_ID, threadId: ARC_ID };
 
 function makeCalendarSignal(overrides: Partial<{ startTime: string; veventUid: string }> = {}): Signal {
   const data: CalendarEventData = {

@@ -64,7 +64,7 @@ export class EventBridgeSchedulerClient implements SchedulerClient {
 
   async createFollowupSchedule(params: FollowupScheduleParams): Promise<Result<void, DbError>> {
     const payload: FollowupMessage = {
-      messageType: "signal_followup",
+      sqsMessageAttributeMessageType: "signal_followup",
       accountId: params.accountId,
       threadId: params.threadId,
     };
@@ -73,7 +73,7 @@ export class EventBridgeSchedulerClient implements SchedulerClient {
 
   async createRsvpReminderSchedule(params: RsvpReminderScheduleParams): Promise<Result<void, DbError>> {
     const payload: RsvpReminderMessage = {
-      messageType: "rsvp_reminder",
+      sqsMessageAttributeMessageType: "rsvp_reminder",
       accountId: params.accountId,
       threadId: params.threadId,
       calendarSignalId: params.calendarSignalId,
