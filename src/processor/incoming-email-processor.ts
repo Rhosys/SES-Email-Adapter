@@ -9,7 +9,7 @@ import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, NoAc
 import type { AccessService } from "../api/accountsApi.js";
 import type { EmailServiceError } from "../email/email-service.js";
 import type { ProviderSendError } from "../external-exchanges/provider-adapter.js";
-import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, UnsubscribeInfo, InboundEmailSignalData } from "../types/index.js";
+import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, UnsubscribeInfo, InboundEmailSignalData, Attachment } from "../types/index.js";
 import { deriveGroupingKey } from "../grouping-key.js";
 import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
@@ -42,7 +42,7 @@ import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
 import { isReplyTargetSafe } from "./reply-target-validator.js";
 import { BillingHandler } from "../billing/billing-handler.js";
 import type { HandlerRegistry } from "../workflow/registry.js";
-import { findCalendarAttachment, parseIcs } from "./calendar/ics-parser.js";
+import { findCalendarAttachments, parseIcsEvents } from "./calendar/ics-parser.js";
 import { buildCalendarSignalLookupId } from "./calendar/signal-lookup.js";
 import { CalendarForwarder } from "./calendar/calendar-forwarder.js";
 import type { CalendarEventData, CalendarInviteInvalidData } from "../types/calendar.js";
@@ -1773,25 +1773,45 @@ export class IncomingEmailProcessor {
   /**
    * Detect and process calendar (.ics) attachments on an email signal.
    *
-   * On valid parse: creates a calendar signal (source: "signal", type: "calendar_event"),
-   * stores raw .ics as S3 attachment, applies system:calendar label to the thread.
+   * A forwarded invite email can carry more than one calendar attachment, and any single
+   * .ics can itself bundle more than one VEVENT (e.g. several proposed time options, or a
+   * multi-session series) — every attachment and every event within it is processed
+   * independently, each producing its own calendar_event signal, so none are silently
+   * dropped down to "the first one found".
    *
-   * On parse rejection (IcsParseError): creates a calendar_invite_invalid signal with reason.
+   * On valid parse: creates a calendar signal (source: "signal", type: "calendar_event")
+   * per event, stores raw .ics as S3 attachment, applies system:calendar label to the thread.
+   *
+   * On parse rejection (IcsParseError): creates a calendar_invite_invalid signal with reason,
+   * once per rejected attachment.
    *
    * On unexpected crash: does NOT catch — lets the exception propagate so SQS retries naturally.
    */
   private async processCalendarAttachment(signal: Signal, thread: Thread, accountId: string, ttl?: number): Promise<void> {
     const attachments = signal.data.attachments ?? [];
-    const calendarAttachment = findCalendarAttachment(attachments, this.logger);
-    if (!calendarAttachment) return;
+    const calendarAttachments = findCalendarAttachments(attachments);
+    if (calendarAttachments.length === 0) return;
 
+    if (calendarAttachments.length > 1) {
+      this.logger.track("Multiple calendar attachments found on signal — processing every one.", {
+        code: "processor.calendar.multiple_attachments",
+        signal, thread, count: calendarAttachments.length,
+      });
+    }
+
+    for (const calendarAttachment of calendarAttachments) {
+      await this.processOneCalendarAttachment(calendarAttachment, signal, thread, accountId, ttl);
+    }
+  }
+
+  private async processOneCalendarAttachment(calendarAttachment: Attachment, signal: Signal, thread: Thread, accountId: string, ttl?: number): Promise<void> {
     this.logger.trackPoint("calendar_attachment_found", { filename: calendarAttachment.filename, mimeType: calendarAttachment.mimeType });
 
     // Fetch .ics bytes from content store
     const icsBytes = await this.contentStore.getContent(calendarAttachment.s3Key);
 
-    // Parse .ics
-    const parseResult = parseIcs(new Uint8Array(icsBytes));
+    // Parse every VEVENT in the .ics
+    const parseResult = parseIcsEvents(new Uint8Array(icsBytes));
 
     if (parseResult.isErr()) {
       // Parse rejection — create calendar_invite_invalid signal
@@ -1821,8 +1841,14 @@ export class IncomingEmailProcessor {
       return;
     }
 
+    const { events, rawIcsContent } = parseResult.value;
+    for (const calendarData of events) {
+      await this.processOneCalendarEvent(calendarData, rawIcsContent, signal, thread, accountId, ttl);
+    }
+  }
+
+  private async processOneCalendarEvent(calendarData: CalendarEventData, rawIcsContent: string, signal: Signal, thread: Thread, accountId: string, ttl?: number): Promise<void> {
     // Valid parse — create calendar signal
-    const { calendarData, rawIcsContent } = parseResult.value;
     const calendarSignalId = generateId("sgn-");
     const calendarTimestamp = DateTime.utc().toISO()!;
     const signalLookupId = buildCalendarSignalLookupId(calendarData.organizer, calendarData.veventUid);
