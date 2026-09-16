@@ -147,10 +147,32 @@ export class ThreadDatabase {
       }));
       const items = res.Items ?? [];
       if (items.length === 0) return ok(null);
-      if (items.length > 1) {
-        this.logger.error("Email message id is supposed to be globally unique but more than one signal record was found. Returning the first, but this indicates a data integrity bug.", { code: "thread_database.email_message_id_not_unique", gsi3pk, count: items.length });
+      // GSI3 has no sort key, so DynamoDB returns matches in arbitrary partition order. When a Message-ID
+      // collides across multiple signals we must pick deterministically: choose the oldest by createdAt —
+      // the thread the Message-ID was first associated with — so retries always resolve the same way.
+      const ordered = [...items].sort((a, b) => String((a as Partial<Signal>).createdAt ?? "").localeCompare(String((b as Partial<Signal>).createdAt ?? "")));
+      if (ordered.length > 1) {
+        // A Message-ID is supposed to be globally unique, so GSI3 should hold at most one signal per key.
+        // Compare the colliding signals to decide whether the duplicate is consequential: if every match
+        // resolves to the same threadId, the threading outcome is identical no matter which we pick, so it
+        // is benign. Only differing threadIds change where a reply lands — that is the real integrity bug.
+        const collisions = ordered.map(i => {
+          const s = i as Partial<Signal>;
+          return { id: s.id, signalLookupId: s.signalLookupId, threadId: s.threadId, status: s.status, source: s.source, type: s.type, createdAt: s.createdAt };
+        });
+        const distinctThreadIds = new Set(collisions.map(c => c.threadId));
+        const sameThread = distinctThreadIds.size <= 1;
+        const context = { code: "thread_database.email_message_id_not_unique", gsi3pk, count: ordered.length, sameThread, collisions };
+        if (sameThread) {
+          // Benign: all matches point at the same thread. Log for visibility, no developer action required.
+          this.logger.warn("Multiple signal records share one Message-ID but resolve to the same thread — threading is unaffected. Logged for visibility; no developer action required.", context);
+        } else {
+          // Consequential: the matches point at different threads, so which one wins changes the thread a reply
+          // is attached to. We deterministically take the oldest by createdAt. DEVELOPER REVIEW REQUIRED.
+          this.logger.error("DEVELOPER REVIEW REQUIRED: multiple signal records share one Message-ID but resolve to DIFFERENT threads — the oldest by createdAt was chosen, but this indicates a data integrity bug that must be investigated.", context);
+        }
       }
-      const item = hydrateThreadObject(items[0] as { threadId?: string; arcId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string });
+      const item = hydrateThreadObject(ordered[0] as { threadId?: string; arcId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string });
       return ok(item as { threadId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string });
     } catch (e) {
       return err(dbError(e));
