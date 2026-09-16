@@ -33,7 +33,7 @@ describe("EmailService error classifications — REQ-0.6", () => {
     });
     mockSend.mockRejectedValueOnce(sesError);
 
-    const opts = { to: ["u@e.com"], subject: "S", textBody: "B", accountId: "test-platform" };
+    const opts = { to: ["u@e.com"], subject: "S", textBody: "B", accountId: "test-platform", sendType: "reply" as const };
     const result = await service.send(opts);
 
     expect(result.isErr()).toBe(true);
@@ -45,7 +45,7 @@ describe("EmailService error classifications — REQ-0.6", () => {
   });
 
   it("rejects empty accountId before calling SES", async () => {
-    const opts = { to: ["u@e.com"], subject: "S", textBody: "B", accountId: "" };
+    const opts = { to: ["u@e.com"], subject: "S", textBody: "B", accountId: "", sendType: "reply" as const };
     const result = await service.send(opts);
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr()).toEqual({ kind: "invalid_argument", argument: "accountId", message: expect.stringContaining("must not be empty") });
@@ -53,7 +53,7 @@ describe("EmailService error classifications — REQ-0.6", () => {
   });
 
   it("rejects whitespace-only accountId before calling SES", async () => {
-    const opts = { to: ["u@e.com"], subject: "S", textBody: "B", accountId: "   " };
+    const opts = { to: ["u@e.com"], subject: "S", textBody: "B", accountId: "   ", sendType: "reply" as const };
     const result = await service.send(opts);
     expect(result.isErr()).toBe(true);
     expect(result._unsafeUnwrapErr()).toEqual({ kind: "invalid_argument", argument: "accountId", message: expect.stringContaining("must not be empty") });
@@ -67,7 +67,7 @@ describe("EmailService error classifications — REQ-0.6", () => {
     });
     mockSend.mockRejectedValueOnce(sesError);
 
-    const opts = { to: ["u@e.com"], subject: "S", textBody: "B", accountId: "test-platform" };
+    const opts = { to: ["u@e.com"], subject: "S", textBody: "B", accountId: "test-platform", sendType: "reply" as const };
     const result = await service.send(opts);
 
     expect(result.isErr()).toBe(true);
@@ -99,6 +99,7 @@ describe("EmailService — SES Destination shape", () => {
       subject: "S",
       textBody: "B",
       accountId: "test-platform",
+      sendType: "reply",
     });
 
     expect(result.isOk()).toBe(true);
@@ -114,6 +115,7 @@ describe("EmailService — SES Destination shape", () => {
       subject: "S",
       textBody: "B",
       accountId: "test-platform",
+      sendType: "reply",
     });
 
     expect(result.isOk()).toBe(true);
@@ -129,6 +131,7 @@ describe("EmailService — SES Destination shape", () => {
       subject: "S",
       textBody: "B",
       accountId: "test-platform",
+      sendType: "reply",
     });
 
     expect(result.isOk()).toBe(true);

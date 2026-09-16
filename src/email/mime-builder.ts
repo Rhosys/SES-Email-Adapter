@@ -42,6 +42,14 @@ export interface MimeMessageOptions {
   calendar?: { method: string };
   /** Extra headers (In-Reply-To, References, …). Values are sanitized like every other header. */
   headers?: Array<{ Name: string; Value: string }>;
+  /**
+   * File attachments. When present, the message becomes `multipart/mixed`: the body computed from
+   * textBody/htmlBody (text/plain or multipart/alternative) is the first part, followed by one part
+   * per attachment (base64, `Content-Disposition: attachment`). When absent or empty, the output is
+   * byte-identical to a message built without this field. Ignored for calendar sends (an iMIP body
+   * is a single actionable part and must not be wrapped).
+   */
+  attachments?: Array<{ filename: string; mimeType: string; content: Uint8Array }>;
   /** Defaults to now. Injectable so tests get a stable Date header. */
   date?: Date;
 }
@@ -122,30 +130,27 @@ export function buildMimeMessage(options: MimeMessageOptions): Uint8Array {
   ];
 
   const boundary = `alt_${crypto.randomUUID()}`;
+  // Attachments (only meaningful for non-calendar sends — an iMIP body is a single actionable part).
+  const attachments = options.calendar ? [] : (options.attachments ?? []);
+  const hasAttachments = attachments.length > 0;
 
+  // ── Inner content: the Content-Type/CTE header line(s) for the body, plus the body itself. ──
+  // Computed independently of any multipart/mixed wrapping so the two concerns don't tangle.
+  const innerContentLines: string[] = [];
   if (options.calendar) {
     // METHOD is a single token per RFC 5545 §3.7.2 (REQUEST, CANCEL, REPLY, …). It reaches
     // us from parsed email content, so take only the leading run of letters — anything after
     // the first non-letter (a stray CRLF, `;`, or injected text) is dropped so it can never
     // split the Content-Type header. Defaults to REQUEST if nothing usable remains.
     const method = (/^[A-Za-z]+/.exec(options.calendar.method.trim())?.[0] ?? "REQUEST").toUpperCase();
-    lines.push(`Content-Type: text/calendar; method=${method}; charset=UTF-8`, "Content-Transfer-Encoding: base64");
+    innerContentLines.push(`Content-Type: text/calendar; method=${method}; charset=UTF-8`, "Content-Transfer-Encoding: base64");
   } else if (options.htmlBody) {
-    lines.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+    innerContentLines.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
   } else {
-    lines.push("Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64");
+    innerContentLines.push("Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64");
   }
 
-  for (const header of options.headers ?? []) {
-    if (RESERVED_HEADERS.has(header.Name.toLowerCase())) continue;
-    const value = sanitizeHeaderValue(header.Value);
-    if (!value) continue;
-    lines.push(`${sanitizeHeaderValue(header.Name)}: ${ASCII_PRINTABLE.test(value) ? value : encodeWord(value)}`);
-  }
-
-  const headerBlock = lines.join("\r\n");
-
-  const body = options.htmlBody && !options.calendar
+  const innerBody = options.htmlBody && !options.calendar
     ? `--${boundary}\r\n`
       + "Content-Type: text/plain; charset=UTF-8\r\n"
       + "Content-Transfer-Encoding: base64\r\n\r\n"
@@ -157,5 +162,48 @@ export function buildMimeMessage(options: MimeMessageOptions): Uint8Array {
       + `--${boundary}--\r\n`
     : `${encodeBody(options.textBody)}\r\n`;
 
-  return new Uint8Array(Buffer.from(`${headerBlock}\r\n\r\n${body}`, "utf8"));
+  // Extra headers (In-Reply-To, References, …) always sit on the top-level header block, whether
+  // or not the message is wrapped in multipart/mixed.
+  const extraHeaderLines: string[] = [];
+  for (const header of options.headers ?? []) {
+    if (RESERVED_HEADERS.has(header.Name.toLowerCase())) continue;
+    const value = sanitizeHeaderValue(header.Value);
+    if (!value) continue;
+    extraHeaderLines.push(`${sanitizeHeaderValue(header.Name)}: ${ASCII_PRINTABLE.test(value) ? value : encodeWord(value)}`);
+  }
+
+  if (!hasAttachments) {
+    // No attachments — top-level carries the inner content headers directly. Byte-identical to
+    // the pre-attachment builder.
+    const headerBlock = [...lines, ...innerContentLines, ...extraHeaderLines].join("\r\n");
+    return new Uint8Array(Buffer.from(`${headerBlock}\r\n\r\n${innerBody}`, "utf8"));
+  }
+
+  // Attachments present — wrap in multipart/mixed. The inner content becomes the first part
+  // (carrying its own Content-Type/CTE headers), followed by one part per attachment.
+  const mixedBoundary = `mixed_${crypto.randomUUID()}`;
+  const headerBlock = [
+    ...lines,
+    `Content-Type: multipart/mixed; boundary="${mixedBoundary}"`,
+    ...extraHeaderLines,
+  ].join("\r\n");
+
+  let mixedBody = `--${mixedBoundary}\r\n`
+    + `${innerContentLines.join("\r\n")}\r\n\r\n`
+    + `${innerBody}${innerBody.endsWith("\r\n") ? "" : "\r\n"}`;
+
+  for (const att of attachments) {
+    const encoded = (Buffer.from(att.content).toString("base64").match(/.{1,76}/g) ?? []).join("\r\n");
+    const filename = sanitizeHeaderValue(att.filename) || "attachment";
+    const encodedName = ASCII_PRINTABLE.test(filename) ? `"${filename}"` : encodeWord(filename);
+    const mimeType = sanitizeHeaderValue(att.mimeType) || "application/octet-stream";
+    mixedBody += `--${mixedBoundary}\r\n`
+      + `Content-Type: ${mimeType}; name=${encodedName}\r\n`
+      + "Content-Transfer-Encoding: base64\r\n"
+      + `Content-Disposition: attachment; filename=${encodedName}\r\n\r\n`
+      + `${encoded}\r\n\r\n`;
+  }
+  mixedBody += `--${mixedBoundary}--\r\n`;
+
+  return new Uint8Array(Buffer.from(`${headerBlock}\r\n\r\n${mixedBody}`, "utf8"));
 }

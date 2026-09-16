@@ -21,7 +21,7 @@ import type { ProviderAdapter } from "../external-exchanges/provider-adapter.js"
 import type { ExternalMailExchange, EmxPlatform } from "../types/index.js";
 import type { Result } from "../errors.js";
 import { ok, err } from "../errors.js";
-import { buildOutboundTags, TAG_HOP_COUNT, MAX_HOP_COUNT } from "../email/ses-tags.js";
+import { TAG_ACCOUNT_ID, TAG_SIGNAL_ID, TAG_THREAD_ID, TAG_HOP_COUNT, MAX_HOP_COUNT, type EmailSendType } from "../email/ses-tags.js";
 import { buildMimeMessage } from "../email/mime-builder.js";
 import { extractAddress, formatAddress } from "../email/address.js";
 import type { Address } from "../email/address.js";
@@ -60,6 +60,13 @@ export class ReplySenderService implements ReplySender {
   }
 
   async sendReply(opts: {
+    /**
+     * What kind of outbound this is — a user's draft going out ("draft-send"), the platform's own
+     * auto-reply ("pong"), or a relayed reply ("reply"). Threaded to EmailService as the send-type
+     * tag so a later bounce is attributable. Provider (Gmail/Graph) sends don't emit SES feedback,
+     * so it only affects the SES route, but is required on every call for consistency.
+     */
+    sendType: EmailSendType;
     /** Recipients — display name carried through to the outbound To: header when present. */
     to: Address[];
     /** Cc recipients, same shape as `to`. Omit when there are none. */
@@ -70,6 +77,8 @@ export class ReplySenderService implements ReplySender {
     from: Address;
     subject: string;
     body: string;
+    /** Resolved attachment bytes to include on the outbound message. Omit when there are none. */
+    attachments?: Array<{ filename: string; mimeType: string; content: Uint8Array }>;
     /** RFC 5322 Message-ID of the specific message being replied to, e.g. "<abc@mail.example.com>".
      * Omit when there isn't one (compose-from-scratch, or the linked message's Message-ID
      * couldn't be resolved) — a wrong value is worse than no In-Reply-To/References at all. */
@@ -247,7 +256,7 @@ export class ReplySenderService implements ReplySender {
 
   private async sendViaProvider(
     emx: ExternalMailExchange,
-    opts: { to: string[]; cc?: string[]; bcc?: string[]; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; headers: Array<{ Name: string; Value: string }> },
+    opts: { to: string[]; cc?: string[]; bcc?: string[]; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; headers: Array<{ Name: string; Value: string }>; attachments?: Array<{ filename: string; mimeType: string; content: Uint8Array }> },
   ): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
     // Keyed by EmxPlatform with sendMessage required — always present, no narrowing needed.
     const adapter = this.adapters[emx.platform];
@@ -261,6 +270,7 @@ export class ReplySenderService implements ReplySender {
       textBody: opts.body,
       htmlBody: opts.htmlBody,
       headers: opts.headers,
+      ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
     });
 
     // The adapter resolves its own credentials from `emx` — a missing or unusable identity
@@ -282,24 +292,38 @@ export class ReplySenderService implements ReplySender {
   }
 
   private async sendViaSes(
-    opts: { to: string[]; cc?: string[]; bcc?: string[]; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; threadId?: string; headers: Array<{ Name: string; Value: string }> },
+    opts: { sendType: EmailSendType; to: string[]; cc?: string[]; bcc?: string[]; from: string; subject: string; body: string; htmlBody: string; accountId: string; signalId?: string; threadId?: string; headers: Array<{ Name: string; Value: string }>; attachments?: Array<{ filename: string; mimeType: string; content: Uint8Array }> },
   ): Promise<Result<{ messageId: string; outboundMsgId?: string }, ReplySendError>> {
-    const tags = buildOutboundTags("reply", {
-      accountId: opts.accountId,
-      signalId: opts.signalId,
-      threadId: opts.threadId,
-    });
+    // Correlation tags only — the send-type tag is stamped authoritatively by EmailService.
+    const tags = [
+      { Name: TAG_ACCOUNT_ID, Value: opts.accountId },
+      ...(opts.signalId ? [{ Name: TAG_SIGNAL_ID, Value: opts.signalId }] : []),
+      ...(opts.threadId ? [{ Name: TAG_THREAD_ID, Value: opts.threadId }] : []),
+    ];
 
-    const result = await this.emailService.send({
-      to: opts.to,
-      ...(opts.cc?.length ? { cc: opts.cc } : {}),
-      ...(opts.bcc?.length ? { bcc: opts.bcc } : {}),
-      fromSender: opts.from,
+    // Built as raw MIME (not SES Simple content) so the message can carry attachments — Simple
+    // content cannot. Bcc is deliberately kept OUT of the MIME and passed only via sendRaw's
+    // Destination.BccAddresses, so recipients never see the Bcc header (matching the prior
+    // Simple-send behaviour, which routed Bcc through Destination too).
+    const rawData = buildMimeMessage({
+      from: opts.from,
+      to: opts.to.join(", "),
+      ...(opts.cc?.length ? { cc: opts.cc.join(", ") } : {}),
       subject: opts.subject,
       textBody: opts.body,
       htmlBody: opts.htmlBody,
-      accountId: opts.accountId,
       headers: opts.headers,
+      ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
+    });
+
+    const result = await this.emailService.sendRaw({
+      to: opts.to,
+      ...(opts.cc?.length ? { cc: opts.cc } : {}),
+      ...(opts.bcc?.length ? { bcc: opts.bcc } : {}),
+      rawData,
+      fromSender: opts.from,
+      accountId: opts.accountId,
+      sendType: opts.sendType,
       tags,
     });
 

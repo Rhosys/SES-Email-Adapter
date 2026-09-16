@@ -175,3 +175,75 @@ describe("buildMimeMessage — text/calendar (calendar)", () => {
     expect(bodyOf(message)).toBe(ICS);
   });
 });
+
+describe("buildMimeMessage — attachments (multipart/mixed)", () => {
+  const PDF = new Uint8Array([0x25, 0x50, 0x44, 0x46]); // "%PDF"
+
+  /** Pulls the base64 body of the first part whose header block contains `marker`, then decodes it. */
+  function partBody(message: string, marker: string): string {
+    const idx = message.indexOf(marker);
+    if (idx === -1) throw new Error(`no part matching ${marker}`);
+    const afterHeaders = message.slice(idx).split("\r\n\r\n")[1] ?? "";
+    const b64 = afterHeaders.split("\r\n--")[0]!.replace(/\r\n/g, "");
+    return Buffer.from(b64, "base64").toString("utf8");
+  }
+
+  it("wraps the body in multipart/mixed and appends the attachment as a base64 part", () => {
+    const message = build({
+      attachments: [{ filename: "report.pdf", mimeType: "application/pdf", content: PDF }],
+    });
+    expect(message).toMatch(/Content-Type: multipart\/mixed; boundary="[^"]+"\r\n/);
+    expect(message).toContain("Content-Type: application/pdf; name=\"report.pdf\"\r\n");
+    expect(message).toContain("Content-Disposition: attachment; filename=\"report.pdf\"\r\n");
+    // The attachment bytes round-trip.
+    expect(partBody(message, "application/pdf")).toBe("%PDF");
+  });
+
+  it("keeps the text body as the first part inside the mixed wrapper", () => {
+    const message = build({
+      textBody: "See attached",
+      attachments: [{ filename: "a.txt", mimeType: "text/plain", content: new Uint8Array([65]) }],
+    });
+    // The message-level type is mixed; the text body is a nested text/plain part.
+    expect(message).toMatch(/Content-Type: multipart\/mixed; boundary="[^"]+"\r\n/);
+    expect(partBody(message, "Content-Type: text/plain; charset=UTF-8")).toBe("See attached");
+  });
+
+  it("carries an htmlBody as a multipart/alternative first part alongside the attachment", () => {
+    const message = build({
+      textBody: "plain",
+      htmlBody: "<p>rich</p>",
+      attachments: [{ filename: "a.bin", mimeType: "application/octet-stream", content: new Uint8Array([1]) }],
+    });
+    expect(message).toContain("Content-Type: multipart/mixed;");
+    expect(message).toContain("Content-Type: multipart/alternative;");
+    expect(message).toContain("Content-Type: text/html; charset=UTF-8\r\n");
+  });
+
+  it("closes the mixed body with a final boundary delimiter", () => {
+    const message = build({ attachments: [{ filename: "a.bin", mimeType: "application/octet-stream", content: new Uint8Array([1]) }] });
+    const boundary = /Content-Type: multipart\/mixed; boundary="([^"]+)"/.exec(message)![1]!;
+    expect(message.trimEnd()).toMatch(new RegExp(`--${boundary}--$`));
+  });
+
+  it("is byte-identical to a no-attachment build when attachments is empty", () => {
+    const withEmpty = build({ attachments: [] });
+    const without = build();
+    expect(withEmpty).toBe(without);
+  });
+
+  it("ignores attachments for a calendar send — the iMIP body stays a single actionable part", () => {
+    const message = build({
+      textBody: "BEGIN:VCALENDAR\r\nEND:VCALENDAR",
+      calendar: { method: "REPLY" },
+      attachments: [{ filename: "a.pdf", mimeType: "application/pdf", content: PDF }],
+    });
+    expect(message).not.toContain("multipart/mixed");
+    expect(message).toContain("Content-Type: text/calendar; method=REPLY; charset=UTF-8\r\n");
+  });
+
+  it("defaults a blank mime type to application/octet-stream", () => {
+    const message = build({ attachments: [{ filename: "x", mimeType: "", content: new Uint8Array([1]) }] });
+    expect(message).toContain("Content-Type: application/octet-stream; name=\"x\"\r\n");
+  });
+});

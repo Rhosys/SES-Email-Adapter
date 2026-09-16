@@ -38,6 +38,59 @@ export interface TagContext {
 export type OutboundType = "reply" | "forward" | "draft-send";
 
 /**
+ * The exhaustive set of outbound-email kinds this service sends. Carried on every SES send as the
+ * TAG_TYPE message tag so a later bounce/complaint is always attributable — a send can never fall
+ * through to the "unknown" process again. Required at the EmailService boundary; adding a new send
+ * kind is a compile error until it is added here and classified in systemResponsibleForBounces.
+ */
+export type EmailSendType =
+  | "healthcheck"
+  | "digest"
+  | "onboarding"
+  | "account-invite"
+  | "forward-verification"
+  | "forward"
+  | "reply"
+  | "pong"
+  | "draft-send"
+  | "calendar-forward"
+  | "calendar-rsvp";
+
+const EMAIL_SEND_TYPES: readonly EmailSendType[] = [
+  "healthcheck", "digest", "onboarding", "account-invite", "forward-verification",
+  "forward", "reply", "pong", "draft-send", "calendar-forward", "calendar-rsvp",
+];
+
+/** Narrows an arbitrary tag value to a known EmailSendType. */
+export function isEmailSendType(value: string): value is EmailSendType {
+  return (EMAIL_SEND_TYPES as readonly string[]).includes(value);
+}
+
+/**
+ * Whether WE are responsible for a bounce/complaint on a send of this kind. True for mail we
+ * originate or send under our own platform identity — a bounce there means our own pipeline is
+ * failing, so it is logged at error level. False for mail carrying a user's content to a third
+ * party, where a recipient bounce is normal deliverability and stays at track level.
+ */
+export function systemResponsibleForBounces(type: EmailSendType): boolean {
+  switch (type) {
+    case "healthcheck":
+    case "digest":
+    case "onboarding":
+    case "account-invite":
+    case "forward-verification":
+    case "pong":
+    case "calendar-forward":
+      return true;
+    case "forward":
+    case "reply":
+    case "draft-send":
+    case "calendar-rsvp":
+      return false;
+  }
+}
+
+/**
  * Build the full set of SES message tags for an outbound email.
  * Omits correlation tags whose values are empty/undefined.
  */

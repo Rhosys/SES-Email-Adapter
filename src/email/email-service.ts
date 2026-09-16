@@ -9,6 +9,7 @@ import { permanentSesError } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { sanitizeTagName, sanitizeTagValue } from "./tag-sanitizer.js";
 import { addressDomain } from "./address.js";
+import { TAG_TYPE, type EmailSendType } from "./ses-tags.js";
 
 export type EmailServiceError = TransientSesError | InvalidArgumentError | PermanentSesError;
 
@@ -19,6 +20,12 @@ export interface EmailSendOptions {
   subject: string;
   textBody: string;
   htmlBody?: string;
+  /**
+   * What kind of send this is. Emitted as the TAG_TYPE SES message tag so a later bounce/complaint
+   * is always attributable in feedback processing. Required — there is no default, so no send path
+   * can silently produce an unattributable "unknown" bounce.
+   */
+  sendType: EmailSendType;
   headers?: Array<{ Name: string; Value: string }>;
   tags?: Array<{ Name: string; Value: string }>;
   /**
@@ -37,6 +44,12 @@ export interface EmailRawOptions {
   cc?: string[];
   bcc?: string[];
   rawData: Uint8Array;
+  /**
+   * What kind of send this is. Emitted as the TAG_TYPE SES message tag so a later bounce/complaint
+   * is always attributable in feedback processing. Required — there is no default, so no send path
+   * can silently produce an unattributable "unknown" bounce.
+   */
+  sendType: EmailSendType;
   tags?: Array<{ Name: string; Value: string }>;
   /**
    * The From address for this send. Must be present in the raw MIME's `From:` header too.
@@ -156,8 +169,10 @@ export class EmailService {
     }
 
     // Merge tags: all custom headers are auto-promoted to SES tags (for feedback correlation).
-    // Explicit tags are added after; headers win on name conflict (deduped).
-    const mergedTags = this.mergeHeadersIntoTags(opts.headers, opts.tags);
+    // Explicit tags are added after; headers win on name conflict (deduped). The send-type tag is
+    // injected authoritatively here (see withSendTypeTag) so every send is attributable regardless
+    // of what the caller passed.
+    const mergedTags = this.withSendTypeTag(opts.sendType, this.mergeHeadersIntoTags(opts.headers, opts.tags));
     const emailTags = this.sanitizeTags(mergedTags);
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
@@ -205,7 +220,7 @@ export class EmailService {
       return err(tenantMismatch.error);
     }
 
-    const emailTags = this.sanitizeTags(opts.tags);
+    const emailTags = this.sanitizeTags(this.withSendTypeTag(opts.sendType, opts.tags));
     try {
       const result = await this.sesv2.send(new SendEmailCommand({
         FromEmailAddress: fromAddress,
@@ -233,6 +248,19 @@ export class EmailService {
    * tags that are SES-only (never MIME headers) are appended after. Deduped by
    * Name — headers win on conflict.
    */
+  /**
+   * Sets the TAG_TYPE tag to the send's type authoritatively: drops any caller-supplied tag of the
+   * same name (a caller must not be able to mislabel a send) and prepends the canonical one. This is
+   * the single point where send-type attribution is stamped, so no send path can omit or override it.
+   */
+  private withSendTypeTag(
+    sendType: EmailSendType,
+    tags: Array<{ Name: string; Value: string }> | undefined,
+  ): Array<{ Name: string; Value: string }> {
+    const withoutType = (tags ?? []).filter((t) => t.Name.toLowerCase() !== TAG_TYPE.toLowerCase());
+    return [{ Name: TAG_TYPE, Value: sendType }, ...withoutType];
+  }
+
   private mergeHeadersIntoTags(
     headers: Array<{ Name: string; Value: string }> | undefined,
     tags: Array<{ Name: string; Value: string }> | undefined,

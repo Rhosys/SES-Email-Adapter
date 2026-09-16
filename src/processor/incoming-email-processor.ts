@@ -36,7 +36,7 @@ import { buildActiveThread } from "./thread-factory.js";
 import { getPrimaryThreadMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
 import { getETLD1, assignSystemLabels } from "./filter.js";
 import { isSystemAccount } from "../database/system-account-db.js";
-import { parseHopCount } from "../email/ses-tags.js";
+import { parseHopCount, type EmailSendType } from "../email/ses-tags.js";
 import { toRuleSignalContext, toRuleThreadContext } from "./rule-context.js";
 import { statusToMetric } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
@@ -103,6 +103,8 @@ export type ReplySendError =
 
 export interface ReplySender {
   sendReply(opts: {
+    /** What kind of outbound this is (draft-send, pong, reply) — threaded to EmailService as the send-type tag. */
+    sendType: EmailSendType;
     /** Recipients — display name carried through to the outbound To: header when present. */
     to: Address[];
     /** Cc recipients, same shape as `to`. Omit when there are none. */
@@ -113,6 +115,8 @@ export interface ReplySender {
     from: Address;
     subject: string;
     body: string;
+    /** Resolved attachment bytes to include on the outbound message. Omit when there are none. */
+    attachments?: Array<{ filename: string; mimeType: string; content: Uint8Array }>;
     /** RFC 5322 Message-ID of the specific message being replied to. Omit when there isn't one. */
     inReplyTo?: string;
     /** Absent for platform-originated mail, which sends under the platform tenant. */
@@ -635,6 +639,7 @@ export class IncomingEmailProcessor {
         // the account never verified). allowFallbackToPlatformSending makes that degrade explicit.
         const hopCount = parseHopCount(signal.data.headers);
         const sendResult = await this.replySender.sendReply({
+          sendType: "pong",
           to: [signal.data.from],
           from: { address: signal.data.recipientAddress },
           subject: signal.data.subject ?? "",

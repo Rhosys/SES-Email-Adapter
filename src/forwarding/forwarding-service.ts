@@ -162,6 +162,7 @@ export class ForwardingService implements IForwardingService {
       subject: "Verify your forwarding address",
       textBody: `Click the link below to verify that you want to receive forwarded emails at ${target}:\n\n${verifyUrl}`,
       htmlBody,
+      sendType: "forward-verification",
       tags,
       fromSender: platformFromAddress("notifications", this.mailDomain),
       accountId: this.emailService.platformTenant,
@@ -189,6 +190,7 @@ export class ForwardingService implements IForwardingService {
     const result = await this.emailService.sendRaw({
       to: [toAddress],
       rawData,
+      sendType: "forward",
       accountId: context.accountId,
       tags,
     })

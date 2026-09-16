@@ -8,7 +8,7 @@ import type { AccountDatabase } from "../database/account-database.js";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
-import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_THREAD_ID, TAG_HEALTHCHECK_ID, TAG_PURPOSE } from "../email/ses-tags.js";
+import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_THREAD_ID, TAG_HEALTHCHECK_ID, TAG_PURPOSE, isEmailSendType, systemResponsibleForBounces } from "../email/ses-tags.js";
 
 // 7 days in seconds — soft bounces expire and can retry
 const SOFT_BOUNCE_TTL_SECONDS = 7 * 24 * 60 * 60;
@@ -77,22 +77,27 @@ export class SesFeedbackProcessor {
   /**
    * Identify which of our sending processes produced the email that bounced /
    * complained, and whether a failure there is our problem. A bounce/complaint on
-   * a *system* email we generate (e.g. the daily healthcheck) means our own
-   * pipeline is broken, so it is logged at error level; recipient bounces on
-   * user/forward mail are normal deliverability and stay at track level.
+   * a send WE are responsible for (e.g. the daily healthcheck) means our own pipeline
+   * is broken, so it is logged at error level; bounces on mail carrying a user's content
+   * to a third party are normal deliverability and stay at track level.
+   *
+   * Every send EmailService produces now carries TAG_TYPE (an EmailSendType), so `sendType`
+   * is read straight off it. Only pre-migration in-flight messages lack the tag — those fall
+   * back to the legacy TAG_PURPOSE/healthcheck signal, then to an unattributable "unknown".
    */
-  private describeOrigin(feedback: SesFeedback): { process: string; isSystemError: boolean; healthcheckId?: string } {
+  private describeSendType(feedback: SesFeedback): { sendType: string; systemResponsible: boolean } {
     const tags = feedback.mail.tags ?? {};
-    const healthcheckId = tags[TAG_HEALTHCHECK_ID];
-    // Check TAG_PURPOSE for backward compat with in-flight messages
-    if (healthcheckId || tags[TAG_PURPOSE] === "healthcheck") {
-      return { process: "healthcheck", isSystemError: true, ...(healthcheckId ? { healthcheckId } : {}) };
+    const tagType = tags[TAG_TYPE];
+    if (tagType && isEmailSendType(tagType)) {
+      return { sendType: tagType, systemResponsible: systemResponsibleForBounces(tagType) };
     }
-    const type = tags[TAG_TYPE];
-    if (type) return { process: type, isSystemError: false };
+    // Backward compat with pre-migration in-flight messages that predate TAG_TYPE.
+    if (tags[TAG_HEALTHCHECK_ID] || tags[TAG_PURPOSE] === "healthcheck") {
+      return { sendType: "healthcheck", systemResponsible: true };
+    }
     const purpose = tags[TAG_PURPOSE];
-    if (purpose) return { process: purpose, isSystemError: false };
-    return { process: "unknown", isSystemError: false };
+    if (purpose) return { sendType: purpose, systemResponsible: false };
+    return { sendType: "unknown", systemResponsible: false };
   }
 
   private async processFeedback(feedback: SesFeedback): Promise<Result<void, DbError>> {
@@ -102,11 +107,15 @@ export class SesFeedbackProcessor {
       const isPermanent = feedback.bounce.bounceType === "Permanent";
       const suppressedAt = DateTime.utc().toISO()!;
 
-      const origin = this.describeOrigin(feedback);
-      if (origin.isSystemError) {
-        this.logger.error(`SES bounce on the ${origin.process} process — a system email we send is failing delivery.`, { code: "feedback.system_bounce", feedback });
+      const sendType = this.describeSendType(feedback);
+      const recipients = feedback.bounce.bouncedRecipients.map(r => r.emailAddress).join(", ") || "(none)";
+      const kind = `${feedback.bounce.bounceType}/${feedback.bounce.bounceSubType}`;
+      const messageId = feedback.mail.messageId;
+      const from = feedback.mail.source;
+      if (sendType.systemResponsible) {
+        this.logger.error(`SES ${kind} bounce on a ${sendType.sendType} send — a system email we send (from ${from}, messageId ${messageId}) failed delivery to ${recipients}.`, { code: "feedback.system_bounce", feedback });
       } else {
-        this.logger.track(`SES bounce on the ${origin.process} process.`, { code: "feedback.bounce", feedback });
+        this.logger.track(`SES ${kind} bounce on a ${sendType.sendType} send — email from ${from} (messageId ${messageId}) bounced for ${recipients}.`, { code: "feedback.bounce", feedback });
       }
 
       for (const r of feedback.bounce.bouncedRecipients) {
@@ -215,11 +224,14 @@ export class SesFeedbackProcessor {
     } else if (type === "Complaint" && feedback.complaint) {
       const suppressedAt = DateTime.utc().toISO()!;
 
-      const origin = this.describeOrigin(feedback);
-      if (origin.isSystemError) {
-        this.logger.error(`SES complaint on the ${origin.process} process — a system email we send was marked as spam.`, { code: "feedback.system_complaint", feedback });
+      const sendType = this.describeSendType(feedback);
+      const recipients = feedback.complaint.complainedRecipients.map(r => r.emailAddress).join(", ") || "(none)";
+      const messageId = feedback.mail.messageId;
+      const from = feedback.mail.source;
+      if (sendType.systemResponsible) {
+        this.logger.error(`SES complaint on a ${sendType.sendType} send — a system email we send (from ${from}, messageId ${messageId}) was marked as spam by ${recipients}.`, { code: "feedback.system_complaint", feedback });
       } else {
-        this.logger.track(`SES complaint on the ${origin.process} process.`, { code: "feedback.complaint", feedback });
+        this.logger.track(`SES complaint on a ${sendType.sendType} send — email from ${from} (messageId ${messageId}) marked as spam by ${recipients}.`, { code: "feedback.complaint", feedback });
       }
 
       for (const r of feedback.complaint.complainedRecipients) {

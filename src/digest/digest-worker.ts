@@ -170,6 +170,7 @@ export class DigestWorker {
       subject,
       textBody,
       htmlBody,
+      sendType: "digest",
       headers,
       tags,
       fromSender: platformFromAddress("digest", fromDomain),

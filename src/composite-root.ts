@@ -304,6 +304,7 @@ export class CompositeRoot {
     const draftSendWorker = new DraftSendWorker(
       threadDb,
       externalEmailHandler,
+      new ContentStore(s3),
       logger,
     );
 

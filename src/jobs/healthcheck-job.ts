@@ -52,6 +52,7 @@ export class HealthcheckJob {
         subject,
         textBody: text,
         htmlBody: html,
+        sendType: "healthcheck",
         // TAG_PURPOSE and TAG_HEALTHCHECK_ID are custom MIME headers — they appear in the
         // delivered email AND are auto-promoted to SES tags by EmailService for feedback
         // correlation. Tag values must be [A-Za-z0-9_-], so we use the id without the

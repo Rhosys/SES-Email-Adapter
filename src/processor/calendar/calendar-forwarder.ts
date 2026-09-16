@@ -124,6 +124,11 @@ interface CalendarSend {
   icsContent: string;
   method: string;
   tenant: string;
+  /**
+   * Which calendar send this is. Passed to EmailService as the send-type tag so a later
+   * bounce/complaint is attributable in feedback processing instead of the "unknown" process.
+   */
+  sendType: "calendar-forward" | "calendar-rsvp";
   /** Extra MIME headers (e.g. the calendar signal ID). Also mirrored as SES tags. */
   headers?: Array<{ Name: string; Value: string }>;
   /** Log `code` used when SES permanently rejects the send. */
@@ -189,6 +194,7 @@ export class CalendarForwarder {
       icsContent,
       method: calendarData.method,
       tenant: this.emailService.platformTenant,
+      sendType: "calendar-forward",
       headers: [{ Name: "X-Numaeel-Calendar-Signal-Id", Value: calendarSignal.id }],
       permanentLogCode: "calendar_forwarder.send_permanent",
       logContext: { accountId, signalId: calendarSignal.id },
@@ -270,6 +276,7 @@ export class CalendarForwarder {
       icsContent,
       method: "REPLY",
       tenant: accountId,
+      sendType: "calendar-rsvp",
       permanentLogCode: "rsvp.send_permanent",
       logContext: { accountId },
     }, logger);
@@ -337,7 +344,8 @@ export class CalendarForwarder {
         rawData,
         fromSender: send.from,
         accountId: send.tenant,
-        // Mirror custom MIME headers as SES tags so they surface in feedback notifications.
+        sendType: send.sendType,
+        // Mirror any extra custom MIME headers as tags alongside the send-type tag.
         ...(send.headers ? { tags: send.headers } : {}),
       });
 

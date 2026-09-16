@@ -251,6 +251,7 @@ export class OnboardingTaskHandler {
       subject: "The Next Step",
       textBody,
       htmlBody,
+      sendType: "onboarding",
       tags,
       fromSender: platformFromAddress("notifications", MAIL_DOMAIN),
       accountId: this.emailService.platformTenant,

@@ -40,6 +40,11 @@ function describeSendFailure(error: ReplySendError): string {
   }
 }
 
+/** Fetches attachment bytes by their content-bucket storage key. Satisfied by ContentStore. */
+export interface IAttachmentContentStore {
+  getContent(s3Key: string): Promise<Uint8Array>;
+}
+
 export interface IDraftSendThreadDb {
   getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>>;
   updateSignalSendStatus(accountId: string, signalLookupId: string, update: {
@@ -56,12 +61,29 @@ export interface IDraftSendThreadDb {
 export class DraftSendWorker {
   private readonly threadDb: IDraftSendThreadDb;
   private readonly replySender: ReplySender;
+  private readonly contentStore: IAttachmentContentStore;
   private readonly logger: Logger;
 
-  constructor(threadDb: IDraftSendThreadDb, replySender: ReplySender, logger: Logger) {
+  constructor(threadDb: IDraftSendThreadDb, replySender: ReplySender, contentStore: IAttachmentContentStore, logger: Logger) {
     this.threadDb = threadDb;
     this.replySender = replySender;
+    this.contentStore = contentStore;
     this.logger = logger;
+  }
+
+  /**
+   * Fetch the bytes for each attachment recorded on the draft. A draft with no attachments
+   * (the norm today, until the compose API accepts them) resolves to an empty array and the
+   * message goes out exactly as before.
+   */
+  private async resolveAttachments(signal: Signal): Promise<Array<{ filename: string; mimeType: string; content: Uint8Array }>> {
+    const attachments = signal.data.attachments ?? [];
+    const resolved: Array<{ filename: string; mimeType: string; content: Uint8Array }> = [];
+    for (const att of attachments) {
+      const content = await this.contentStore.getContent(att.s3Key);
+      resolved.push({ filename: att.filename, mimeType: att.mimeType, content });
+    }
+    return resolved;
   }
 
   async process(payload: DraftSendPayload): Promise<Result<void, DbError | ReplySendError>> {
@@ -107,14 +129,17 @@ export class DraftSendWorker {
     const body = "textBody" in signal.data ? (signal.data.textBody ?? "") : "";
     const inReplyTo = await this.resolveInReplyTo(accountId, threadId, signal);
     const hopCount = parseHopCount(signal.data.headers);
+    const attachments = await this.resolveAttachments(signal);
 
     const sendResult = await this.replySender.sendReply({
+      sendType: "draft-send",
       to,
       ...(cc.length ? { cc } : {}),
       ...(bccAddresses.length ? { bcc: bccAddresses } : {}),
       from,
       subject,
       body,
+      ...(attachments.length ? { attachments } : {}),
       ...(inReplyTo ? { inReplyTo } : {}),
       ...(hopCount !== undefined ? { hopCount } : {}),
       accountId,

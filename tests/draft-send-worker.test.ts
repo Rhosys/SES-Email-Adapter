@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ok, err, dbError } from "../src/errors.js";
 import { DraftSendWorker } from "../src/processor/draft-send-worker.js";
-import type { IDraftSendThreadDb } from "../src/processor/draft-send-worker.js";
+import type { IDraftSendThreadDb, IAttachmentContentStore } from "../src/processor/draft-send-worker.js";
 import type { ReplySender } from "../src/processor/incoming-email-processor.js";
 import type { DraftSendPayload } from "../src/processor/draft-send-dispatcher.js";
 import type { Signal } from "../src/types/index.js";
@@ -62,6 +62,10 @@ function makeReplySender(): ReplySender {
   };
 }
 
+function makeContentStore(): IAttachmentContentStore {
+  return { getContent: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3])) };
+}
+
 const PAYLOAD: DraftSendPayload = {
   signalId: "USR#signal-001",
   accountId: "acct-001",
@@ -79,7 +83,7 @@ describe("DraftSendWorker", () => {
     vi.mocked(validateRecipientMx).mockResolvedValue(ok(undefined));
     threadDb = makeThreadDb();
     replySender = makeReplySender();
-    worker = new DraftSendWorker(threadDb, replySender, createMockLogger());
+    worker = new DraftSendWorker(threadDb, replySender, makeContentStore(), createMockLogger());
   });
 
   it("discards when signal not found (returns ok)", async () => {
@@ -115,6 +119,7 @@ describe("DraftSendWorker", () => {
 
     expect(result.isOk()).toBe(true);
     expect(replySender.sendReply).toHaveBeenCalledWith({
+      sendType: "draft-send",
       to: [{ address: "recipient@example.com" }],
       from: { address: "me@example.com" },
       subject: "Hello",
@@ -131,6 +136,32 @@ describe("DraftSendWorker", () => {
       gsi3pk: "ACCT#acct-001#MSGID#ses-msg-001@eu-central-1.amazonses.com",
       threadId: "thr-001",
     });
+  });
+
+  it("resolves attachment bytes from the content store and passes them to sendReply", async () => {
+    const contentStore: IAttachmentContentStore = {
+      getContent: vi.fn().mockResolvedValue(new Uint8Array([0x25, 0x50, 0x44, 0x46])),
+    };
+    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({
+      data: {
+        attachments: [{ filename: "report.pdf", mimeType: "application/pdf", sizeBytes: 4, s3Key: "content/acct-001/att/report.pdf" }],
+      },
+    })));
+    const localWorker = new DraftSendWorker(threadDb, replySender, contentStore, createMockLogger());
+
+    const result = await localWorker.process(PAYLOAD);
+
+    expect(result.isOk()).toBe(true);
+    expect(contentStore.getContent).toHaveBeenCalledWith("content/acct-001/att/report.pdf");
+    expect(replySender.sendReply).toHaveBeenCalledWith(expect.objectContaining({
+      attachments: [{ filename: "report.pdf", mimeType: "application/pdf", content: new Uint8Array([0x25, 0x50, 0x44, 0x46]) }],
+    }));
+  });
+
+  it("omits attachments from sendReply when the draft has none", async () => {
+    // The common case today — no attachments field passed, so the send is unchanged.
+    await worker.process(PAYLOAD);
+    expect(replySender.sendReply).toHaveBeenCalledWith(expect.not.objectContaining({ attachments: expect.anything() }));
   });
 
   // threadId now always comes from the dispatch payload (DraftSendPayload.threadId: string,
@@ -160,7 +191,7 @@ describe("DraftSendWorker", () => {
 
     it("omits In-Reply-To and tracks (not errors) when the linked signal is not found — expected once creation-time validation is gone", async () => {
       const logger = createMockLogger();
-      const localWorker = new DraftSendWorker(threadDb, replySender, logger);
+      const localWorker = new DraftSendWorker(threadDb, replySender, makeContentStore(), logger);
       vi.mocked(threadDb.getSignalById)
         .mockResolvedValueOnce(ok(makeSignal({ data: { linkedSignalId: "USR#missing-001" } })))
         .mockResolvedValueOnce(ok(null));
@@ -175,7 +206,7 @@ describe("DraftSendWorker", () => {
 
     it("omits In-Reply-To and logs a warning when the linked signal has no Message-ID header", async () => {
       const logger = createMockLogger();
-      const localWorker = new DraftSendWorker(threadDb, replySender, logger);
+      const localWorker = new DraftSendWorker(threadDb, replySender, makeContentStore(), logger);
       vi.mocked(threadDb.getSignalById)
         .mockResolvedValueOnce(ok(makeSignal({ data: { linkedSignalId: "USR#linked-001" } })))
         .mockResolvedValueOnce(ok(makeSignal({ id: "USR#linked-001", data: { headers: {} } })));
@@ -257,7 +288,7 @@ describe("DraftSendWorker", () => {
 
   it("returns ok and logs WARN on permanent SES error — no retry", async () => {
     const logger = createMockLogger();
-    const localWorker = new DraftSendWorker(threadDb, replySender, logger);
+    const localWorker = new DraftSendWorker(threadDb, replySender, makeContentStore(), logger);
     vi.mocked(replySender.sendReply).mockResolvedValueOnce(err({ kind: "permanent_ses_error", errorName: "MessageRejected", httpStatus: 400, message: "Email address is not verified", cause: new Error("test") }));
 
     const result = await localWorker.process(PAYLOAD);
@@ -275,7 +306,7 @@ describe("DraftSendWorker", () => {
 
   it("parks the draft with a reconnect prompt when the mailbox lacks the send scope", async () => {
     const logger = createMockLogger();
-    const localWorker = new DraftSendWorker(threadDb, replySender, logger);
+    const localWorker = new DraftSendWorker(threadDb, replySender, makeContentStore(), logger);
     vi.mocked(replySender.sendReply).mockResolvedValueOnce(err({ kind: "provider_send_scope_missing", cause: "insufficient permissions" }));
 
     const result = await localWorker.process(PAYLOAD);
@@ -302,7 +333,7 @@ describe("DraftSendWorker", () => {
   });
 
   it("retries a transient provider failure rather than parking the draft", async () => {
-    const localWorker = new DraftSendWorker(threadDb, replySender, createMockLogger());
+    const localWorker = new DraftSendWorker(threadDb, replySender, makeContentStore(), createMockLogger());
     vi.mocked(replySender.sendReply).mockResolvedValueOnce(err({ kind: "provider_send_failed", cause: "503" }));
 
     const result = await localWorker.process(PAYLOAD);
