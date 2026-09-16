@@ -151,18 +151,21 @@ export class ThreadDatabase {
       // collides across multiple signals we must pick deterministically: choose the oldest by createdAt —
       // the thread the Message-ID was first associated with — so retries always resolve the same way.
       const ordered = [...items].sort((a, b) => String((a as Partial<Signal>).createdAt ?? "").localeCompare(String((b as Partial<Signal>).createdAt ?? "")));
-      if (ordered.length > 1) {
-        // A Message-ID is supposed to be globally unique, so GSI3 should hold at most one signal per key.
-        // Compare the colliding signals to decide whether the duplicate is consequential: if every match
+      // Signals with an undefined threadId are blocked/quarantined — they aren't threaded yet, so they are
+      // not up for reply-threading validation and cannot be a consequential collision. Exclude them entirely.
+      const threaded = ordered.filter(i => (i as Partial<Signal>).threadId !== undefined);
+      if (threaded.length > 1) {
+        // A Message-ID is supposed to be globally unique, so GSI3 should hold at most one threaded signal per
+        // key. Compare the colliding signals to decide whether the duplicate is consequential: if every match
         // resolves to the same threadId, the threading outcome is identical no matter which we pick, so it
         // is benign. Only differing threadIds change where a reply lands — that is the real integrity bug.
-        const collisions = ordered.map(i => {
+        const collisions = threaded.map(i => {
           const s = i as Partial<Signal>;
           return { id: s.id, signalLookupId: s.signalLookupId, threadId: s.threadId, status: s.status, source: s.source, type: s.type, createdAt: s.createdAt };
         });
         const distinctThreadIds = new Set(collisions.map(c => c.threadId));
         const sameThread = distinctThreadIds.size <= 1;
-        const context = { code: "thread_database.email_message_id_not_unique", gsi3pk, count: ordered.length, sameThread, collisions };
+        const context = { code: "thread_database.email_message_id_not_unique", gsi3pk, count: threaded.length, sameThread, collisions };
         if (sameThread) {
           // Benign: all matches point at the same thread. Log for visibility, no developer action required.
           this.logger.warn("Multiple signal records share one Message-ID but resolve to the same thread — threading is unaffected. Logged for visibility; no developer action required.", context);
