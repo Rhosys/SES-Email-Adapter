@@ -14,7 +14,7 @@ import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency
 import { deriveGroupingKey } from "../grouping-key.js";
 import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
-import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
+import type { ContentSanitizerClient, BounceInfo } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
 import type { RuleEvalResult } from "./interpret-rule-result.js";
 import { buildEmbedText } from "../embedding/embed-text.js";
@@ -446,6 +446,45 @@ export class IncomingEmailProcessor {
     const owner = ownerResult.value;
     if (!owner || owner.status === "deleted") return ok(null);
     return ok({ accountId: owner.accountId, aliasConfig: null });
+  }
+
+  /**
+   * Reacts to an external bounce/DSN detected by the content sanitizer (see BounceInfo) — most
+   * likely one that never went through SES's own send-time bounce feedback loop
+   * (SesFeedbackProcessor): a receiving MTA that accepted the original message and rejected it
+   * later, out of band (e.g. Google Groups checking posting permission after acceptance), rather
+   * than at SMTP time. Authenticity for the bounce is already established by the time this is
+   * called — it comes from the DKIM/DMARC gate earlier in the pipeline (step 1b), not from
+   * anything checked here — so this method is purely about noticing and recording it: a WARN log,
+   * plus the failed address going into the same suppression list SES's own bounce feedback uses
+   * (see notifier/bounce-suppression.ts). A no-op when `bounceInfo` is undefined.
+   */
+  private async handleExternalBounce(bounceInfo: BounceInfo | undefined, from: string, accountId: string, compositeMailMessageId: string): Promise<void> {
+    if (!bounceInfo) return;
+
+    const failedAddress = bounceInfo.originalRecipient ?? bounceInfo.finalRecipient;
+    this.logger.warn(`External bounce/DSN received from ${from} — a message could not be delivered, reported out-of-band rather than via SES's own bounce feedback.`, {
+      code: "processor.external_bounce_detected",
+      accountId,
+      from,
+      action: bounceInfo.action,
+      status: bounceInfo.status,
+      diagnosticCode: bounceInfo.diagnosticCode,
+      failedAddress,
+      compositeMailMessageId,
+    });
+
+    if (!failedAddress) return;
+    const isPermanent = bounceInfo.action !== "delayed";
+    const suppressResult = await this.processingDb.suppressAddress(buildBounceSuppressionEntry({
+      address: failedAddress,
+      isPermanent,
+      reason: "external_bounce",
+      feedback: bounceInfo,
+    }));
+    if (suppressResult.isErr()) {
+      this.logger.warn("Failed to record external bounce in suppression list.", { code: "processor.external_bounce_suppress_failed", accountId, failedAddress, error: suppressResult.error });
+    }
   }
 
   /**
@@ -1084,42 +1123,9 @@ export class IncomingEmailProcessor {
     const { parsed: sanitizedParsed } = sanitizeResult.value;
     const sanitizerAssets = sanitizedParsed.assets ?? [];
 
-    // 2a. External bounce/DSN detection — a delivery-status part extracted by the content
-    // sanitizer means this message is a bounce, most likely one that never went through
-    // SES's own send-time bounce feedback loop (SesFeedbackProcessor): a receiving MTA that
-    // accepted the original message and rejected it later, out of band (e.g. Google Groups
-    // checking posting permission after acceptance), rather than at SMTP time. Authenticity
-    // for this message was already established above (step 1b): reaching this point means its
-    // own DKIM/DMARC verdicts passed, so the bounce genuinely came from the domain it claims —
-    // that's a property of the message we just received, independent of what its DSN body
-    // claims about the original recipient.
+    // 2a. External bounce/DSN detection — see handleExternalBounce for what this covers and why.
     const bounceInfo = sanitizedParsed.bounce;
-    if (bounceInfo) {
-      const failedAddress = bounceInfo.originalRecipient ?? bounceInfo.finalRecipient;
-      this.logger.warn(`External bounce/DSN received from ${sanitizedParsed.from.address} — a message could not be delivered, reported out-of-band rather than via SES's own bounce feedback.`, {
-        code: "processor.external_bounce_detected",
-        accountId,
-        from: sanitizedParsed.from.address,
-        action: bounceInfo.action,
-        status: bounceInfo.status,
-        diagnosticCode: bounceInfo.diagnosticCode,
-        failedAddress,
-        compositeMailMessageId: msg.compositeMailMessageId,
-      });
-
-      if (failedAddress) {
-        const isPermanent = bounceInfo.action !== "delayed";
-        const suppressResult = await this.processingDb.suppressAddress(buildBounceSuppressionEntry({
-          address: failedAddress,
-          isPermanent,
-          reason: "external_bounce",
-          feedback: bounceInfo,
-        }));
-        if (suppressResult.isErr()) {
-          this.logger.warn("Failed to record external bounce in suppression list.", { code: "processor.external_bounce_suppress_failed", accountId, failedAddress, error: suppressResult.error });
-        }
-      }
-    }
+    await this.handleExternalBounce(bounceInfo, sanitizedParsed.from.address, accountId, msg.compositeMailMessageId);
 
     if (sanitizedParsed.droppedAttachments && sanitizedParsed.droppedAttachments.length > 0) {
       const reasonSummary = summarizeDroppedReasons(sanitizedParsed.droppedAttachments);
