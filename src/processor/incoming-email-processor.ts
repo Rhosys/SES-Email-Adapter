@@ -38,6 +38,7 @@ import { getETLD1, assignSystemLabels } from "./filter.js";
 import { isSystemAccount } from "../database/system-account-db.js";
 import { parseHopCount, type EmailSendType } from "../email/ses-tags.js";
 import { toRuleSignalContext, toRuleThreadContext } from "./rule-context.js";
+import { buildBounceSuppressionEntry } from "../notifier/bounce-suppression.js";
 import { statusToMetric } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
 import { isReplyTargetSafe } from "./reply-target-validator.js";
@@ -150,10 +151,6 @@ import type { SESReceiptStatus } from "aws-lambda";
 export type SesVerdictStatus = SESReceiptStatus["status"];
 
 const systemSignalDefaultRetentionDuration = Math.floor(Duration.fromISO("P90D").as("seconds"));
-
-// 7 days in seconds — mirrors SesFeedbackProcessor's SOFT_BOUNCE_TTL_SECONDS. Kept as a
-// separate constant (not imported) since the two bounce paths are otherwise unrelated code.
-const EXTERNAL_BOUNCE_SOFT_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 export interface InboundSignalMessage {
   /**
@@ -1112,13 +1109,12 @@ export class IncomingEmailProcessor {
 
       if (failedAddress) {
         const isPermanent = bounceInfo.action !== "delayed";
-        const suppressResult = await this.processingDb.suppressAddress({
+        const suppressResult = await this.processingDb.suppressAddress(buildBounceSuppressionEntry({
           address: failedAddress,
+          isPermanent,
           reason: "external_bounce",
-          suppressedAt: DateTime.utc().toISO()!,
-          ...(!isPermanent ? { ttl: Math.floor(Date.now() / 1000) + EXTERNAL_BOUNCE_SOFT_TTL_SECONDS } : {}),
           feedback: bounceInfo,
-        });
+        }));
         if (suppressResult.isErr()) {
           this.logger.warn("Failed to record external bounce in suppression list.", { code: "processor.external_bounce_suppress_failed", accountId, failedAddress, error: suppressResult.error });
         }

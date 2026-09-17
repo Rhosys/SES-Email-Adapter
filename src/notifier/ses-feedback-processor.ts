@@ -9,9 +9,7 @@ import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_THREAD_ID, TAG_HEALTHCHECK_ID, TAG_PURPOSE, isEmailSendType, systemResponsibleForBounces } from "../email/ses-tags.js";
-
-// 7 days in seconds — soft bounces expire and can retry
-const SOFT_BOUNCE_TTL_SECONDS = 7 * 24 * 60 * 60;
+import { buildBounceSuppressionEntry } from "./bounce-suppression.js";
 
 export interface FeedbackSignalStore {
   getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>>;
@@ -105,7 +103,6 @@ export class SesFeedbackProcessor {
 
     if (type === "Bounce" && feedback.bounce) {
       const isPermanent = feedback.bounce.bounceType === "Permanent";
-      const suppressedAt = DateTime.utc().toISO()!;
 
       const sendType = this.describeSendType(feedback);
       const recipients = feedback.bounce.bouncedRecipients.map(r => r.emailAddress).join(", ") || "(none)";
@@ -121,15 +118,14 @@ export class SesFeedbackProcessor {
       for (const r of feedback.bounce.bouncedRecipients) {
         const address = r.emailAddress;
         const tagSignalId = feedback.mail.tags?.[TAG_SIGNAL_ID];
-        const entry: SuppressedAddress = {
+        const entry = buildBounceSuppressionEntry({
           address,
+          isPermanent,
           reason: isPermanent ? "hard_bounce" : "soft_bounce",
-          suppressedAt,
-          ...(!isPermanent ? { ttl: Math.floor(Date.now() / 1000) + SOFT_BOUNCE_TTL_SECONDS } : {}),
           feedback,
           sesMessageId: feedback.mail.messageId,
           ...(tagSignalId ? { linkedSignalId: tagSignalId } : {}),
-        };
+        });
         const suppressResult = await this.processingDb.suppressAddress(entry);
         if (suppressResult.isErr()) return err(suppressResult.error);
 
