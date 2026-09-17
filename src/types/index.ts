@@ -162,7 +162,7 @@ export interface NoticeData {
   workflow: "notice";
   noticeType:
     | "terms_update" | "privacy_policy" | "data_processor" | "cookie_policy" | "compliance"
-    | "service_notice" | "government" | "account_notification" | "security_awareness" | "other";
+    | "service_notice" | "government" | "account_notification" | "security_awareness" | "bounce" | "other";
   provider: string;
   effectiveDate?: string;
   /** UTC instant derived from effectiveDate at classification time (internal; not in API schema). */
@@ -1001,7 +1001,7 @@ export interface ApiErrorBody {
 // Suppression list
 // ---------------------------------------------------------------------------
 
-export const SUPPRESSION_REASONS = ["hard_bounce", "soft_bounce", "complaint", "manual"] as const;
+export const SUPPRESSION_REASONS = ["hard_bounce", "soft_bounce", "complaint", "manual", "external_bounce"] as const;
 export type SuppressionReason = (typeof SUPPRESSION_REASONS)[number];
 
 export interface SuppressedAddress {

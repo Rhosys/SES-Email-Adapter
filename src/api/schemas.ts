@@ -234,7 +234,7 @@ export const ContentData = z.object({
 
 export const NoticeData = z.object({
   workflow: z.literal("notice"),
-  noticeType: z.enum(["terms_update", "privacy_policy", "data_processor", "cookie_policy", "compliance", "service_notice", "government", "account_notification", "security_awareness", "other"]),
+  noticeType: z.enum(["terms_update", "privacy_policy", "data_processor", "cookie_policy", "compliance", "service_notice", "government", "account_notification", "security_awareness", "bounce", "other"]),
   provider: z.string(),
   effectiveDate: z.string().optional(),
   referenceNumber: z.string().optional(),

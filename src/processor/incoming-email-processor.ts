@@ -151,6 +151,10 @@ export type SesVerdictStatus = SESReceiptStatus["status"];
 
 const systemSignalDefaultRetentionDuration = Math.floor(Duration.fromISO("P90D").as("seconds"));
 
+// 7 days in seconds — mirrors SesFeedbackProcessor's SOFT_BOUNCE_TTL_SECONDS. Kept as a
+// separate constant (not imported) since the two bounce paths are otherwise unrelated code.
+const EXTERNAL_BOUNCE_SOFT_TTL_SECONDS = 7 * 24 * 60 * 60;
+
 export interface InboundSignalMessage {
   /**
    * Optional sanity-check value. The pipeline always re-derives the owning accountId
@@ -1083,6 +1087,44 @@ export class IncomingEmailProcessor {
     const { parsed: sanitizedParsed } = sanitizeResult.value;
     const sanitizerAssets = sanitizedParsed.assets ?? [];
 
+    // 2a. External bounce/DSN detection — a delivery-status part extracted by the content
+    // sanitizer means this message is a bounce, most likely one that never went through
+    // SES's own send-time bounce feedback loop (SesFeedbackProcessor): a receiving MTA that
+    // accepted the original message and rejected it later, out of band (e.g. Google Groups
+    // checking posting permission after acceptance), rather than at SMTP time. Authenticity
+    // for this message was already established above (step 1b): reaching this point means its
+    // own DKIM/DMARC verdicts passed, so the bounce genuinely came from the domain it claims —
+    // that's a property of the message we just received, independent of what its DSN body
+    // claims about the original recipient.
+    const bounceInfo = sanitizedParsed.bounce;
+    if (bounceInfo) {
+      const failedAddress = bounceInfo.originalRecipient ?? bounceInfo.finalRecipient;
+      this.logger.warn(`External bounce/DSN received from ${sanitizedParsed.from.address} — a message could not be delivered, reported out-of-band rather than via SES's own bounce feedback.`, {
+        code: "processor.external_bounce_detected",
+        accountId,
+        from: sanitizedParsed.from.address,
+        action: bounceInfo.action,
+        status: bounceInfo.status,
+        diagnosticCode: bounceInfo.diagnosticCode,
+        failedAddress,
+        compositeMailMessageId: msg.compositeMailMessageId,
+      });
+
+      if (failedAddress) {
+        const isPermanent = bounceInfo.action !== "delayed";
+        const suppressResult = await this.processingDb.suppressAddress({
+          address: failedAddress,
+          reason: "external_bounce",
+          suppressedAt: DateTime.utc().toISO()!,
+          ...(!isPermanent ? { ttl: Math.floor(Date.now() / 1000) + EXTERNAL_BOUNCE_SOFT_TTL_SECONDS } : {}),
+          feedback: bounceInfo,
+        });
+        if (suppressResult.isErr()) {
+          this.logger.warn("Failed to record external bounce in suppression list.", { code: "processor.external_bounce_suppress_failed", accountId, failedAddress, error: suppressResult.error });
+        }
+      }
+    }
+
     if (sanitizedParsed.droppedAttachments && sanitizedParsed.droppedAttachments.length > 0) {
       const reasonSummary = summarizeDroppedReasons(sanitizedParsed.droppedAttachments);
       this.logger.warn(`Message had attachment(s) dropped by content sanitizer: ${reasonSummary}`, {
@@ -1230,6 +1272,15 @@ export class IncomingEmailProcessor {
       classificationOutput = { workflow: "unspecified", workflowData: { workflow: "unspecified" }, tags: [], summary: "", labels: [], actions: [] };
     } else {
       classificationOutput = classification.value;
+    }
+
+    // 4a. Bounce override — deterministic from the sanitizer's DSN extraction, so it takes
+    // priority over whatever the classifier guessed. Overriding after classify() (rather than
+    // skipping classify() outright) keeps this on the same thread-matching/save path as every
+    // other notice, instead of duplicating that machinery for a fast-path exit.
+    if (bounceInfo) {
+      classificationOutput.workflow = "notice";
+      classificationOutput.workflowData = { workflow: "notice", noticeType: "bounce", provider: senderETLD1 } as unknown as WorkflowData;
     }
 
     // 4b. requiresReply override — if the alias is not a direct recipient (only CC/BCC),
