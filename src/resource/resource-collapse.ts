@@ -36,7 +36,7 @@ function titlesMatch(a?: string, b?: string): boolean {
 // Merges `other` into `target` in place: assets are unioned (dedup by type+rawValue), and
 // whichever side was updated most recently wins on the display/status fields.
 function mergeInto(target: Resource, other: Resource): void {
-  for (const asset of other.assets) {
+  for (const asset of other.assets ?? []) {
     if (!target.assets.some(a => a.type === asset.type && a.rawValue === asset.rawValue)) {
       target.assets.push(asset);
     }
@@ -73,7 +73,7 @@ export function collapseResources(resources: readonly Resource[]): Resource[] {
     for (const resource of group) {
       const match = merged.find(m => titlesMatch(m.title, resource.title) && sameDay(m.displayDate, resource.displayDate));
       if (match) mergeInto(match, resource);
-      else merged.push({ ...resource, assets: [...resource.assets] });
+      else merged.push({ ...resource, assets: [...(resource.assets ?? [])] });
     }
     collapsed.push(...merged);
   }

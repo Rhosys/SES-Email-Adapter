@@ -81,4 +81,16 @@ describe("collapseResources", () => {
     expect(result).toHaveLength(1);
     expect(result[0]!.assets).toHaveLength(2);
   });
+
+  it("handles DynamoDB items that lack the assets attribute", () => {
+    const a = makeResource({ resourceKey: "a", title: "Concert" });
+    const b = makeResource({ resourceKey: "b", title: "Concert" });
+    delete (a as { assets?: unknown }).assets;
+    delete (b as { assets?: unknown }).assets;
+
+    const result = collapseResources([a, b]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]!.assets).toEqual([]);
+  });
 });
