@@ -127,6 +127,19 @@ interface ExtractedLink {
   text: string | null;
 }
 
+/**
+ * Fields pulled from an RFC 3464 `message/delivery-status` part — the machine-readable
+ * body of a bounce/DSN. Presence of this field on the response is itself the "this message
+ * is a bounce" signal; the processor never has to re-sniff Content-Type itself.
+ */
+interface BounceInfo {
+  action?: string;
+  status?: string;
+  diagnosticCode?: string;
+  originalRecipient?: string;
+  finalRecipient?: string;
+}
+
 interface ContentSanitizeResponse {
   success: true;
   parsed: {
@@ -144,6 +157,7 @@ interface ContentSanitizeResponse {
     links?: ExtractedLink[];
     droppedAttachments?: DroppedAttachment[];
     inlineImages?: InlineImageRef[];
+    bounce?: BounceInfo;
   };
 }
 
@@ -201,6 +215,49 @@ function parseAddress(addr: unknown): EmailAddress | undefined {
   const first = obj.value?.[0];
   if (!first?.address) return undefined;
   return { address: first.address, ...(first.name ? { name: first.name } : {}) };
+}
+
+/**
+ * True when the message's top-level Content-Type declares it as an RFC 3464 delivery
+ * status notification (`multipart/report; report-type=delivery-status`) — the standard
+ * bounce/DSN envelope used by mailer-daemons across MTAs (Google, Postfix, Exchange, etc.).
+ */
+function isDeliveryStatusReport(parsed: { headers: Map<string, unknown> }): boolean {
+  const contentType = parsed.headers.get("content-type") as { value?: string; params?: Record<string, string> } | undefined;
+  if (!contentType?.value) return false;
+  return contentType.value.toLowerCase() === "multipart/report"
+    && (contentType.params?.["report-type"] ?? "").toLowerCase() === "delivery-status";
+}
+
+/**
+ * Parses an RFC 3464 `message/delivery-status` part's per-recipient fields out of the
+ * message body text. mailparser has no special handling for `message/delivery-status` —
+ * it has no filename/disposition, so mailparser folds its raw "Field: value" lines
+ * straight into `parsed.text` alongside the report's human-readable part, rather than
+ * surfacing it as a separate attachment. The DSN body is a small, fixed set of such lines
+ * (optionally split into a per-message block followed by one per-recipient block); we only
+ * care about the handful of fields that identify what failed and why, so a flat line scan
+ * over the combined text is sufficient — the last-seen value of each field wins, which is
+ * correct for the common single-recipient case, and prose in the human-readable part is in
+ * practice never going to collide with these exact field names.
+ */
+function parseDeliveryStatusPart(text: string): BounceInfo {
+  const fields: BounceInfo = {};
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^([A-Za-z-]+):\s*(.*)$/);
+    if (!match) continue;
+    const [, rawKey, rawValue] = match;
+    const key = rawKey!.toLowerCase();
+    const value = rawValue!.trim();
+    // Recipient fields are of the form "rfc822;address@example.com" — strip the address-type prefix.
+    const addressValue = value.replace(/^rfc822;\s*/i, "");
+    if (key === "action") fields.action = value.toLowerCase();
+    else if (key === "status") fields.status = value;
+    else if (key === "diagnostic-code") fields.diagnosticCode = value;
+    else if (key === "original-recipient") fields.originalRecipient = addressValue;
+    else if (key === "final-recipient") fields.finalRecipient = addressValue;
+  }
+  return fields;
 }
 
 function parseAddressList(addr: unknown): EmailAddress[] {
@@ -335,6 +392,12 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   }
 
   // 4. Validate: attachment count ≤ 50, total size ≤ 25MB
+  //
+  // Bounce/DSN detection: a `multipart/report; report-type=delivery-status` message's
+  // machine-readable `message/delivery-status` part has no filename/disposition, so
+  // mailparser folds it straight into parsed.text rather than surfacing it as an attachment
+  // (see parseDeliveryStatusPart) — nothing to exclude from the attachment loop below.
+  const bounceInfo = isDeliveryStatusReport(parsed) && parsed.text ? parseDeliveryStatusPart(parsed.text) : undefined;
   const attachments = parsed.attachments ?? [];
   if (attachments.length > MAX_ATTACHMENTS) {
     return {
@@ -634,6 +697,9 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   // here, or they'd be both an attachment and an unresolved inline ref.
   if (referencedInlineImages.length > 0) {
     result.parsed.inlineImages = referencedInlineImages;
+  }
+  if (bounceInfo) {
+    result.parsed.bounce = bounceInfo;
   }
 
   logger?.trackPoint("response_built");

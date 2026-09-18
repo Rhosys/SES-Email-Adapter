@@ -1685,6 +1685,84 @@ describe("IncomingEmailProcessor", () => {
   });
 
   // -------------------------------------------------------------------------
+  // External bounce/DSN detection (out-of-band bounce arriving as ordinary inbound mail,
+  // distinct from SES's own send-time bounce feedback loop — see SesFeedbackProcessor)
+  // -------------------------------------------------------------------------
+
+  describe("external bounce/DSN detection", () => {
+    beforeEach(() => {
+      vi.mocked(contentSanitizer.invoke).mockReturnValueOnce(Promise.resolve(ok({
+        success: true as const,
+        parsed: {
+          from: { address: "mailer-daemon@mindstone.com" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Delivery Status Notification (Failure)",
+          textBody: "Your message wasn't delivered.",
+          attachments: [],
+          headers: {},
+          bounce: {
+            action: "failed",
+            status: "5.1.1",
+            diagnosticCode: "smtp; 550-5.1.1 The email account that you tried to reach does not exist",
+            originalRecipient: "no-reply@mindstone.com",
+            finalRecipient: "no-reply@mindstone.com",
+          },
+        },
+        urlMapping: {},
+      })));
+    });
+
+    it("classifies the signal as a notice/bounce, overriding whatever the classifier returned", async () => {
+      await processor.processInbound(makeMessage(), 1);
+
+      const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.data.workflow).toBe("notice");
+      expect(saved.data.workflowData).toMatchObject({ workflow: "notice", noticeType: "bounce" });
+    });
+
+    it("logs a WARN naming the failed address and diagnostic detail", async () => {
+      const warnSpy = vi.spyOn(mockLogger, "warn");
+
+      await processor.processInbound(makeMessage(), 1);
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("External bounce/DSN"),
+        expect.objectContaining({ code: "processor.external_bounce_detected", failedAddress: "no-reply@mindstone.com" }),
+      );
+    });
+
+    it("records the failed address in the suppression list with reason external_bounce", async () => {
+      await processor.processInbound(makeMessage(), 1);
+
+      expect(processingDb.suppressAddress).toHaveBeenCalledWith(
+        expect.objectContaining({ address: "no-reply@mindstone.com", reason: "external_bounce" }),
+      );
+    });
+
+    it("does not affect a message with no delivery-status part", async () => {
+      vi.mocked(contentSanitizer.invoke).mockReset();
+      vi.mocked(contentSanitizer.invoke).mockReturnValueOnce(Promise.resolve(ok({
+        success: true as const,
+        parsed: {
+          from: { address: "sender@example.com" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Hello",
+          textBody: "Hi there",
+          attachments: [],
+          headers: {},
+        },
+        urlMapping: {},
+      })));
+
+      await processor.processInbound(makeMessage(), 1);
+
+      expect(processingDb.suppressAddress).not.toHaveBeenCalled();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Rule actions: assign_workflow and delete
   // -------------------------------------------------------------------------
 

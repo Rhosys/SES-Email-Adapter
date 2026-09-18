@@ -163,5 +163,6 @@ export function applyCtx(accountDb: AccountDatabase, ctx: CtxLike, opts?: { once
 export function makeProcessingDbMock(): ProcessingDatabase {
   return {
     updateGlobalReputation: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    suppressAddress: vi.fn().mockReturnValue(Promise.resolve(ok({ bounceCount: 1 }))),
   } as unknown as ProcessingDatabase;
 }

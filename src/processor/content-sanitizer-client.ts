@@ -60,6 +60,15 @@ export interface ExtractedLink {
   text: string | null;
 }
 
+/** Fields pulled from an RFC 3464 `message/delivery-status` part — see src/isolated/content-sanitizer.ts. */
+export interface BounceInfo {
+  action?: string;
+  status?: string;
+  diagnosticCode?: string;
+  originalRecipient?: string;
+  finalRecipient?: string;
+}
+
 export interface ContentSanitizeResponse {
   parsed: {
     from: EmailAddress;
@@ -76,6 +85,7 @@ export interface ContentSanitizeResponse {
     links?: ExtractedLink[];
     droppedAttachments?: DroppedAttachment[];
     inlineImages?: InlineImageRef[];
+    bounce?: BounceInfo;
   };
 }
 

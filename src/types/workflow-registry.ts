@@ -242,6 +242,7 @@ export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
         e("government", "government or municipal official notice"),
         e("account_notification", "informational account change — no action needed"),
         e("security_awareness", "mass-sent phishing warning or credential-safety reminder"),
+        e("bounce", "delivery status notification (DSN) reporting that a message could not be delivered"),
         e("other", "passive informational notice that does not fit the above categories"),
       ] },
       { name: "provider", type: "string", required: true, identity: true },

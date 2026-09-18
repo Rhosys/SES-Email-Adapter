@@ -14,7 +14,7 @@ import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency
 import { deriveGroupingKey } from "../grouping-key.js";
 import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
-import type { ContentSanitizerClient } from "./content-sanitizer-client.js";
+import type { ContentSanitizerClient, BounceInfo } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
 import type { RuleEvalResult } from "./interpret-rule-result.js";
 import { buildEmbedText } from "../embedding/embed-text.js";
@@ -38,6 +38,7 @@ import { getETLD1, assignSystemLabels } from "./filter.js";
 import { isSystemAccount } from "../database/system-account-db.js";
 import { parseHopCount, type EmailSendType } from "../email/ses-tags.js";
 import { toRuleSignalContext, toRuleThreadContext } from "./rule-context.js";
+import { buildBounceSuppressionEntry } from "../notifier/bounce-suppression.js";
 import { statusToMetric } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
 import { isReplyTargetSafe } from "./reply-target-validator.js";
@@ -445,6 +446,45 @@ export class IncomingEmailProcessor {
     const owner = ownerResult.value;
     if (!owner || owner.status === "deleted") return ok(null);
     return ok({ accountId: owner.accountId, aliasConfig: null });
+  }
+
+  /**
+   * Reacts to an external bounce/DSN detected by the content sanitizer (see BounceInfo) — most
+   * likely one that never went through SES's own send-time bounce feedback loop
+   * (SesFeedbackProcessor): a receiving MTA that accepted the original message and rejected it
+   * later, out of band (e.g. Google Groups checking posting permission after acceptance), rather
+   * than at SMTP time. Authenticity for the bounce is already established by the time this is
+   * called — it comes from the DKIM/DMARC gate earlier in the pipeline (step 1b), not from
+   * anything checked here — so this method is purely about noticing and recording it: a WARN log,
+   * plus the failed address going into the same suppression list SES's own bounce feedback uses
+   * (see notifier/bounce-suppression.ts). A no-op when `bounceInfo` is undefined.
+   */
+  private async handleExternalBounce(bounceInfo: BounceInfo | undefined, from: string, accountId: string, compositeMailMessageId: string): Promise<void> {
+    if (!bounceInfo) return;
+
+    const failedAddress = bounceInfo.originalRecipient ?? bounceInfo.finalRecipient;
+    this.logger.warn(`External bounce/DSN received from ${from} — a message could not be delivered, reported out-of-band rather than via SES's own bounce feedback.`, {
+      code: "processor.external_bounce_detected",
+      accountId,
+      from,
+      action: bounceInfo.action,
+      status: bounceInfo.status,
+      diagnosticCode: bounceInfo.diagnosticCode,
+      failedAddress,
+      compositeMailMessageId,
+    });
+
+    if (!failedAddress) return;
+    const isPermanent = bounceInfo.action !== "delayed";
+    const suppressResult = await this.processingDb.suppressAddress(buildBounceSuppressionEntry({
+      address: failedAddress,
+      isPermanent,
+      reason: "external_bounce",
+      feedback: bounceInfo,
+    }));
+    if (suppressResult.isErr()) {
+      this.logger.warn("Failed to record external bounce in suppression list.", { code: "processor.external_bounce_suppress_failed", accountId, failedAddress, error: suppressResult.error });
+    }
   }
 
   /**
@@ -1083,6 +1123,10 @@ export class IncomingEmailProcessor {
     const { parsed: sanitizedParsed } = sanitizeResult.value;
     const sanitizerAssets = sanitizedParsed.assets ?? [];
 
+    // 2a. External bounce/DSN detection — see handleExternalBounce for what this covers and why.
+    const bounceInfo = sanitizedParsed.bounce;
+    await this.handleExternalBounce(bounceInfo, sanitizedParsed.from.address, accountId, msg.compositeMailMessageId);
+
     if (sanitizedParsed.droppedAttachments && sanitizedParsed.droppedAttachments.length > 0) {
       const reasonSummary = summarizeDroppedReasons(sanitizedParsed.droppedAttachments);
       this.logger.warn(`Message had attachment(s) dropped by content sanitizer: ${reasonSummary}`, {
@@ -1230,6 +1274,15 @@ export class IncomingEmailProcessor {
       classificationOutput = { workflow: "unspecified", workflowData: { workflow: "unspecified" }, tags: [], summary: "", labels: [], actions: [] };
     } else {
       classificationOutput = classification.value;
+    }
+
+    // 4a. Bounce override — deterministic from the sanitizer's DSN extraction, so it takes
+    // priority over whatever the classifier guessed. Overriding after classify() (rather than
+    // skipping classify() outright) keeps this on the same thread-matching/save path as every
+    // other notice, instead of duplicating that machinery for a fast-path exit.
+    if (bounceInfo) {
+      classificationOutput.workflow = "notice";
+      classificationOutput.workflowData = { workflow: "notice", noticeType: "bounce", provider: senderETLD1 } as unknown as WorkflowData;
     }
 
     // 4b. requiresReply override — if the alias is not a direct recipient (only CC/BCC),
