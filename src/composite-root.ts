@@ -15,7 +15,7 @@ import { JsonLogicRuleEvaluator } from "./processor/rule-evaluator.js";
 import { LambdaUserCodeExecutor } from "./processor/user-code-client.js";
 import { AccountDatabase } from "./database/account-database.js";
 import { ThreadDatabase } from "./database/thread-database.js";
-import { ResourceDatabase } from "./database/resource-database.js";
+import { ResourceDatabase } from "./resource/resource-database.js";
 import { ProcessingDatabase } from "./database/processing-database.js";
 import { AuditDatabase } from "./database/audit-database.js";
 import { SESv2Client } from "@aws-sdk/client-sesv2";

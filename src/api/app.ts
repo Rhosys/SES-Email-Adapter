@@ -3,7 +3,7 @@ import type { Context } from "hono";
 import type { EmailContentStore } from "./content-store.js";
 import type { AuditDatabase } from "../database/audit-database.js";
 import type { ThreadDatabase } from "../database/thread-database.js";
-import type { ResourceDatabase } from "../database/resource-database.js";
+import type { ResourceDatabase } from "../resource/resource-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import type { UserCodeExecutorClient } from "../processor/user-code-client.js";
@@ -48,7 +48,7 @@ import { ExternalExchangesApi } from "./externalExchangesApi.js";
 import type { ExchangesDatabase } from "../database/exchanges-database.js";
 import type { JmapAdapter } from "../external-exchanges/jmap-adapter.js";
 import { ThreadsApi } from "./threadsApi.js";
-import { ResourcesApi } from "./resourcesApi.js";
+import { ResourcesApi } from "../resource/resource-api.js";
 import { SignalsApi } from "./signalsApi.js";
 import { UserApi } from "./userApi.js";
 

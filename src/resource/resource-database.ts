@@ -1,6 +1,6 @@
 import { UpdateCommand, GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { DateTime } from "luxon";
-import { dynamo, RESOURCES_TABLE, encodeCursor, decodeCursor } from "./shared.js";
+import { dynamo, RESOURCES_TABLE, encodeCursor, decodeCursor } from "../database/shared.js";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Resource, ResourceAsset, ResourceStatus, Workflow, Page, PageParams } from "../types/index.js";

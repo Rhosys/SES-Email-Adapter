@@ -1,15 +1,16 @@
 import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import { zParse } from "./validate.js";
-import { UpdateResourceRequest } from "./requests.js";
+import { zParse } from "../api/validate.js";
+import { UpdateResourceRequest } from "../api/requests.js";
 import { RESOURCE_WORKFLOWS, RESOURCE_STATUSES } from "../types/index.js";
 import type { Resource as DbResource, ResourceWorkflow, ResourceStatus } from "../types/index.js";
-import type { ListResourcesParams, ResourceDatabase } from "../database/resource-database.js";
+import type { ListResourcesParams, ResourceDatabase } from "./resource-database.js";
 import type { Logger } from "../logger.js";
-import { Resource as ResourceSchema, ListResourcesResponse } from "./schemas.js";
-import type * as Api from "./schemas.js";
-import type { AppEnv, RouteHelpers } from "./route-helpers.js";
+import { Resource as ResourceSchema, ListResourcesResponse } from "../api/schemas.js";
+import type * as Api from "../api/schemas.js";
+import type { AppEnv, RouteHelpers } from "../api/route-helpers.js";
 import type { Pagination } from "../types/index.js";
+import { collapseResources } from "./resource-collapse.js";
 
 // Public resource id is an opaque token encoding threadId + the item's own sk
 // (workflow#resourceKey), so a direct-by-id lookup needs no secondary index —
@@ -122,7 +123,8 @@ export class ResourcesApi {
 
       const merged = results.flatMap(r => (r.isOk() ? r.value.items : []));
       merged.sort((a, b) => a.expectedResolutionDate.localeCompare(b.expectedResolutionDate));
-      const items = workflow ? merged.filter(r => r.workflow === workflow) : merged;
+      const filtered = workflow ? merged.filter(r => r.workflow === workflow) : merged;
+      const items = collapseResources(filtered);
       const nextCursor = statuses.length === 1 && results[0]!.isOk() ? results[0]!.value.nextCursor : undefined;
       return c.json(page("resources", items.map(r => toApiResource(r, contentCdnBaseUrl)), nextCursor), 200);
     });
@@ -145,7 +147,8 @@ export class ResourcesApi {
         logger.error("Failed to list resources by thread.", { code: "api.resources.list_by_thread_failed", error: result.error });
         return err(c, 500, "Internal Server Error");
       }
-      return c.json(page("resources", result.value.map(r => toApiResource(r, contentCdnBaseUrl))), 200);
+      const items = collapseResources(result.value);
+      return c.json(page("resources", items.map(r => toApiResource(r, contentCdnBaseUrl))), 200);
     });
 
     // -------------------------------------------------------------------------
