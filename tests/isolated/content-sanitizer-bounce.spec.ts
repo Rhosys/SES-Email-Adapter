@@ -11,7 +11,19 @@ import { handler } from "../../src/isolated/content-sanitizer.js";
 
 const BOUNDARY = "----=_Part_bounce_boundary";
 
-function buildBounceEmail(): string {
+function buildBounceEmail(echoedContentType = "text/plain"): string {
+  const echoedHeaders = echoedContentType === "text/calendar"
+    ? [
+      "From: mindstone@vortex.link",
+      "To: no-reply@mindstone.com",
+      "Subject: Re: Mindstone Zurich September AI Meetup",
+      "Content-Type: text/calendar; method=REPLY",
+    ]
+    : [
+      "From: mindstone@vortex.link",
+      "To: no-reply@mindstone.com",
+      "Subject: Re: Mindstone Zurich September AI Meetup",
+    ];
   return [
     "From: mailer-daemon@mindstone.com",
     "To: no-reply@mindstone.com",
@@ -38,9 +50,7 @@ function buildBounceEmail(): string {
     `--${BOUNDARY}`,
     "Content-Type: message/rfc822",
     "",
-    "From: mindstone@vortex.link",
-    "To: no-reply@mindstone.com",
-    "Subject: Re: Mindstone Zurich September AI Meetup",
+    ...echoedHeaders,
     "",
     "(original message body)",
     "",
@@ -130,6 +140,24 @@ describe("content-sanitizer — bounce/DSN detection", () => {
       accountId: "acct-test",
       senderEtld1: "example.com",
       keyPrefix: "emails/msg-normal/",
+      retentionTag: null,
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+
+    expect(result.parsed.bounce).toBeUndefined();
+  });
+
+  it("ignores a bounce whose echoed original message was a calendar reply", async () => {
+    mockFetch(buildBounceEmail("text/calendar"));
+
+    const result = await handler({
+      presignedGetUrl: "https://example.com/get",
+      presignedPost: { url: "https://example.com/post", fields: {} },
+      accountId: "acct-test",
+      senderEtld1: "mindstone.com",
+      keyPrefix: "emails/msg-bounce-ics/",
       retentionTag: null,
     });
 

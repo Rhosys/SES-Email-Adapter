@@ -1740,6 +1740,18 @@ describe("IncomingEmailProcessor", () => {
       );
     });
 
+    it("exposes the failure to the account owner via summary and workflowData", async () => {
+      await processor.processInbound(makeMessage(), 1);
+
+      const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.data.summary).toContain("no-reply@mindstone.com");
+      expect(saved.data.summary).toContain("does not exist");
+      expect(saved.data.workflowData).toMatchObject({
+        failedAddress: "no-reply@mindstone.com",
+        bounceReason: "smtp; 550-5.1.1 The email account that you tried to reach does not exist",
+      });
+    });
+
     it("does not affect a message with no delivery-status part", async () => {
       vi.mocked(contentSanitizer.invoke).mockReset();
       vi.mocked(contentSanitizer.invoke).mockReturnValueOnce(Promise.resolve(ok({
@@ -1759,6 +1771,55 @@ describe("IncomingEmailProcessor", () => {
       await processor.processInbound(makeMessage(), 1);
 
       expect(processingDb.suppressAddress).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("external bounce/DSN — transient vs permanent", () => {
+    function mockBounce(bounce: { action?: string; status?: string; diagnosticCode?: string; originalRecipient?: string }) {
+      vi.mocked(contentSanitizer.invoke).mockReturnValueOnce(Promise.resolve(ok({
+        success: true as const,
+        parsed: {
+          from: { address: "mailer-daemon@mindstone.com" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Delivery Status Notification",
+          textBody: "Your message wasn't delivered.",
+          attachments: [],
+          headers: {},
+          bounce,
+        },
+        urlMapping: {},
+      })));
+    }
+
+    it("does not suppress a transient bounce (Action: delayed, 4.x.x status) — only logs it", async () => {
+      mockBounce({ action: "delayed", status: "4.2.2", originalRecipient: "someone@example.com" });
+
+      await processor.processInbound(makeMessage(), 1);
+
+      expect(processingDb.suppressAddress).not.toHaveBeenCalled();
+      const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.data.workflowData).toMatchObject({ noticeType: "bounce" });
+    });
+
+    it("treats a 5.x.x status as permanent even when Action says delayed (status is the authoritative signal)", async () => {
+      mockBounce({ action: "delayed", status: "5.1.1", diagnosticCode: "550 does not exist", originalRecipient: "someone@example.com" });
+
+      await processor.processInbound(makeMessage(), 1);
+
+      expect(processingDb.suppressAddress).toHaveBeenCalledWith(
+        expect.objectContaining({ address: "someone@example.com", reason: "external_bounce" }),
+      );
+    });
+
+    it("falls back to Action when no Status is present", async () => {
+      mockBounce({ action: "failed", originalRecipient: "someone@example.com" });
+
+      await processor.processInbound(makeMessage(), 1);
+
+      expect(processingDb.suppressAddress).toHaveBeenCalledWith(
+        expect.objectContaining({ address: "someone@example.com" }),
+      );
     });
   });
 
