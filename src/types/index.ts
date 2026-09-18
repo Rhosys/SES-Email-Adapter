@@ -169,6 +169,10 @@ export interface NoticeData {
   effectiveDateInstant?: string;
   referenceNumber?: string;
   documentUrl?: string;
+  /** Populated only when noticeType is "bounce" — the address the bounce reports as undeliverable. */
+  failedAddress?: string;
+  /** Populated only when noticeType is "bounce" — the DSN's raw failure reason (diagnostic code or status). */
+  bounceReason?: string;
 }
 
 export interface HealthcareData {

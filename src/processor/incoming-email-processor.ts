@@ -181,6 +181,29 @@ function isAutomatedMessage(headers: Record<string, string>): boolean {
   return headers["return-path"]?.trim() === "<>";
 }
 
+/**
+ * Whether a bounce is permanent (should stop future sends) vs. transient (should be retried).
+ * The Status field's class digit (RFC 3463: 5.x.x permanent, 4.x.x transient) is the primary
+ * signal — it's what the MTA actually computed the failure severity as. The Action field
+ * ("delayed" vs "failed") is only a fallback for a DSN with no Status, because in practice the
+ * two can disagree: an MTA's final "giving up" report can carry Action: delayed alongside a
+ * permanent 5.x.x status left over from the last delivery attempt, so trusting Action alone can
+ * misclassify an unmistakably permanent failure (e.g. "does not exist") as transient.
+ */
+function isPermanentBounce(bounceInfo: BounceInfo): boolean {
+  const statusClass = bounceInfo.status?.trim().charAt(0);
+  if (statusClass === "5") return true;
+  if (statusClass === "4") return false;
+  return bounceInfo.action !== "delayed";
+}
+
+/** One-line, human-readable summary of a bounce for the thread/signal's `summary` field. */
+function describeBounceFailure(bounceInfo: BounceInfo, failedAddress: string | undefined): string {
+  const target = failedAddress ? `delivery to ${failedAddress}` : "a message";
+  const reason = bounceInfo.diagnosticCode ?? bounceInfo.status ?? "unknown reason";
+  return `Bounce: ${target} failed — ${reason}`;
+}
+
 // ---------------------------------------------------------------------------
 // Processing outcome
 // ---------------------------------------------------------------------------
@@ -456,13 +479,16 @@ export class IncomingEmailProcessor {
    * than at SMTP time. Authenticity for the bounce is already established by the time this is
    * called — it comes from the DKIM/DMARC gate earlier in the pipeline (step 1b), not from
    * anything checked here — so this method is purely about noticing and recording it: a WARN log,
-   * plus the failed address going into the same suppression list SES's own bounce feedback uses
-   * (see notifier/bounce-suppression.ts). A no-op when `bounceInfo` is undefined.
+   * plus (for a permanent failure only) the failed address going into the same suppression list
+   * SES's own bounce feedback uses (see notifier/bounce-suppression.ts). A no-op when
+   * `bounceInfo` is undefined — including the case where the sanitizer already dropped it because
+   * the bounced message was itself a calendar reply (routine noise, not worth reporting).
    */
   private async handleExternalBounce(bounceInfo: BounceInfo | undefined, from: string, accountId: string, compositeMailMessageId: string): Promise<void> {
     if (!bounceInfo) return;
 
     const failedAddress = bounceInfo.originalRecipient ?? bounceInfo.finalRecipient;
+    const isPermanent = isPermanentBounce(bounceInfo);
     this.logger.warn(`External bounce/DSN received from ${from} — a message could not be delivered, reported out-of-band rather than via SES's own bounce feedback.`, {
       code: "processor.external_bounce_detected",
       accountId,
@@ -471,11 +497,16 @@ export class IncomingEmailProcessor {
       status: bounceInfo.status,
       diagnosticCode: bounceInfo.diagnosticCode,
       failedAddress,
+      isPermanent,
       compositeMailMessageId,
     });
 
     if (!failedAddress) return;
-    const isPermanent = bounceInfo.action !== "delayed";
+    // A transient failure (4.x.x / Action: delayed) means "try again later" — suppressing the
+    // address on the very first one would block the retries that are the whole point of it being
+    // transient rather than permanent. Only a permanent failure (5.x.x) goes into the suppression
+    // list; a transient one is logged for visibility only, and sending is free to retry naturally.
+    if (!isPermanent) return;
     const suppressResult = await this.processingDb.suppressAddress(buildBounceSuppressionEntry({
       address: failedAddress,
       isPermanent,
@@ -1279,10 +1310,21 @@ export class IncomingEmailProcessor {
     // 4a. Bounce override — deterministic from the sanitizer's DSN extraction, so it takes
     // priority over whatever the classifier guessed. Overriding after classify() (rather than
     // skipping classify() outright) keeps this on the same thread-matching/save path as every
-    // other notice, instead of duplicating that machinery for a fast-path exit.
+    // other notice, instead of duplicating that machinery for a fast-path exit. The failure
+    // itself is surfaced to the account owner two ways: `summary` (the one-line synopsis shown
+    // on the thread row) and structured `failedAddress`/`bounceReason` fields on workflowData
+    // (for a future dedicated notice/bounce UI panel — see NoticeData).
     if (bounceInfo) {
+      const failedAddress = bounceInfo.originalRecipient ?? bounceInfo.finalRecipient;
       classificationOutput.workflow = "notice";
-      classificationOutput.workflowData = { workflow: "notice", noticeType: "bounce", provider: senderETLD1 } as unknown as WorkflowData;
+      classificationOutput.workflowData = {
+        workflow: "notice",
+        noticeType: "bounce",
+        provider: senderETLD1,
+        ...(failedAddress ? { failedAddress } : {}),
+        ...(bounceInfo.diagnosticCode || bounceInfo.status ? { bounceReason: bounceInfo.diagnosticCode ?? bounceInfo.status } : {}),
+      } as unknown as WorkflowData;
+      classificationOutput.summary = describeBounceFailure(bounceInfo, failedAddress);
     }
 
     // 4b. requiresReply override — if the alias is not a direct recipient (only CC/BCC),

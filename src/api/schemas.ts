@@ -239,6 +239,8 @@ export const NoticeData = z.object({
   effectiveDate: z.string().optional(),
   referenceNumber: z.string().optional(),
   documentUrl: z.string().optional(),
+  failedAddress: z.string().optional(),
+  bounceReason: z.string().optional(),
 }).openapi("NoticeData");
 
 export const HealthcareData = z.object({

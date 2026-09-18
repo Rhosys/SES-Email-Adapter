@@ -241,6 +241,26 @@ function isDeliveryStatusReport(parsed: { headers: Map<string, unknown> }): bool
  * correct for the common single-recipient case, and prose in the human-readable part is in
  * practice never going to collide with these exact field names.
  */
+/**
+ * True when a DSN's echoed original message (the `message/rfc822` part mailparser
+ * surfaces as an attachment — see the call site) was itself a calendar invite/RSVP rather
+ * than a real email. A bounced calendar reply is routine noise (calendar clients send these
+ * on their own schedule; a stale attendee address, a since-cancelled event, a distribution
+ * list that no longer accepts posts) rather than something the account owner needs to see —
+ * unlike a bounced email they actually wrote, it needs no action and isn't worth surfacing.
+ * Checked with a cheap header-line scan rather than a full parse: the DSN boundary already
+ * establishes this is a small, known-shape MIME part, so a full mailparser re-parse of the
+ * echoed message would be pure overhead for one header lookup.
+ */
+function echoedOriginalIsCalendarReply(attachments: Array<{ contentType?: string; content: Buffer }>): boolean {
+  const echoed = attachments.find(a => (a.contentType ?? "").toLowerCase() === "message/rfc822");
+  if (!echoed) return false;
+  // Only scan the header block (before the first blank line) — the body of a calendar
+  // reply is raw ICS text and must never be mistaken for a header.
+  const headerBlock = echoed.content.toString("utf-8").split(/\r?\n\r?\n/)[0] ?? "";
+  return /^content-type:\s*text\/calendar/im.test(headerBlock);
+}
+
 function parseDeliveryStatusPart(text: string): BounceInfo {
   const fields: BounceInfo = {};
   for (const line of text.split(/\r?\n/)) {
@@ -397,8 +417,12 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   // machine-readable `message/delivery-status` part has no filename/disposition, so
   // mailparser folds it straight into parsed.text rather than surfacing it as an attachment
   // (see parseDeliveryStatusPart) — nothing to exclude from the attachment loop below.
-  const bounceInfo = isDeliveryStatusReport(parsed) && parsed.text ? parseDeliveryStatusPart(parsed.text) : undefined;
   const attachments = parsed.attachments ?? [];
+  const rawBounceInfo = isDeliveryStatusReport(parsed) && parsed.text ? parseDeliveryStatusPart(parsed.text) : undefined;
+  // A bounced calendar reply is routine noise, not something worth reporting — see
+  // echoedOriginalIsCalendarReply. Drop it here, at the source, so nothing downstream
+  // (processor WARN log, suppression, notice classification) ever sees it.
+  const bounceInfo = rawBounceInfo && !echoedOriginalIsCalendarReply(attachments) ? rawBounceInfo : undefined;
   if (attachments.length > MAX_ATTACHMENTS) {
     return {
       success: false,

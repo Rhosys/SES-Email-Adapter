@@ -249,6 +249,8 @@ export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
       { name: "effectiveDate", type: "date", required: false },
       { name: "referenceNumber", type: "string", required: false, identity: true },
       { name: "documentUrl", type: "string", required: false },
+      { name: "failedAddress", type: "string", required: false, notes: "Only for noticeType 'bounce' — the address the message could not be delivered to." },
+      { name: "bounceReason", type: "string", required: false, notes: "Only for noticeType 'bounce' — the failure reason (e.g. an SMTP diagnostic code like '550 5.1.1 ... does not exist')." },
     ],
   },
   {
