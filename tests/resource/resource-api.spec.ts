@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Resource } from "../../src/types/index.js";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
-import { encodeResourceId } from "../../src/api/resourcesApi.js";
+import { encodeResourceId } from "../../src/resource/resource-api.js";
 import type { AuthService, AccessService } from "../../src/api/app.js";
-import type { ResourceDatabase } from "../../src/database/resource-database.js";
+import type { ResourceDatabase } from "../../src/resource/resource-database.js";
 import { ok } from "../../src/errors.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 

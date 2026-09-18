@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, UpdateCommand, GetCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
-import { ResourceDatabase } from "../../src/database/resource-database.js";
+import { ResourceDatabase } from "../../src/resource/resource-database.js";
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
 

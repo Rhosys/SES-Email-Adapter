@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveResourceInfo } from "../../src/processor/resource-info.js";
+import { deriveResourceInfo } from "../../src/resource/resource-info.js";
 import type { WorkflowData } from "../../src/types/index.js";
 
 /**

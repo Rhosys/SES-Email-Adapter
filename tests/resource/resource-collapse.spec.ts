@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Resource } from "../../src/types/index.js";
-import { collapseResources } from "../../src/api/resource-collapse.js";
+import { collapseResources } from "../../src/resource/resource-collapse.js";
 
 function makeResource(overrides: Partial<Resource> = {}): Resource {
   return {

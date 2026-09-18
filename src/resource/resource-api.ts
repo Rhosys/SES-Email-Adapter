@@ -1,14 +1,14 @@
 import { z } from "@hono/zod-openapi";
 import type { OpenAPIHono } from "@hono/zod-openapi";
-import { zParse } from "./validate.js";
-import { UpdateResourceRequest } from "./requests.js";
+import { zParse } from "../api/validate.js";
+import { UpdateResourceRequest } from "../api/requests.js";
 import { RESOURCE_WORKFLOWS, RESOURCE_STATUSES } from "../types/index.js";
 import type { Resource as DbResource, ResourceWorkflow, ResourceStatus } from "../types/index.js";
-import type { ListResourcesParams, ResourceDatabase } from "../database/resource-database.js";
+import type { ListResourcesParams, ResourceDatabase } from "./resource-database.js";
 import type { Logger } from "../logger.js";
-import { Resource as ResourceSchema, ListResourcesResponse } from "./schemas.js";
-import type * as Api from "./schemas.js";
-import type { AppEnv, RouteHelpers } from "./route-helpers.js";
+import { Resource as ResourceSchema, ListResourcesResponse } from "../api/schemas.js";
+import type * as Api from "../api/schemas.js";
+import type { AppEnv, RouteHelpers } from "../api/route-helpers.js";
 import type { Pagination } from "../types/index.js";
 import { collapseResources } from "./resource-collapse.js";
 
