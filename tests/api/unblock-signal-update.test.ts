@@ -195,76 +195,15 @@ async function req(
 // Tests — unblock-signal handler uses updateThread for existing threads
 // ---------------------------------------------------------------------------
 
-describe("POST /signals/:id/quarantineResponse — updateThread usage", () => {
-  let threadDb: ReturnType<typeof makeThreadDb>;
-  let accountDb: ReturnType<typeof makeAccountDb>;
-  let auditDb: ReturnType<typeof makeAuditDb>;
-  let app: ReturnType<typeof createApp>;
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    threadDb = makeThreadDb();
-    accountDb = makeAccountDb();
-    auditDb = makeAuditDb();
-    const forwardingService: IForwardingService = { sendVerification: vi.fn().mockResolvedValue(ok(undefined)), forward: vi.fn().mockResolvedValue(ok(undefined)) };
-    const draftSendDispatcher = { dispatch: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as DraftSendDispatcher;
-    const astValidator = {
-      invoke: vi.fn().mockResolvedValue({ success: true, purpose: "rule_condition", result: true }),
-      validateAst: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast", result: { valid: true } }),
-      validateAstBatch: vi.fn().mockResolvedValue({ success: true, purpose: "validate_ast_batch", results: [] }),
-    } as unknown as UserCodeExecutorClient;
-    app = createApp(makeAppDeps({ threadDb: threadDb as unknown as ThreadDatabase, accountDb: accountDb as unknown as AccountDatabase, auditDb: auditDb as unknown as AuditDatabase, auth: makeAuth(), access: makeAccess(), logger: createMockLogger(), forwardingService, jobDispatcher: { dispatchReindex: vi.fn(), dispatchSegment: vi.fn() } as never, draftSendDispatcher, accountCreationStarter: { start: vi.fn() }, contentCdnBaseUrl: "https://cdn.test", astValidator, billingHandler: new BillingHandler(), emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn() } as unknown as EmailService, domainIdentityService: { register: vi.fn().mockResolvedValue(ok(undefined)), deregister: vi.fn().mockResolvedValue(ok(undefined)) }, calendarForwarder: { forwardInvite: vi.fn().mockResolvedValue(ok(undefined)), sendReply: vi.fn().mockResolvedValue(ok({ messageId: "stub" })) } as unknown as CalendarForwarder, postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps, schedulerClient: { scheduleMessage: vi.fn().mockResolvedValue(ok(undefined)), deleteSchedule: vi.fn().mockResolvedValue(ok(undefined)) } as never }));
-  });
-
-  it("matched thread → calls updateThread with (accountId, threadId, 'active', signal.receivedAt, {})", async () => {
-    const existingThread = makeThread({ id: "arc-existing", lastSignalAt: "2024-01-10T00:00:00Z" });
-    // Use "auth" workflow so deriveGroupingKey returns a non-null key
-    const signal = makeSignal({
-      data: {
-        receivedAt: "2024-01-20T12:00:00Z",
-        workflow: "auth",
-        workflowData: { workflow: "auth", authType: "verification", service: "example.com" },
-      },
-    });
-
-    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(signal));
-    vi.mocked(threadDb.findThreadByGroupingKey).mockResolvedValueOnce(ok(existingThread));
-    vi.mocked(threadDb.updateThread).mockResolvedValueOnce(ok({ ...existingThread, lastSignalAt: signal.data.receivedAt }));
-
-    const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
-    expect(res.status).toBe(200);
-
-    expect(threadDb.updateThread).toHaveBeenCalledOnce();
-    expect(threadDb.updateThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "arc-existing", "active", "2024-01-20T12:00:00Z", { retentionDuration: "P3M" });
-    expect(threadDb.createThread).not.toHaveBeenCalled();
-  });
-
-  it("no matched thread → calls createThread (PutItem), not updateThread", async () => {
-    // Use "auth" workflow so deriveGroupingKey returns a non-null key and findThreadByGroupingKey is called
-    const signal = makeSignal({
-      data: {
-        receivedAt: "2024-01-20T12:00:00Z",
-        workflow: "auth",
-        workflowData: { workflow: "auth", authType: "verification", service: "example.com" },
-      },
-    });
-
-    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(signal));
-    vi.mocked(threadDb.findThreadByGroupingKey).mockResolvedValueOnce(ok(null));
-
-    const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
-    expect(res.status).toBe(200);
-
-    expect(threadDb.createThread).toHaveBeenCalledOnce();
-    expect(threadDb.updateThread).not.toHaveBeenCalled();
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Quarantine response records the user's sender decision unconditionally and
 // never touches aliases — the alias is guaranteed to exist as an ingest
 // invariant, and reaching this handler means the signal was quarantined, so no
 // rule-evaluation (matchedRules / SR-00) is consulted.
+//
+// Approve/reject cascade + thread landing (handler + real processor) is covered
+// in quarantine-cascade.spec.ts. This suite retains only the dismiss trace-folding
+// invariants, which are unique to the handler and not exercised there.
 // ---------------------------------------------------------------------------
 describe("POST /signals/:id/quarantineResponse — sender disposition", () => {
   let threadDb: ReturnType<typeof makeThreadDb>;
@@ -294,16 +233,6 @@ describe("POST /signals/:id/quarantineResponse — sender disposition", () => {
       // Synthetic unknown-sender rule the processor attaches; carries a statusChange.
       matchedRules: [{ ruleId: "SR-00", actions: [{ type: "quarantine_visible" }], labelsAdded: [], statusChange: "quarantine_visible", text: "Sender newsletter.example.org is not in approved senders" }],
     },
-  });
-
-  it("approve → records sender as allowed and never touches the alias", async () => {
-    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(sr00Signal()));
-
-    const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
-    expect(res.status).toBe(200);
-
-    expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "user@example.com", "example.org", "allow");
-    expect(accountDb.ensureAlias).not.toHaveBeenCalled();
   });
 
   it("block → records the block disposition and never touches the alias", async () => {
@@ -360,47 +289,4 @@ describe("POST /signals/:id/quarantineResponse — sender disposition", () => {
     }));
   });
 
-  it("approve → records the sender allow unconditionally, even for a content-rule quarantine", async () => {
-    // Quarantined by a content rule. The user explicitly approved this sender,
-    // so the sender is allowed regardless of why it was quarantined — no rule inspection.
-    const signal = makeSignal({
-      data: {
-        recipientAddress: "user@example.com",
-        from: { address: "sender@spammy.com", name: "Sender" },
-        matchedRules: [{ ruleId: "SR-05", actions: [{ type: "quarantine_hidden" }], labelsAdded: [], statusChange: "quarantine_hidden" }],
-      },
-    });
-    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(signal));
-
-    const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
-    expect(res.status).toBe(200);
-
-    expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "user@example.com", "spammy.com", "allow");
-    expect(accountDb.ensureAlias).not.toHaveBeenCalled();
-  });
-
-  it("approve → reuses the processor-matched thread (matchedThreadId) instead of creating a duplicate", async () => {
-    // conversation workflow → deriveGroupingKey returns null, so without matchedThreadId the
-    // handler would always createThread. The processor recorded the matched thread, so reuse it.
-    const existingThread = makeThread({ id: "thr-existing" });
-    const signal = makeSignal({
-      data: {
-        workflow: "conversation",
-        workflowData: { workflow: "conversation", sentiment: "neutral", requiresReply: true },
-        matchedThreadId: "thr-existing",
-        matchedRules: [{ ruleId: "SR-00", actions: [{ type: "quarantine_visible" }], labelsAdded: [], statusChange: "quarantine_visible" }],
-      },
-    });
-    vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(signal));
-    vi.mocked(threadDb.getThread).mockResolvedValueOnce(ok(existingThread));
-    vi.mocked(threadDb.updateThread).mockResolvedValueOnce(ok(existingThread));
-
-    const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
-    expect(res.status).toBe(200);
-
-    expect(threadDb.getThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "thr-existing");
-    expect(threadDb.updateThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "thr-existing", "active", signal.data.receivedAt, { retentionDuration: "P3M" });
-    expect(threadDb.createThread).not.toHaveBeenCalled();
-    expect(threadDb.findThreadByGroupingKey).not.toHaveBeenCalled();
-  });
 });

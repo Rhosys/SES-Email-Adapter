@@ -36,6 +36,7 @@ export function makeAppDeps(overrides: Partial<AppDeps>): AppDeps {
     healthCheckValidator: { validateLatest: async () => ({ status: "pass", checkedDate: "2025-01-01", checkedAt: "2025-01-01T00:00:00.000Z", checks: [], rawChecks: null }) } as never,
     draftSendDispatcher: { dispatch: async () => ok(undefined) } as never,
     accountCreationStarter: { start: async () => {} },
+    signalReprocessor: { reprocessSignal: async () => ok({} as never) } as never,
     contentCdnBaseUrl: "https://cdn.test",
     astValidator: { validateAstBatch: async () => ({ success: true, purpose: "validate_ast_batch", results: [] }) } as never,
     billingHandler: new BillingHandler(),

@@ -528,53 +528,10 @@ describe("API", () => {
       expect(accountDb.saveAlias).not.toHaveBeenCalled();
     });
 
-    it("allows a quarantined signal — creates new thread when no grouping key match", async () => {
-      const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
-      vi.mocked(threadDb.findThreadByGroupingKey).mockResolvedValueOnce(ok(null));
-      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
-      expect(res.status).toBe(200);
-      const body = await res.json() as { thread: { threadId: string; workflow: string }; signal: { status: string } };
-      expect(body.thread.workflow).toBe((s.data as InboundEmailSignalData).workflow);
-      expect(body.signal.status).toBe("active");
-      expect(threadDb.createThread).toHaveBeenCalledOnce();
-      expect(threadDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, expect.any(String));
-    });
-
-    it("records the sender allow (not the alias) when approving a quarantined signal", async () => {
-      // The alias is created as an ingest invariant, so the handler only records the sender decision.
-      const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
-      vi.mocked(threadDb.findThreadByGroupingKey).mockResolvedValueOnce(ok(null));
-      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
-      expect(res.status).toBe(200);
-      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.data.recipientAddress, expect.any(String), "allow");
-      expect(accountDb.saveAlias).not.toHaveBeenCalled();
-    });
-
-    it("does not recreate the alias when approving a quarantined signal for a known address", async () => {
-      const s = makeSignal({ status: "quarantine_visible" });
-      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
-      vi.mocked(threadDb.findThreadByGroupingKey).mockResolvedValueOnce(ok(null));
-      vi.mocked(accountDb.getAlias).mockResolvedValueOnce(ok(makeAlias({ aliasAddress: s.data.recipientAddress })));
-      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
-      expect(res.status).toBe(200);
-      expect(accountDb.saveAlias).not.toHaveBeenCalled();
-    });
-
-    it("allows a quarantined signal — attaches to existing thread when grouping key matches", async () => {
-      const s = makeSignal({ status: "quarantine_visible", data: { workflow: "auth" } });
-      const existingThread = makeThread();
-      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(s));
-      vi.mocked(threadDb.findThreadByGroupingKey).mockResolvedValueOnce(ok(existingThread));
-      const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
-      expect(res.status).toBe(200);
-      const body = await res.json() as { thread: { threadId: string }; signal: Signal };
-      expect(body.thread.threadId).toBe(existingThread.id);
-      expect(threadDb.createThread).not.toHaveBeenCalled();
-      expect(threadDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, existingThread.id);
-    });
-
+    // Approve/reject/dismiss behavior — including the sender-disposition and alias invariants — is
+    // covered end-to-end (handler + real processor) in quarantine-cascade.spec.ts. This suite mocks
+    // the processor, so it no longer asserts the quarantine-approve path; only the pure request
+    // validation (400/404) that lives entirely in the handler remains here.
     it("returns 400 when signal is already active", async () => {
       vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });

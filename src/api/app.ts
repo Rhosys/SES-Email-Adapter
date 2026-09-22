@@ -351,7 +351,7 @@ export function createApp({ threadDb, resourceDb, accountDb, exchangesDb, auditD
   new AccountsApi(accountDb, access, logger, accountCreationStarter, emailService, triggerDigest).register(app, helpers);
   new ThreadsApi(threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, calendarForwarder, postApprovalCalendarDeps, signalReprocessor, emailContentStore, contentCdnBaseUrl, embeddingGenerator, threadMatcher, signalQueue).register(app, helpers);
   new ResourcesApi(resourceDb, logger, contentCdnBaseUrl).register(app, helpers);
-  new SignalsApi(threadDb, accountDb, logger, postApprovalCalendarDeps, contentCdnBaseUrl).register(app, helpers);
+  new SignalsApi(threadDb, accountDb, logger, contentCdnBaseUrl, signalReprocessor).register(app, helpers);
   new ViewsApi(accountDb, logger).register(app, helpers);
   new LabelsApi(accountDb, logger).register(app, helpers);
   new RulesApi(accountDb, auditDb, astValidator, billingHandler, logger).register(app, helpers);

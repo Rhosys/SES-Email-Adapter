@@ -274,6 +274,8 @@ describe("Quarantine response — handler + real processor", () => {
     expect(body.signal.status).toBe("active");
     expect(body.thread.threadId).toBeTruthy();
     expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, ALIAS, SENDER_ETLD1, "allow");
+    // The alias is an ingest invariant — approval records the sender decision, never the alias.
+    expect(accountDb.saveAlias).not.toHaveBeenCalled();
   });
 
   it("approve → returns 404 for an unknown signal", async () => {
@@ -285,5 +287,118 @@ describe("Quarantine response — handler + real processor", () => {
     vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeQuarantinedSignal({ status: "active" })));
     const res = await req(app, "POST", `${A}/signals/SES%23msg-primary/quarantineResponse`, { status: "active" });
     expect(res.status).toBe(400);
+  });
+
+  // ── CASCADE — the new behavior layered on top of the validated baseline ──
+
+  describe("cascade to sibling quarantined signals", () => {
+    // Wire the processor's reprocess reads so BOTH primary and any sibling replay to completion.
+    // getSignalById / getSignalByMessageId key off the signal id so each reprocess sees its own signal.
+    function wireReprocessReads(signals: Signal[]) {
+      const byId = new Map(signals.map(s => [s.id, s]));
+      vi.mocked(threadDb.getSignalById).mockImplementation((_a, id) => Promise.resolve(ok(byId.get(id) ?? null)));
+      vi.mocked(threadDb.getSignalByMessageId).mockImplementation((_a, lookupId) => {
+        const s = byId.get(lookupId);
+        return Promise.resolve(ok(s ? { ...s, status: "active", threadId: "arc-001" } as Signal : null));
+      });
+      vi.mocked(threadDb.getThread).mockResolvedValue(ok(makeThread({ id: "arc-001" })));
+      // The cascade writes saveSender(allow) before reprocessing; the processor then re-reads
+      // getSender during replay and must see the sender as trusted so the signal comes out active
+      // (not re-quarantined). Reflect that written disposition for the approved sender's domain.
+      vi.mocked(accountDb.getSender).mockImplementation((_a, _alias, senderDomain) =>
+        Promise.resolve(ok(senderDomain === SENDER_ETLD1
+          ? { accountId: TEST_ACCOUNT_ID, aliasAddress: ALIAS, domain: "example.com", aliasName: "user", senderDomain: SENDER_ETLD1, policy: "allow" as const, addedAt: "2024-01-01T00:00:00Z" }
+          : null)));
+    }
+
+    it("approve → reprocesses the primary plus every matching quarantine_visible sibling, each with skipNotify", async () => {
+      const primary = makeQuarantinedSignal({ id: "SES#msg-primary" });
+      const sibA = makeQuarantinedSignal({ id: "SES#msg-sib-a" });
+      const sibB = makeQuarantinedSignal({ id: "SES#msg-sib-b" });
+      wireReprocessReads([primary, sibA, sibB]);
+      vi.mocked(threadDb.listPreThreadSignals).mockResolvedValue(ok({ items: [primary, sibA, sibB] }));
+
+      const res = await req(app, "POST", `${A}/signals/SES%23msg-primary/quarantineResponse`, { status: "active" });
+
+      expect(res.status).toBe(200);
+      // The real processor dispatched side-effects for all three, each carrying skipNotify.
+      expect(sqsDispatcher.sendMessage).toHaveBeenCalledTimes(3);
+      for (const call of sqsDispatcher.sendMessage.mock.calls) {
+        expect((call[0] as { skipNotify?: boolean }).skipNotify).toBe(true);
+      }
+      // Sender allow written exactly once (config keyed by alias+sender, not per signal).
+      expect(accountDb.saveSender).toHaveBeenCalledTimes(1);
+    });
+
+    it("approve → a sibling reprocess failure does not fail the request and does not halt the cascade", async () => {
+      const primary = makeQuarantinedSignal({ id: "SES#msg-primary" });
+      const sibA = makeQuarantinedSignal({ id: "SES#msg-sib-a" });
+      const sibB = makeQuarantinedSignal({ id: "SES#msg-sib-b" });
+      wireReprocessReads([primary, sibA, sibB]);
+      vi.mocked(threadDb.listPreThreadSignals).mockResolvedValue(ok({ items: [primary, sibA, sibB] }));
+      // Make sibling A's replay blow up inside the processor (S3 fetch throws).
+      vi.mocked(contentStore.getContent).mockImplementation((key: string) => {
+        if (key.includes("sib-a")) return Promise.reject(new Error("s3 down"));
+        return Promise.resolve(new Uint8Array());
+      });
+
+      const res = await req(app, "POST", `${A}/signals/SES%23msg-primary/quarantineResponse`, { status: "active" });
+
+      expect(res.status).toBe(200);
+      // primary + sibA (failed) + sibB (still attempted) → 3 reprocess attempts, sibB dispatched.
+      const dispatchedSignalIds = sqsDispatcher.sendMessage.mock.calls.map(c => (c[0] as { signal: Signal }).signal.signalLookupId);
+      expect(dispatchedSignalIds).toContain("SES#msg-sib-b");
+    });
+
+    const filterCases = [
+      { name: "different alias → skipped", overrides: { data: { recipientAddress: "other@example.com" } }, cascaded: false },
+      { name: "different sender domain → skipped", overrides: { data: { from: { address: "x@evil.net" } } }, cascaded: false },
+      { name: "quarantine_hidden → skipped", overrides: { status: "quarantine_hidden" as const }, cascaded: false },
+      { name: "same alias + same sender → cascaded", overrides: {}, cascaded: true },
+    ];
+
+    it.each(filterCases)("approve → sibling filter: $name", async ({ overrides, cascaded }) => {
+      const primary = makeQuarantinedSignal({ id: "SES#msg-primary" });
+      const candidate = makeQuarantinedSignal({ id: "SES#msg-candidate", ...overrides });
+      wireReprocessReads([primary, candidate]);
+      vi.mocked(threadDb.listPreThreadSignals).mockResolvedValue(ok({ items: [primary, candidate] }));
+
+      const res = await req(app, "POST", `${A}/signals/SES%23msg-primary/quarantineResponse`, { status: "active" });
+
+      expect(res.status).toBe(200);
+      const dispatchedIds = sqsDispatcher.sendMessage.mock.calls.map(c => (c[0] as { signal: Signal }).signal.signalLookupId);
+      expect(dispatchedIds.includes("SES#msg-candidate")).toBe(cascaded);
+    });
+
+    it("reject → blocks the primary + matching siblings, saves the sender disposition once, no reprocess", async () => {
+      const primary = makeQuarantinedSignal({ id: "SES#msg-primary" });
+      const sibA = makeQuarantinedSignal({ id: "SES#msg-sib-a" });
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(primary));
+      vi.mocked(threadDb.listPreThreadSignals).mockResolvedValue(ok({ items: [primary, sibA] }));
+
+      const res = await req(app, "POST", `${A}/signals/SES%23msg-primary/quarantineResponse`, { status: "block_reject" });
+
+      expect(res.status).toBe(200);
+      expect(sqsDispatcher.sendMessage).not.toHaveBeenCalled();
+      expect(accountDb.saveSender).toHaveBeenCalledTimes(1);
+      const blockedIds = threadDb.updateSignalStatus.mock.calls.map(c => c[1]);
+      expect(blockedIds).toContain("SES#msg-primary");
+      expect(blockedIds).toContain("SES#msg-sib-a");
+    });
+
+    it("dismiss → dismisses the primary + matching siblings, no sender disposition, no reprocess", async () => {
+      const primary = makeQuarantinedSignal({ id: "SES#msg-primary" });
+      const sibA = makeQuarantinedSignal({ id: "SES#msg-sib-a" });
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(primary));
+      vi.mocked(threadDb.listPreThreadSignals).mockResolvedValue(ok({ items: [primary, sibA] }));
+
+      const res = await req(app, "POST", `${A}/signals/SES%23msg-primary/quarantineResponse`, { status: "dismiss" });
+
+      expect(res.status).toBe(200);
+      expect(sqsDispatcher.sendMessage).not.toHaveBeenCalled();
+      expect(accountDb.saveSender).not.toHaveBeenCalled();
+      const dismissed = threadDb.saveSignal.mock.calls.map(c => c[0] as Signal).filter(s => s.status === "block_hidden");
+      expect(dismissed.length).toBe(2);
+    });
   });
 });

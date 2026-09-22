@@ -4,26 +4,20 @@ import { DateTime } from "luxon";
 import { getDomain } from "tldts";
 import { zParse } from "./validate.js";
 import { toApiThread, toApiSignal, withResolvedContentUrls } from "./signal-transforms.js";
-import { deriveGroupingKey } from "../grouping-key.js";
-import { handlePostApprovalCalendar } from "../processor/calendar/post-approval-handler.js";
-import { extractCalendarEvents } from "../processor/calendar/calendar-event-extraction.js";
-import { resolveRetention } from "../retention.js";
-import { buildActiveThread } from "../thread-factory.js";
 import { isEmailSignal, isInboundEmailSignalData } from "../types/index.js";
 import type { Result } from "neverthrow";
-import type { Thread, Signal, MatchedRuleResult, PageParams } from "../types/index.js";
+import type { Signal, MatchedRuleResult, PageParams } from "../types/index.js";
 import type { Pagination } from "../types/index.js";
 import type { ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
-import type { PostApprovalCalendarHandlerDeps } from "../processor/calendar/post-approval-handler.js";
 import type { NotFoundError, ProcessorError } from "../errors.js";
 import { QuarantineResponse } from "./requests.js";
 import { ListSignalsResponse } from "./schemas.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
 export interface SignalReprocessor {
-  reprocessSignal(accountId: string, signalId: string, threadId: string): Promise<Result<Signal, ProcessorError | NotFoundError>>;
+  reprocessSignal(accountId: string, signalId: string, threadId: string, opts?: { skipNotify?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
 }
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
@@ -35,12 +29,12 @@ export class SignalsApi {
     private readonly threadDb: ThreadDatabase,
     private readonly accountDb: AccountDatabase,
     private readonly logger: Logger,
-    private readonly postApprovalCalendarDeps: PostApprovalCalendarHandlerDeps,
     private readonly contentCdnBaseUrl: string,
+    private readonly signalReprocessor: SignalReprocessor,
   ) {}
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
-    const { threadDb, accountDb, logger, postApprovalCalendarDeps, contentCdnBaseUrl } = this;
+    const { threadDb, accountDb, logger, contentCdnBaseUrl, signalReprocessor } = this;
 
     // -------------------------------------------------------------------------
     // 1. GET /accounts/{accountId}/signals — list quarantined signals
@@ -139,6 +133,29 @@ export class SignalsApi {
       // invariant during ingest), so there is nothing to ensure and no rule-evaluation to consult.
       const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
       const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
+      const recipientAddress = signal.data.recipientAddress;
+
+      // Enumerate the OTHER quarantine_visible signals this same decision must cascade to: same
+      // alias + same sender eTLD+1, inbound email, excluding the primary. The user made one decision
+      // about a sender; every visible quarantined message from that sender to that alias inherits it.
+      // One page (limit 100) only — a sender with >100 quarantined messages to one alias is
+      // pathological; the tail resolves on a later action. Best-effort: a failure to enumerate must
+      // not fail the primary decision, so on error we log and cascade to nothing.
+      const collectSiblings = async (): Promise<Signal[]> => {
+        const listResult = await threadDb.listPreThreadSignals(accountId, "quarantined", { limit: 100 });
+        if (listResult.isErr()) {
+          logger.warn("Failed to enumerate sibling quarantined signals — cascading to primary only.", { code: "api.quarantine_response.sibling_list_failed", accountId, signalId, error: listResult.error });
+          return [];
+        }
+        return listResult.value.items.filter((s) => {
+          if (s.signalLookupId === signal.signalLookupId) return false;
+          if (s.status !== "quarantine_visible") return false;
+          if (!isInboundEmailSignalData(s.data)) return false;
+          if (s.data.recipientAddress !== recipientAddress) return false;
+          const sSenderDomain = s.data.from.address.includes("@") ? s.data.from.address.split("@").pop()! : s.data.from.address;
+          return (getDomain(sSenderDomain) ?? sSenderDomain) === senderETLD1;
+        });
+      };
 
       if (body.status === "dismiss") {
         // Dismiss carries no sender opinion, so unlike a real block/reject/violation it would otherwise
@@ -149,12 +166,23 @@ export class SignalsApi {
         // in signal-transforms.ts) — so fold the prior SR-00 explanation (why it was quarantined) into
         // this one's text (that the user then dismissed it), and the collapsed view reads as a single
         // coherent story instead of the dismiss silently replacing the original reason.
-        const priorSR00Text = signal.data.matchedRules?.find(r => r.ruleId === "SR-00")?.text;
-        const dismissText = priorSR00Text ? `${priorSR00Text} — dismissed by user from quarantine` : "Dismissed by user from quarantine";
-        const dismissRule: MatchedRuleResult = { ruleId: "SR-00", actions: [{ type: "block_hidden" }], labelsAdded: [], statusChange: "block_hidden", text: dismissText };
-        const dismissedSignal: Signal = { ...signal, status: "block_hidden", data: { ...signal.data, matchedRules: [...(signal.data.matchedRules ?? []), dismissRule] } };
+        const dismiss = (s: Signal): Signal => {
+          const priorSR00Text = s.data.matchedRules?.find(r => r.ruleId === "SR-00")?.text;
+          const dismissText = priorSR00Text ? `${priorSR00Text} — dismissed by user from quarantine` : "Dismissed by user from quarantine";
+          const dismissRule: MatchedRuleResult = { ruleId: "SR-00", actions: [{ type: "block_hidden" }], labelsAdded: [], statusChange: "block_hidden", text: dismissText };
+          return { ...s, status: "block_hidden", data: { ...s.data, matchedRules: [...(s.data.matchedRules ?? []), dismissRule] } };
+        };
+
+        const dismissedSignal = dismiss(signal);
         const saveResult = await threadDb.saveSignal(dismissedSignal);
         if (saveResult.isErr()) { logger.error("Failed to dismiss signal.", { code: "api.quarantine_response.block_failed", error: saveResult.error }); return err(c, 500, "Internal Server Error"); }
+
+        // Dismiss carries no sender opinion, so there is no saveSender to repeat — just fold each
+        // sibling into the blocked partition too. Best-effort per sibling: log and continue.
+        for (const sibling of await collectSiblings()) {
+          const siblingSaveResult = await threadDb.saveSignal(dismiss(sibling));
+          if (siblingSaveResult.isErr()) logger.warn("Failed to dismiss sibling quarantined signal — skipping.", { code: "api.quarantine_response.sibling_dismiss_failed", accountId, siblingSignalId: sibling.id, error: siblingSaveResult.error });
+        }
 
         logger.info("Signal blocked", { code: "api.signals.blocked", accountId, signalId, decision: "block_hidden" });
         return c.json(dismissedSignal, 200);
@@ -164,96 +192,59 @@ export class SignalsApi {
         const blockResult = await threadDb.updateSignalStatus(accountId, signal.signalLookupId, body.status);
         if (blockResult.isErr()) { logger.error("Failed to block signal.", { code: "api.quarantine_response.block_failed", error: blockResult.error }); return err(c, 500, "Internal Server Error"); }
 
-        const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, body.status);
+        // Record the sender disposition ONCE — it is keyed by (alias, sender), so repeating it per
+        // sibling would be a meaningless rewrite of the identical record. Blocking writes no Aurora
+        // embedding, so there is no serial dependency: a plain status flip per sibling suffices.
+        const saveSenderResult = await accountDb.saveSender(accountId, recipientAddress, senderETLD1, body.status);
         if (saveSenderResult.isErr()) { logger.error("Failed to save sender disposition.", { code: "api.quarantine_response.save_sender_failed", error: saveSenderResult.error }); return err(c, 500, "Internal Server Error"); }
+
+        for (const sibling of await collectSiblings()) {
+          const siblingBlockResult = await threadDb.updateSignalStatus(accountId, sibling.signalLookupId, body.status);
+          if (siblingBlockResult.isErr()) logger.warn("Failed to block sibling quarantined signal — skipping.", { code: "api.quarantine_response.sibling_block_failed", accountId, siblingSignalId: sibling.id, error: siblingBlockResult.error });
+        }
 
         logger.info("Signal blocked", { code: "api.signals.blocked", accountId, signalId, decision: body.status });
         return c.json(blockResult.value, 200);
       }
 
-      // status === "active": find existing thread or create one
+      // status === "active": approve the sender, then replay each affected signal through the
+      // full ingest pipeline (reprocessSignal). Replay — rather than a bespoke thread build here —
+      // is required because ingest is where embeddings are generated, the Aurora thread match runs,
+      // and the embedding is persisted to Aurora. A quarantined signal has none of that (no vector,
+      // no thread), so approving one has to run ingest for it to land on the right thread AND to
+      // seed Aurora for the NEXT approved sibling to match against.
 
-      // Prefer the thread the processor already resolved at receive time via full grouping-key /
-      // in-reply-to / similarity matching. Re-deriving here would only cover grouping-key matches
-      // (null for conversation/crm/etc.) and would spawn a duplicate thread for everything else.
-      let matchedThread: Thread | null = null;
-      if (signal.data.matchedThreadId) {
-        const byIdResult = await threadDb.getThread(accountId, signal.data.matchedThreadId);
-        if (byIdResult.isErr()) { logger.error("Failed to get matched thread for quarantine approval.", { code: "api.quarantine_response.get_matched_thread_failed", error: byIdResult.error }); return err(c, 500, "Internal Server Error"); }
-        matchedThread = byIdResult.value;
-      }
-
-      // Fallback grouping-key lookup — covers signals quarantined before matchedThreadId was recorded.
-      const groupingKey = deriveGroupingKey(signal.data.workflow, signal.data.workflowData, signal.data.recipientAddress, senderETLD1);
-      if (!matchedThread && groupingKey) {
-        const matchedThreadResult = await threadDb.findThreadByGroupingKey(accountId, groupingKey);
-        if (matchedThreadResult.isErr()) { logger.error("Failed to find thread by grouping key.", { code: "api.quarantine_response.find_thread_failed", error: matchedThreadResult.error }); return err(c, 500, "Internal Server Error"); }
-        matchedThread = matchedThreadResult.value;
-      }
-
-      let thread: Thread;
-
-      // Resolve retention — need account config for the effective duration
-      const accountResult = await accountDb.getAccount(accountId);
-      const accountRetention = accountResult.isOk() ? accountResult.value?.retentionDuration : undefined;
-      const effectiveRetention = resolveRetention(accountRetention ? { retentionDuration: accountRetention } : {}, null);
-
-      // Detect calendar attachments now (before the thread's single create/update write below)
-      // so the system:calendar label — if this signal turns out to carry one — lands in that
-      // SAME write instead of a second updateThread call to the same item right after.
-      const calendarExtraction = postApprovalCalendarDeps
-        ? await extractCalendarEvents(signal.data.attachments ?? [], postApprovalCalendarDeps.contentStore, logger)
-        : null;
-      const needsCalendarLabel = !!calendarExtraction && calendarExtraction.validEvents.length > 0;
-
-      if (matchedThread) {
-        const labels = needsCalendarLabel && !matchedThread.labels.includes("system:calendar")
-          ? [...matchedThread.labels, "system:calendar"]
-          : undefined;
-        const updateResult = await threadDb.updateThread(accountId, matchedThread.id, "active", signal.data.receivedAt, { retentionDuration: effectiveRetention, ...(labels ? { labels } : {}) });
-        if (updateResult.isErr()) { logger.error("Failed to update thread for quarantine approval.", { code: "api.quarantine_response.update_thread_failed", error: updateResult.error }); return err(c, 500, "Internal Server Error"); }
-        thread = updateResult.value;
-      } else {
-        thread = buildActiveThread({
-          accountId,
-          workflow: signal.data.workflow,
-          summary: signal.data.summary,
-          lastSignalAt: signal.data.receivedAt,
-          sender: { address: (signal.data as { from?: { address?: string } }).from?.address ?? "", ...(((signal.data as { from?: { name?: string } }).from?.name) ? { name: (signal.data as { from?: { name?: string } }).from!.name } : {}) },
-          recipientAddress: (signal.data as { recipientAddress?: string }).recipientAddress ?? "",
-          subject: (signal.data as { subject?: string }).subject ?? "",
-          retentionDuration: effectiveRetention,
-          groupingKey: groupingKey ?? undefined,
-        });
-        if (needsCalendarLabel) thread.labels = ["system:calendar"];
-        const createResult = await threadDb.createThread(thread);
-        if (createResult.isErr()) { logger.error("Failed to create thread for quarantine approval.", { code: "api.quarantine_response.create_thread_failed", error: createResult.error }); return err(c, 500, "Internal Server Error"); }
-      }
-
-      const unblockResult = await threadDb.unblockSignal(accountId, signal.signalLookupId, thread.id);
-      if (unblockResult.isErr()) { logger.error("Failed to unblock signal.", { code: "api.quarantine_response.unblock_failed", error: unblockResult.error }); return err(c, 500, "Internal Server Error"); }
-
-      // Record the user's explicit sender approval — always. The alias already exists (ingest invariant).
-      const saveSenderResult = await accountDb.saveSender(accountId, signal.data.recipientAddress, senderETLD1, "allow");
+      // 1. Record the sender approval ONCE, up front. Keyed by (alias, sender) — repeating it per
+      //    sibling is a meaningless rewrite. Writing it before any replay is what makes each replay
+      //    resolve the now-trusted sender to `active` instead of re-quarantining.
+      const saveSenderResult = await accountDb.saveSender(accountId, recipientAddress, senderETLD1, "allow");
       if (saveSenderResult.isErr()) { logger.error("Failed to save sender approval.", { code: "api.quarantine_response.save_sender_failed", error: saveSenderResult.error }); return err(c, 500, "Internal Server Error"); }
 
-      // Post-approval calendar forwarding
-      if (postApprovalCalendarDeps) {
-        const approvedSignal: Signal = { ...signal, status: "active", threadId: thread.id };
-        try {
-          await handlePostApprovalCalendar(approvedSignal, thread, postApprovalCalendarDeps, calendarExtraction);
-        } catch (e) {
-          logger.warn("Post-approval calendar handler threw unexpectedly.", {
-            code: "api.quarantine_response.calendar_error",
-            signal, thread,
-            error: e,
-          });
-        }
+      // 2. Replay the PRIMARY first. Its Aurora embedding must exist before any sibling runs its
+      //    thread match, so siblings collapse onto the thread the primary anchors. skipNotify: the
+      //    user is live in-app performing this action and does not want a notification per signal.
+      //    The primary drives the HTTP response — its failure is the only one that fails the request.
+      const primaryResult = await signalReprocessor.reprocessSignal(accountId, signal.id, "QUARANTINED", { skipNotify: true });
+      if (primaryResult.isErr()) { logger.error("Failed to reprocess primary signal on quarantine approval.", { code: "api.quarantine_response.reprocess_primary_failed", accountId, signalId, error: primaryResult.error }); return err(c, 500, "Internal Server Error"); }
+      const activatedSignal = primaryResult.value;
+      if (!activatedSignal.threadId) { logger.error("Primary reprocess produced a signal with no threadId.", { code: "api.quarantine_response.reprocess_no_thread", accountId, signalId }); return err(c, 500, "Internal Server Error"); }
+
+      // 3. Replay each sibling IN SERIES (never Promise.all): each iteration's Aurora upsert must be
+      //    visible to the next iteration's similarity search. Best-effort — a sibling failure is
+      //    logged and skipped, never rolls back, never affects the response.
+      for (const sibling of await collectSiblings()) {
+        const siblingResult = await signalReprocessor.reprocessSignal(accountId, sibling.id, "QUARANTINED", { skipNotify: true });
+        if (siblingResult.isErr()) logger.warn("Failed to reprocess sibling quarantined signal on approval — skipping.", { code: "api.quarantine_response.reprocess_sibling_failed", accountId, siblingSignalId: sibling.id, error: siblingResult.error });
       }
 
-      const signalWithUrls = withResolvedContentUrls(signal, contentCdnBaseUrl);
-      logger.info("Signal activated", { code: "api.signals.activated", accountId, signalId, threadId: thread.id });
-      return c.json({ thread: toApiThread(thread), signal: toApiSignal({ ...signalWithUrls, status: "active", threadId: thread.id }) }, 200);
+      // 4. Response derives from the primary only. Fetch the thread it landed on for the client's
+      //    navigation target.
+      const threadResult = await threadDb.getThread(accountId, activatedSignal.threadId);
+      if (threadResult.isErr() || !threadResult.value) { logger.error("Failed to load thread after primary reprocess.", { code: "api.quarantine_response.get_thread_failed", accountId, signalId, threadId: activatedSignal.threadId, error: threadResult.isErr() ? threadResult.error : undefined }); return err(c, 500, "Internal Server Error"); }
+
+      const signalWithUrls = withResolvedContentUrls(activatedSignal, contentCdnBaseUrl);
+      logger.info("Signal activated", { code: "api.signals.activated", accountId, signalId, threadId: activatedSignal.threadId });
+      return c.json({ thread: toApiThread(threadResult.value), signal: toApiSignal(signalWithUrls) }, 200);
     });
   }
 }
