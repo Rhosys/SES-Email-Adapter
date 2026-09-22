@@ -1631,9 +1631,14 @@ export class IncomingEmailProcessor {
       return ok(undefined);
     }
 
-    // Auto-approve: record the sender allow when approve_sender fires or allow_all mode is active.
-    // The alias itself is guaranteed to exist by the invariant near the top of the pipeline.
-    if (outcome.approveSender || effectiveFilterMode === "allow_all") {
+    // Auto-approve: record the sender allow when approve_sender fires or allow_all mode is active,
+    // but ONLY when the sender has no per-sender policy of its own. Sender policy overrides alias
+    // and account policy — never the reverse — so an existing record (allow OR block_*) is a
+    // deliberate decision and must not be clobbered by propagating the alias's allow_all here.
+    // A null record (effectiveAliasSenderConfig, already loaded above via getSender) is the only
+    // case where writing allow is correct; this also skips the redundant write on re-delivery of an
+    // already-allowed sender. The alias itself is guaranteed to exist by the invariant near the top.
+    if ((outcome.approveSender || effectiveFilterMode === "allow_all") && !effectiveAliasSenderConfig) {
       const approveResult = await this.accountDb.saveSender(accountId, recipientAddress, senderETLD1, "allow");
       if (approveResult.isErr()) return err(approveResult.error);
     }
