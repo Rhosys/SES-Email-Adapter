@@ -246,6 +246,11 @@ resource "aws_dynamodb_table" "accounts" {
     }
   }
 
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+
   point_in_time_recovery { enabled = true }
   deletion_protection_enabled = true
 
