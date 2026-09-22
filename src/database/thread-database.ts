@@ -7,6 +7,7 @@ import type { Logger } from "../logger.js";
 import type { ListThreadsParams } from "../api/app.js";
 import type { Thread, Signal, AnySignal, OutboundEmailSignalData, Page, PageParams, ThreadStatus, ThreadUrgency, Workflow } from "../types/index.js";
 import type { CalendarEventData } from "../types/calendar.js";
+import { retentionTtl } from "../retention.js";
 
 // ---------------------------------------------------------------------------
 // Key helpers
@@ -53,9 +54,9 @@ export function coerceStaleStatus(signal: Signal): Signal {
 // Persistence boundary — threadId-only write + universal read fallback
 // ---------------------------------------------------------------------------
 
-/** Resolve the thread identifier from a DDB record, falling back to legacy arcId attribute. */
+/** Resolve the thread identifier from a DDB record. */
 function resolveThreadId(record: Record<string, unknown>): string | undefined {
-  return (record.threadId as string | undefined) ?? (record.arcId as string | undefined);
+  return record.threadId as string | undefined;
 }
 
 function hydrateThreadObject<T>(record: T): T {
@@ -175,7 +176,7 @@ export class ThreadDatabase {
           this.logger.error("DEVELOPER REVIEW REQUIRED: multiple signal records share one Message-ID but resolve to DIFFERENT threads — the oldest by createdAt was chosen, but this indicates a data integrity bug that must be investigated.", context);
         }
       }
-      const item = hydrateThreadObject(ordered[0] as { threadId?: string; arcId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string });
+      const item = hydrateThreadObject(ordered[0] as { threadId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string });
       return ok(item as { threadId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string });
     } catch (e) {
       return err(dbError(e));
@@ -192,16 +193,20 @@ export class ThreadDatabase {
       gsi1pk = `ACCT#${signal.accountId}#BLOCKED`;
     }
     const gsi1sk = signal.id;
-    const { arcId: _arcId, ...rest } = signal as AnySignal & { arcId?: string };
+    // TTL is derived state: always createdAt + retentionDuration. Compute it here at the write
+    // boundary and assign it last so it is authoritative. Absent/infinite retention → no ttl
+    // attribute → the item never expires.
+    const ttl = retentionTtl(signal.retentionDuration, signal.createdAt);
     try {
       await dynamo.send(new PutCommand({
         TableName: SIGNALS_TABLE,
         Item: {
-          ...rest,
+          ...signal,
           pk: sigPk(signal.accountId, signal.signalLookupId),
           sk: ITEM_SK,
           gsi1pk,
           gsi1sk,
+          ttl, // authoritative — undefined omits the attribute (DynamoDB drops undefined values)
         },
       }));
       return ok(undefined);
@@ -333,15 +338,18 @@ export class ThreadDatabase {
   }
 
   async saveThread(thread: Thread): Promise<Result<void, DbError>> {
-    const { arcId: _arcId, ...rest } = thread as Thread & { arcId?: string };
+    // TTL is derived state, computed here from the thread's retention. Per the product invariant it
+    // is set once at creation and never refreshed (updateThread deliberately leaves it untouched).
+    const ttl = retentionTtl(thread.retentionDuration, thread.createdAt);
     try {
       const item: Record<string, unknown> = {
-        ...rest,
+        ...thread,
         threadId: thread.id,
         pk: threadPk(thread.accountId, thread.id),
         sk: ITEM_SK,
         gsi1pk: `ACCT#${thread.accountId}`,
         gsi1sk: `LASTACT#${thread.status}#${thread.lastSignalAt}#${thread.id}`,
+        ttl, // authoritative — undefined omits the attribute (removeUndefinedValues)
       };
 
       if (thread.groupingKey) {
@@ -406,14 +414,19 @@ export class ThreadDatabase {
     }
   }
 
-  async setThreadTtl(accountId: string, threadId: string, ttl: number): Promise<Result<void, DbError>> {
+  /**
+   * Gives a thread a bounded sweep TTL when it has none — used when a thread is emptied by reprocess
+   * so an infinite-retention orphan doesn't linger forever. if_not_exists keeps any existing
+   * retention-derived ttl untouched, so the caller never reads the DB-internal ttl to decide.
+   */
+  async setThreadTtlFallback(accountId: string, threadId: string, fallbackTtl: number): Promise<Result<void, DbError>> {
     try {
       await dynamo.send(new UpdateCommand({
         TableName: SIGNALS_TABLE,
         Key: { pk: threadPk(accountId, threadId), sk: ITEM_SK },
-        UpdateExpression: "SET #ttl = :ttl",
+        UpdateExpression: "SET #ttl = if_not_exists(#ttl, :fallback)",
         ExpressionAttributeNames: { "#ttl": "ttl" },
-        ExpressionAttributeValues: { ":ttl": ttl },
+        ExpressionAttributeValues: { ":fallback": fallbackTtl },
       }));
       return ok(undefined);
     } catch (e) {

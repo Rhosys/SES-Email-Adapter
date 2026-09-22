@@ -211,7 +211,9 @@ describe("Single saveThread call with complete mutations", () => {
     }
 
     if (testCase.hasRetention) {
-      expect(arc.ttl).toBeDefined();
+      // ttl is derived inside saveThread from retentionDuration — the domain object carries the
+      // duration, not the epoch ttl.
+      expect(arc.retentionDuration).toBeDefined();
     }
   });
 });

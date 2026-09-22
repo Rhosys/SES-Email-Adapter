@@ -45,7 +45,7 @@ describe("ThreadDatabase.batchGetThreads", () => {
     ddbMock.on(BatchGetCommand).resolves({
       Responses: {
         "ses-signals": [
-          { arcId: "thr-001", accountId: "acct-1", subject: "Hello", lastSignalAt: "2024-01-01T00:00:00.000Z" },
+          { threadId: "thr-001", accountId: "acct-1", subject: "Hello", lastSignalAt: "2024-01-01T00:00:00.000Z" },
           { threadId: "thr-002", accountId: "acct-1", subject: "World", lastSignalAt: "2024-01-01T00:00:00.000Z" },
         ],
       },
@@ -55,9 +55,7 @@ describe("ThreadDatabase.batchGetThreads", () => {
 
     expect(result.isOk()).toBe(true);
     const threads = result._unsafeUnwrap();
-    // hydrateThreadObject resolves arcId → threadId for legacy items
     expect(threads[0]).toMatchObject({ threadId: "thr-001", subject: "Hello" });
-    // Already has threadId — kept as-is
     expect(threads[1]).toMatchObject({ threadId: "thr-002", subject: "World" });
   });
 

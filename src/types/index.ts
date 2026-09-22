@@ -585,9 +585,9 @@ export interface SignalBase {
   status: SignalStatus;
   labels: string[];      // Full resolved label set (system + classifier + rule-assigned)
   createdAt: string;
-  ttl?: number;   // DynamoDB TTL (epoch seconds) — computed from retentionDuration at write time; absent = never expire
   // ISO 8601 retention duration — the ONLY retention field stored in DynamoDB.
-  // Drives DynamoDB TTL (computed at write time) and S3 lifecycle tagging.
+  // The DynamoDB TTL attribute is derived from this at write time (saveSignal) and is NEVER part
+  // of the domain type. It also drives S3 lifecycle tagging.
   // userDisplayedRetention is NEVER stored — derived at API response time via getUserDisplayedRetention().
   retentionDuration?: import("../processor/retention.js").RetentionDuration;
 }
@@ -647,8 +647,9 @@ export interface Thread {
   deletedAt?: string;
   createdAt: string;
   updatedAt: string;
-  ttl?: number;   // DynamoDB TTL (epoch seconds) — computed from retentionDuration at write time; absent = never expire
-  // ISO 8601 retention duration — from the most recently received signal in the thread
+  // ISO 8601 retention duration — from the most recently received signal in the thread.
+  // The DynamoDB TTL attribute is derived from this at write time (thread-factory/saveThread) and
+  // is NEVER part of the domain type.
   retentionDuration?: import("../processor/retention.js").RetentionDuration;
   // Message-IDs of emails the user sent on this thread
   sentMessageIds?: string[];

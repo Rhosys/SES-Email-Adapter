@@ -20,16 +20,10 @@ describe("Invariant 9: findSignalByEmailMessageId uses gsi3", () => {
 
   it.each([
     {
-      scenario: "post-migration item (threadId present) — resolves threadId",
+      scenario: "item with threadId — resolves threadId",
       gsi3pk: "ACCT#acct-1#MSGID#<abc@example.com>",
       returnedItem: { id: "sgn-1", signalLookupId: "sgn-1", threadId: "thr-99", accountId: "acct-1", status: "active", source: "email", type: "email" },
       expectedThreadId: "thr-99",
-    },
-    {
-      scenario: "pre-migration item (arcId only) — resolves threadId via fallback",
-      gsi3pk: "ACCT#acct-2#MSGID#<old@legacy.com>",
-      returnedItem: { id: "sgn-old", signalLookupId: "sgn-old", arcId: "thr-legacy", accountId: "acct-2", status: "active", source: "email", type: "email" },
-      expectedThreadId: "thr-legacy",
     },
   ])("hit: $scenario", async ({ gsi3pk, returnedItem, expectedThreadId }) => {
     ddbMock.on(QueryCommand).resolves({ Items: [returnedItem] });
@@ -76,7 +70,7 @@ describe("Invariant 10: findThreadByGroupingKey uses gsi3 with GKEY prefix", () 
 
   it.each([
     {
-      scenario: "post-migration thread (threadId present) — returns full thread",
+      scenario: "thread with threadId — returns full thread",
       accountId: "acct-1",
       groupingKey: "order-12345",
       returnedItem: {
@@ -86,18 +80,6 @@ describe("Invariant 10: findThreadByGroupingKey uses gsi3 with GKEY prefix", () 
         sender: { address: "shop@example.com" }, recipientAddress: "me@example.com", subject: "Your order",
       },
       expectedThreadId: "thr-9",
-    },
-    {
-      scenario: "pre-migration thread (arcId only) — resolves threadId via fallback",
-      accountId: "acct-2",
-      groupingKey: "invoice-99",
-      returnedItem: {
-        id: "thr-legacy", accountId: "acct-2", arcId: "thr-legacy", groupingKey: "invoice-99",
-        workflow: "email", labels: [], status: "active", summary: "Legacy thread",
-        lastSignalAt: "2023-01-01T00:00:00Z", createdAt: "2022-12-01T00:00:00Z", updatedAt: "2023-01-01T00:00:00Z",
-        sender: { address: "billing@corp.com" }, recipientAddress: "user@example.com", subject: "Invoice",
-      },
-      expectedThreadId: "thr-legacy",
     },
   ])("hit: $scenario", async ({ accountId, groupingKey, returnedItem, expectedThreadId }) => {
     ddbMock.on(QueryCommand).resolves({ Items: [returnedItem] });

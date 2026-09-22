@@ -12,7 +12,6 @@
 
 import { DateTime } from "luxon";
 import { generateId } from "./utils/id.js";
-import { durationToSeconds } from "./retention.js";
 import type { RetentionDuration } from "./retention.js";
 import type { Thread, Workflow } from "./types/index.js";
 
@@ -30,10 +29,6 @@ export interface BuildActiveThreadParams {
 
 export function buildActiveThread(params: BuildActiveThreadParams): Thread {
   const now = DateTime.utc().toISO()!;
-  const retentionSecs = durationToSeconds(params.retentionDuration);
-  const ttl = retentionSecs != null
-    ? Math.floor(Date.now() / 1000) + retentionSecs
-    : undefined;
 
   return {
     id: generateId("thr-"),
@@ -48,8 +43,8 @@ export function buildActiveThread(params: BuildActiveThreadParams): Thread {
     subject: params.subject,
     createdAt: now,
     updatedAt: now,
+    // TTL is derived from retentionDuration at the write boundary (saveThread) — not set here.
     retentionDuration: params.retentionDuration,
-    ...(ttl !== undefined ? { ttl } : {}),
     ...(params.groupingKey ? { groupingKey: params.groupingKey } : {}),
   };
 }

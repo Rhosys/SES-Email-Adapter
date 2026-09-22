@@ -1,6 +1,6 @@
 import type { EmailContentStore, ContentStore } from "../content-store.js";
 import type { Address } from "../email/address.js";
-import { DateTime, Duration } from "luxon";
+import { DateTime } from "luxon";
 import { generateId } from "../utils/id.js";
 import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
@@ -30,7 +30,7 @@ import { deriveResourceInfo } from "../resource/resource-info.js";
 import type { S3RetentionService } from "../embedding/s3-retention-service.js";
 import { getRetentionForPlan } from "../embedding/retention-tier.js";
 import type { BillingPlan } from "../embedding/retention-tier.js";
-import { resolveRetention, retentionToS3Tag, durationToSeconds } from "./retention.js";
+import { resolveRetention, retentionToS3Tag } from "./retention.js";
 import type { RetentionDuration } from "./retention.js";
 import { buildActiveThread } from "./thread-factory.js";
 import { getPrimaryThreadMatcherRegistry, getActiveClusters } from "../embedding/cluster-registry.js";
@@ -150,7 +150,13 @@ import type { SESReceiptStatus } from "aws-lambda";
 /** Re-exported for external consumers that need the verdict status type. */
 export type SesVerdictStatus = SESReceiptStatus["status"];
 
-const systemSignalDefaultRetentionDuration = Math.floor(Duration.fromISO("P90D").as("seconds"));
+// Retention for system-generated notice signals (invalid rule/template function, auto-send blocked).
+// Expressed as a duration so saveSignal derives the ttl — the signal never carries a raw ttl.
+const SYSTEM_SIGNAL_RETENTION: RetentionDuration = "P90D";
+
+// Blocked/quarantined mail is never subject to the account's (possibly infinite) retention. The
+// user did not choose to keep it, so it is held only long enough for review/appeal, then expires.
+const SPAM_QUARANTINE_RETENTION: RetentionDuration = "P3M";
 
 export interface InboundSignalMessage {
   /**
@@ -278,12 +284,11 @@ async function applyRules(
       });
       const id = generateId("sgn-");
       const timestamp = DateTime.utc().toISO()!;
-      const ttl = Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration;
       const result = await saveSignal({
         id, signalLookupId: id, threadId: context.thread.id, accountId: rule.accountId,
         source: "email", type: "invalid_rule_function", status: "active",
         labels: [],
-        createdAt: timestamp, ttl,
+        createdAt: timestamp, retentionDuration: SYSTEM_SIGNAL_RETENTION,
         data: { resourceName: rule.name, issue: evalResult.warnings.join("; ") },
       });
       if (result.isErr()) {
@@ -792,7 +797,7 @@ export class IncomingEmailProcessor {
                 {
                   const sigId = generateId("sgn-");
                   const sigTs = DateTime.utc().toISO()!;
-                  const invalidFnResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
+                  const invalidFnResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, retentionDuration: SYSTEM_SIGNAL_RETENTION, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
                   if (invalidFnResult.isErr()) { this.logger.warn("Failed to save invalid_template_function signal", { code: "processor.save_invalid_fn_signal_failed", accountId, threadId: thread.id, error: invalidFnResult.error }); }
                 }
                 actionVars[`fn.${fn.name}`] = "";
@@ -815,7 +820,7 @@ export class IncomingEmailProcessor {
                   {
                     const sigId = generateId("sgn-");
                     const sigTs = DateTime.utc().toISO()!;
-                    const invalidReturnResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
+                    const invalidReturnResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, retentionDuration: SYSTEM_SIGNAL_RETENTION, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
                     if (invalidReturnResult.isErr()) { this.logger.warn("Failed to save invalid_template_function signal", { code: "processor.save_invalid_fn_signal_failed", accountId, threadId: thread.id, error: invalidReturnResult.error }); }
                   }
                   actionVars[`fn.${fn.name}`] = "";
@@ -849,7 +854,7 @@ export class IncomingEmailProcessor {
               {
                 const sigId = generateId("sgn-");
                 const sigTs = DateTime.utc().toISO()!;
-                const autoSendBlockedResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "auto_send_blocked", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration, data: { recipientAddress: signal.data.recipientAddress } });
+                const autoSendBlockedResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "auto_send_blocked", status: "active", labels: [], createdAt: sigTs, retentionDuration: SYSTEM_SIGNAL_RETENTION, data: { recipientAddress: signal.data.recipientAddress } });
                 if (autoSendBlockedResult.isErr()) { this.logger.warn("Failed to save auto_send_blocked signal", { code: "processor.save_auto_send_blocked_failed", accountId, threadId: thread.id, error: autoSendBlockedResult.error }); }
               }
             }
@@ -869,7 +874,7 @@ export class IncomingEmailProcessor {
             });
             const sigId = generateId("sgn-");
             const sigTs = DateTime.utc().toISO()!;
-            const autoSendBlockedResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "auto_send_blocked", status: "active", labels: [], createdAt: sigTs, ttl: Math.floor(Date.now() / 1000) + systemSignalDefaultRetentionDuration, data: { recipientAddress: signal.data.recipientAddress } });
+            const autoSendBlockedResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "auto_send_blocked", status: "active", labels: [], createdAt: sigTs, retentionDuration: SYSTEM_SIGNAL_RETENTION, data: { recipientAddress: signal.data.recipientAddress } });
             if (autoSendBlockedResult.isErr()) { this.logger.warn("Failed to save auto_send_blocked signal", { code: "processor.save_auto_send_blocked_failed", accountId, threadId: thread.id, error: autoSendBlockedResult.error }); }
           }
 
@@ -1075,6 +1080,7 @@ export class IncomingEmailProcessor {
         type: "email",
         labels: [],
         createdAt: DateTime.utc().toISO()!,
+        retentionDuration: SPAM_QUARANTINE_RETENTION,
         data: {
           s3Key,
           recipientAddress: destination[0] ?? "",
@@ -1206,11 +1212,6 @@ export class IncomingEmailProcessor {
     if (effectiveAliasSenderConfig && effectiveAliasSenderConfig.policy !== "allow") {
       const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | report_violation
       const now = DateTime.utc().toISO()!;
-      const effectiveRetention = resolveRetention({ retentionDuration: configuredRetentionDuration }, null);
-      const retentionSecs = durationToSeconds(effectiveRetention);
-      const ttl = retentionSecs != null
-        ? Math.floor(Date.now() / 1000) + retentionSecs
-        : undefined;
       const signalId = generateId("sgn-");
       const signal: Signal = {
         id: signalId,
@@ -1221,7 +1222,10 @@ export class IncomingEmailProcessor {
         type: "email",
         labels: [],
         createdAt: now,
-        retentionDuration: effectiveRetention,
+        // Blocked/quarantined mail is never subject to the account's (possibly infinite) retention —
+        // the user did not choose to keep it, so it is held only long enough for review/appeal.
+        // saveSignal derives the ttl from this duration.
+        retentionDuration: SPAM_QUARANTINE_RETENTION,
         ...(gsi3pk !== undefined ? { gsi3pk } : {}),
         data: {
           s3Key,
@@ -1239,7 +1243,6 @@ export class IncomingEmailProcessor {
           tags: [],
           summary: "",
         },
-        ...(ttl !== undefined ? { ttl } : {}),
       };
       const saveResult = await this.threadDb.saveSignal(signal);
       if (saveResult.isErr()) return err(saveResult.error);
@@ -1354,10 +1357,6 @@ export class IncomingEmailProcessor {
     const now = DateTime.utc().toISO()!;
 
     const effectiveRetentionForTtl = resolveRetention({ retentionDuration: configuredRetentionDuration }, null);
-    const retentionSecsForTtl = durationToSeconds(effectiveRetentionForTtl);
-    const ttl = retentionSecsForTtl != null
-      ? Math.floor(Date.now() / 1000) + retentionSecsForTtl
-      : undefined;
 
     // 5. SYSTEM account override — healthcheck emails always get workflow "healthcheck"
     // regardless of classifier output.
@@ -1480,7 +1479,9 @@ export class IncomingEmailProcessor {
     // (post-classify path: preserves classification data on blocked signal for audit/review)
     if (effectiveAliasSenderConfig && effectiveAliasSenderConfig.policy !== "allow") {
       const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | report_violation
-      const blockedSignal = buildSignal({ status: blockStatus, accountId, compositeMailMessageId: msg.compositeMailMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}) }, this.logger);
+      // Blocked mail is never subject to the account's (possibly infinite) retention — held only for
+      // review/appeal. saveSignal derives the ttl from this duration.
+      const blockedSignal = buildSignal({ status: blockStatus, accountId, compositeMailMessageId: msg.compositeMailMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: SPAM_QUARANTINE_RETENTION }, this.logger);
       const saveResult = await this.threadDb.saveSignal(blockedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.track(`Blocked email — sender explicitly blocked for this alias ${recipientAddress}`, { code: "processor.sender_block", signal: blockedSignal, thread, alias: recipientAddress, sender: parsed.from.address, senderETLD1, policy: blockStatus });
@@ -1534,7 +1535,6 @@ export class IncomingEmailProcessor {
       receivedAt: timestamp,
       now,
       retentionDuration: effectiveRetentionForTtl,
-      ...(ttl !== undefined ? { ttl } : {}),
       ...(gsi3pk !== undefined ? { gsi3pk } : {}),
       ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}),
     }, this.logger);
@@ -1582,10 +1582,15 @@ export class IncomingEmailProcessor {
       }
     }
 
-    const buildArgs = { accountId, compositeMailMessageId: msg.compositeMailMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}), ...(gsi3pk !== undefined ? { gsi3pk } : {}), ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}) };
+    const buildArgs = { accountId, compositeMailMessageId: msg.compositeMailMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(gsi3pk !== undefined ? { gsi3pk } : {}), ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}) };
+
+    // Blocked/quarantined mail is never subject to the account's (possibly infinite) retention —
+    // the user did not choose to keep it, so it is held only long enough for review/appeal. Spread
+    // after buildArgs to override retentionDuration; saveSignal derives the ttl from it.
+    const spamRetentionArgs = { retentionDuration: SPAM_QUARANTINE_RETENTION };
 
     if (outcome.blockDisposition) {
-      const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs }, this.logger);
+      const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs, ...spamRetentionArgs }, this.logger);
       const saveResult = await this.threadDb.saveSignal({ ...blockSignal, data: { ...blockSignal.data, matchedRules } });
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.track(`Blocked email — rule matched with block disposition. accountId=${accountId}, signalId=${blockSignal.id}, alias=${recipientAddress}, subject="${parsed.subject}", sender=${parsed.from.address}`, { code: "processor.rule_block", signal: blockSignal, thread, disposition: outcome.blockDisposition, matchedRules: matchedRules.map(r => r.ruleId) });
@@ -1606,7 +1611,7 @@ export class IncomingEmailProcessor {
     // approveSender overrides quarantine — SR-01 (auto-approve on matched conversation) fires before SR-03/SR-04
     if (outcome.quarantine && !outcome.approveSender) {
       const quarantineStatus = outcome.quarantineHidden ? "quarantine_hidden" : "quarantine_visible";
-      const quarantineBase = buildSignal({ status: quarantineStatus, ...buildArgs }, this.logger);
+      const quarantineBase = buildSignal({ status: quarantineStatus, ...buildArgs, ...spamRetentionArgs }, this.logger);
       // Persist the thread the matcher resolved so approving this quarantined signal reattaches
       // to it instead of creating a duplicate. Only record an existing thread — a fresh shell is
       // not persisted here, so the approval path creates the thread itself when there is no match.
@@ -1726,11 +1731,10 @@ export class IncomingEmailProcessor {
         ...(a.s3Key ? { s3Key: a.s3Key } : {}),
       }));
       const allAssets = [...resourceInfo.assets, ...extractedAssets];
-      // Resource TTL always has a floor of expectedResolutionDate + 1 year — a resource must
-      // outlive its own due date regardless of the signal's own retention (which may be shorter,
-      // or absent entirely for unlimited-retention accounts).
-      const resourceTtlFloor = Math.floor(DateTime.fromISO(resourceInfo.expectedResolutionDate).toSeconds()) + 365 * 24 * 60 * 60;
-      const resourceTtl = ttl !== undefined ? Math.max(ttl, resourceTtlFloor) : resourceTtlFloor;
+      // Resource TTL is always expectedResolutionDate + 1 year — a resource lives one year past its
+      // own due date, independent of the signal's retention (the signal may live longer, forever,
+      // or have no retention at all; none of that should change when the resource expires).
+      const resourceTtl = Math.floor(DateTime.fromISO(resourceInfo.expectedResolutionDate).toSeconds()) + 365 * 24 * 60 * 60;
       const resourceResult = await this.resourceDb.saveResource({
         accountId,
         threadId: thread.id,
@@ -1759,7 +1763,7 @@ export class IncomingEmailProcessor {
 
     // 12b. Calendar attachment processing — detect .ics, parse, create calendar signal
     // Unexpected exceptions propagate to the caller (SQS retry). Only IcsParseError is caught.
-    await this.processCalendarAttachment(signal, thread, accountId, calendarExtraction, ttl);
+    await this.processCalendarAttachment(signal, thread, accountId, calendarExtraction, signal.retentionDuration);
 
     // 13. S3 retention — best-effort (idempotent, failure means default lifecycle applies instead of plan-specific)
     await this.attemptS3Retention(signal, billingPlan, thread);
@@ -1802,7 +1806,8 @@ export class IncomingEmailProcessor {
           recipientAddress: signal.data.recipientAddress,
           embedding,
           signalId: signal.id,
-          ...(signal.ttl != null ? { ttl: signal.ttl } : {}),
+          ...(signal.retentionDuration != null ? { retentionDuration: signal.retentionDuration } : {}),
+          createdAt: signal.createdAt,
         });
 
         if (upsertResult.isErr()) {
@@ -1902,7 +1907,7 @@ export class IncomingEmailProcessor {
    *
    * On unexpected crash: does NOT catch — lets the exception propagate so SQS retries naturally.
    */
-  private async processCalendarAttachment(signal: Signal, thread: Thread, accountId: string, extraction: CalendarAttachmentExtractionResult | null, ttl?: number): Promise<void> {
+  private async processCalendarAttachment(signal: Signal, thread: Thread, accountId: string, extraction: CalendarAttachmentExtractionResult | null, retentionDuration?: RetentionDuration): Promise<void> {
     if (!extraction) return;
 
     for (const invalid of extraction.invalidAttachments) {
@@ -1918,7 +1923,8 @@ export class IncomingEmailProcessor {
         status: "active",
         labels: [],
         createdAt: invalidTimestamp,
-        ...(ttl !== undefined ? { ttl } : {}),
+        // Inherits the parent email's retention; saveSignal derives the ttl from it.
+        ...(retentionDuration !== undefined ? { retentionDuration } : {}),
         data: {
           reason: invalid.reason,
           linkedSignalId: signal.id,
@@ -1963,7 +1969,8 @@ export class IncomingEmailProcessor {
         status: "active",
         labels: [],
         createdAt: calendarTimestamp,
-        ...(ttl !== undefined ? { ttl } : {}),
+        // Inherits the parent email's retention; saveSignal derives the ttl from it.
+        ...(retentionDuration !== undefined ? { retentionDuration } : {}),
         data: {
           ...calendarData,
           ...(organizerCn !== undefined ? { organizerCn } : {}),
@@ -2080,13 +2087,13 @@ export class IncomingEmailProcessor {
           this.logger.warn("Failed to delete embeddings for thread being emptied by reprocess.", { code: "processor.reprocess.pre_embedding_cleanup_failed", accountId, threadId, error: deleteEmbResult.error });
         }
 
-        const threadResult = await this.threadDb.getThread(accountId, threadId);
-        if (threadResult.isOk() && threadResult.value && !threadResult.value.ttl) {
-          const fiveYearsTtl = Math.floor(Date.now() / 1000) + (5 * 365 * 24 * 60 * 60);
-          const ttlResult = await this.threadDb.setThreadTtl(accountId, threadId, fiveYearsTtl);
-          if (ttlResult.isErr()) {
-            this.logger.warn("Failed to set 5-year TTL on thread being emptied by reprocess.", { code: "processor.reprocess.pre_ttl_set_failed", accountId, threadId, error: ttlResult.error });
-          }
+        // Give the emptied thread a 5-year sweep TTL only if it has none yet (infinite-retention
+        // orphan). if_not_exists in setThreadTtlFallback keeps any existing retention-derived ttl,
+        // so no read of the persisted ttl is needed here.
+        const fiveYearsTtl = Math.floor(Date.now() / 1000) + (5 * 365 * 24 * 60 * 60);
+        const ttlResult = await this.threadDb.setThreadTtlFallback(accountId, threadId, fiveYearsTtl);
+        if (ttlResult.isErr()) {
+          this.logger.warn("Failed to set 5-year TTL on thread being emptied by reprocess.", { code: "processor.reprocess.pre_ttl_set_failed", accountId, threadId, error: ttlResult.error });
         }
       }
     }
@@ -2291,12 +2298,11 @@ function buildSignal(opts: {
   s3Key: string;
   receivedAt: string;
   now: string;
-  ttl?: number;
   retentionDuration?: RetentionDuration;
   gsi3pk?: string;
   forceSignalId?: string;
 }, logger?: Logger): Signal<InboundEmailSignalData> {
-  const { threadId, status, accountId, compositeMailMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, ttl, retentionDuration, gsi3pk, forceSignalId } = opts;
+  const { threadId, status, accountId, compositeMailMessageId, recipientAddress, parsed, classification, s3Key, receivedAt, now, retentionDuration, gsi3pk, forceSignalId } = opts;
   const signalId = forceSignalId ?? generateId("sgn-");
 
   // Extract unsubscribe info from List-Unsubscribe / List-Unsubscribe-Post headers,
@@ -2407,7 +2413,6 @@ function buildSignal(opts: {
   };
 
   if (threadId !== undefined) signal.threadId = threadId;
-  if (ttl !== undefined) signal.ttl = ttl;
   if (retentionDuration !== undefined) signal.retentionDuration = retentionDuration;
   if (gsi3pk !== undefined) signal.gsi3pk = gsi3pk;
 

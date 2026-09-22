@@ -351,18 +351,15 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
   });
 
   it("matched thread — TTL is NOT refreshed on subsequent signals (product: expiry = createdAt + retention)", async () => {
-    // Product expectation: thread TTL is computed once at creation time and pinned.
-    // Subsequent signals update retentionDuration (metadata) but never recompute ttl.
-    // This means the DynamoDB item expires at createdAt + original retention, regardless
-    // of how many later signals arrive. The UI should display expiry relative to createdAt.
-    const existingTtl = Math.floor(new Date("2024-01-10T00:00:00Z").getTime() / 1000) + 90 * 24 * 60 * 60; // createdAt + P3M
+    // Product expectation: thread TTL is computed once at write time (saveThread, from createdAt +
+    // retention) and pinned. ttl is DB-internal and not on the domain type; subsequent signals
+    // update retentionDuration (metadata) but the updateThread delta must never carry a ttl.
     const existing = makeThread({
       id: "arc-ttl-fixed",
       workflow: "conversation",
       summary: "A test email.",
       labels: ["system:workflow:conversation"],
       retentionDuration: "P3M",
-      ttl: existingTtl,
     });
     vi.mocked(threadMatcher.findMatch).mockReturnValueOnce(Promise.resolve(ok(existing)));
 

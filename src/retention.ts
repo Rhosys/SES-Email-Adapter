@@ -39,6 +39,22 @@ export function durationToSeconds(duration: RetentionDuration): number | null {
 }
 
 /**
+ * Derives the DynamoDB/Aurora TTL (epoch seconds) for a record from its retention duration and
+ * creation time: createdAt + retentionDuration. Returns undefined when retention is absent or
+ * infinite/unparseable — the record then has no expiry and lives forever.
+ *
+ * This is the single source of truth for turning retention into an expiry timestamp. TTL is never
+ * stored on domain types; every write boundary (saveSignal, saveThread) and every consumer that
+ * needs an expiry (Aurora embeddings) derives it here from retentionDuration + createdAt.
+ */
+export function retentionTtl(retentionDuration: RetentionDuration | undefined, createdAt: string): number | undefined {
+  if (retentionDuration == null) return undefined;
+  const seconds = durationToSeconds(retentionDuration);
+  if (seconds == null) return undefined;
+  return Math.floor(new Date(createdAt).getTime() / 1000) + seconds;
+}
+
+/**
  * Maps a retention duration to the appropriate S3 lifecycle tag.
  * Durations ≤ 1 year get the 365-day tag, 2–10 years get the 3650-day tag,
  * and >10 years or Infinity get no tag (live forever).

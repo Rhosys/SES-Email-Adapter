@@ -16,6 +16,8 @@ import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { ThreadMatcherPort } from "../processor/incoming-email-processor.js";
 import type { Thread } from "../types/index.js";
+import { retentionTtl } from "../retention.js";
+import type { RetentionDuration } from "../retention.js";
 import type { AwsDataApiPgDatabase } from "drizzle-orm/aws-data-api/pg";
 import type { Logger } from "../logger.js";
 
@@ -42,7 +44,8 @@ export interface MultiClusterAuroraWriter {
     recipientAddress: string;
     embedding: number[];
     signalId: string;
-    ttl?: number;
+    retentionDuration?: RetentionDuration;
+    createdAt?: string;
   }): Promise<Result<void, DbError>>;
 
   findMatch(opts: {
@@ -381,15 +384,14 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
   // MultiClusterAuroraWriter — upserts
   // ---------------------------------------------------------------------------
 
-  async upsertEmbedding(threadId: string, embedding: number[], accountId: string, recipientAddress: string, signalId: string, ttl?: number): Promise<Result<void, DbError>>;
-  async upsertEmbedding(opts: { registryId: string; threadId: string; accountId: string; recipientAddress: string; embedding: number[]; signalId: string; ttl?: number }): Promise<Result<void, DbError>>;
+  async upsertEmbedding(threadId: string, embedding: number[], accountId: string, recipientAddress: string, signalId: string): Promise<Result<void, DbError>>;
+  async upsertEmbedding(opts: { registryId: string; threadId: string; accountId: string; recipientAddress: string; embedding: number[]; signalId: string; retentionDuration?: RetentionDuration; createdAt?: string }): Promise<Result<void, DbError>>;
   async upsertEmbedding(
-    threadIdOrOpts: string | { registryId: string; threadId: string; accountId: string; recipientAddress: string; embedding: number[]; signalId: string; ttl?: number },
+    threadIdOrOpts: string | { registryId: string; threadId: string; accountId: string; recipientAddress: string; embedding: number[]; signalId: string; retentionDuration?: RetentionDuration; createdAt?: string },
     embedding?: number[],
     accountId?: string,
     recipientAddress?: string,
     signalId?: string,
-    ttl?: number,
   ): Promise<Result<void, DbError>> {
     if (typeof threadIdOrOpts === "string") {
       const cluster = getPrimaryThreadMatcherRegistry();
@@ -400,7 +402,6 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
         recipientAddress: recipientAddress!,
         embedding: embedding!,
         signalId: signalId!,
-        ...(ttl != null ? { ttl } : {}),
       });
     }
     return this.upsertToCluster(threadIdOrOpts);
@@ -413,11 +414,21 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
     recipientAddress: string;
     embedding: number[];
     signalId: string;
-    ttl?: number;
+    retentionDuration?: RetentionDuration;
+    createdAt?: string;
   }): Promise<Result<void, DbError>> {
     const cluster = getRegistryById(opts.registryId);
     if (!cluster) return err(dbError(`Cluster "${opts.registryId}" not found in CLUSTER_REGISTRY`));
     const db = getDbForCluster(cluster);
+
+    // Derive the embedding-row expiry from retention at the write boundary — same rule as the DDB
+    // ttl. When retention is absent/infinite (retentionTtl → undefined), Aurora keeps its own
+    // bounded default (2 years); the search index is not the system of record, so vectors need not
+    // outlive that even for infinite-retention signals.
+    const ttl = opts.retentionDuration != null && opts.createdAt != null
+      ? retentionTtl(opts.retentionDuration, opts.createdAt)
+      : undefined;
+    const expiresAt = ttl != null ? sql`to_timestamp(${ttl})` : sql`now() + interval '2 years'`;
 
     const result = await withRetry(async () => {
       await db.transaction(async (tx) => {
@@ -432,14 +443,14 @@ export class ThreadMatcher implements ThreadMatcherPort, MultiClusterAuroraWrite
             recipientAddress: opts.recipientAddress,
             embedding: toVector(opts.embedding),
             updatedAt: sql`now()`,
-            expiresAt: opts.ttl != null ? sql`to_timestamp(${opts.ttl})` : sql`now() + interval '2 years'`,
+            expiresAt,
           })
           .onConflictDoUpdate({
             target: [threadEmbeddings.signalId, threadEmbeddings.threadId, threadEmbeddings.accountId, threadEmbeddings.recipientAddress],
             set: {
               embedding: toVector(opts.embedding),
               updatedAt: sql`now()`,
-              expiresAt: opts.ttl != null ? sql`to_timestamp(${opts.ttl})` : sql`now() + interval '2 years'`,
+              expiresAt,
             },
           });
       });

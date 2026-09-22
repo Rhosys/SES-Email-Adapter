@@ -122,7 +122,7 @@ export class ReindexWorker {
     targetRegistryId: string,
     modelId: string,
   ): Promise<Result<void, { signalId: string; cause: unknown }>> {
-    const signal = item as unknown as Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId" | "createdAt"> & { data?: Pick<EmailSignalData, "recipientAddress" | "embeddings" | "s3Key"> };
+    const signal = item as unknown as Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId" | "createdAt" | "retentionDuration"> & { data?: Pick<EmailSignalData, "recipientAddress" | "embeddings" | "s3Key"> };
 
     if (!signal.data) {
       return err({ signalId: signal.id ?? "unknown", cause: "no data property on item" });
@@ -130,12 +130,14 @@ export class ReindexWorker {
 
     const embeddings = signal.data.embeddings;
 
+    // The Aurora embedding expiry is derived by upsertEmbedding from the signal's retention +
+    // createdAt — the same rule the DDB ttl uses — never from a persisted ttl attribute.
     const vector = embeddings?.[modelId];
     if (vector && Array.isArray(vector)) {
-      return this.pureCopyToAurora(signal as Pick<Signal, "id" | "accountId" | "threadId"> & { data: Pick<EmailSignalData, "recipientAddress"> }, vector, targetRegistryId);
+      return this.pureCopyToAurora(signal as Pick<Signal, "id" | "accountId" | "threadId" | "createdAt" | "retentionDuration"> & { data: Pick<EmailSignalData, "recipientAddress"> }, vector, targetRegistryId);
     }
 
-    return this.regenerateFromS3(signal as Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId" | "createdAt"> & { data: Pick<EmailSignalData, "recipientAddress" | "s3Key"> }, targetRegistryId, modelId);
+    return this.regenerateFromS3(signal as Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId" | "createdAt" | "retentionDuration"> & { data: Pick<EmailSignalData, "recipientAddress" | "s3Key"> }, targetRegistryId, modelId);
   }
 
   // ---------------------------------------------------------------------------
@@ -143,7 +145,7 @@ export class ReindexWorker {
   // ---------------------------------------------------------------------------
 
   private async pureCopyToAurora(
-    signal: Pick<Signal, "id" | "accountId" | "threadId" | "ttl"> & { data: Pick<EmailSignalData, "recipientAddress"> },
+    signal: Pick<Signal, "id" | "accountId" | "threadId" | "createdAt" | "retentionDuration"> & { data: Pick<EmailSignalData, "recipientAddress"> },
     vector: number[],
     targetRegistryId: string,
   ): Promise<Result<void, { signalId: string; cause: unknown }>> {
@@ -154,7 +156,8 @@ export class ReindexWorker {
       recipientAddress: signal.data.recipientAddress,
       embedding: vector,
       signalId: signal.id,
-      ...(signal.ttl != null ? { ttl: signal.ttl } : {}),
+      ...(signal.retentionDuration != null ? { retentionDuration: signal.retentionDuration } : {}),
+      createdAt: signal.createdAt,
     });
     if (upsertResult.isErr()) {
       return err({ signalId: signal.id, cause: upsertResult.error });
@@ -167,7 +170,7 @@ export class ReindexWorker {
   // ---------------------------------------------------------------------------
 
   private async regenerateFromS3(
-    signal: Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId" | "createdAt" | "ttl"> & { data: Pick<EmailSignalData, "recipientAddress" | "s3Key"> },
+    signal: Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId" | "createdAt" | "retentionDuration"> & { data: Pick<EmailSignalData, "recipientAddress" | "s3Key"> },
     targetRegistryId: string,
     modelId: string,
   ): Promise<Result<void, { signalId: string; cause: unknown }>> {
@@ -205,7 +208,8 @@ export class ReindexWorker {
       recipientAddress: signal.data.recipientAddress,
       embedding: result.value.vector,
       signalId: signal.id,
-      ...(signal.ttl != null ? { ttl: signal.ttl } : {}),
+      ...(signal.retentionDuration != null ? { retentionDuration: signal.retentionDuration } : {}),
+      createdAt: signal.createdAt,
     });
     if (upsertResult.isErr()) {
       return err({ signalId: signal.id, cause: upsertResult.error });

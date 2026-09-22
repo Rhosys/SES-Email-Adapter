@@ -25,7 +25,7 @@ export function makeThreadDbMock(): ThreadDatabase {
     findThreadByGroupingKey: vi.fn().mockReturnValue(Promise.resolve(ok(null))),
     saveThread: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     updateThread: vi.fn().mockReturnValue(Promise.resolve(ok({ id: "arc-mock" }))),
-    setThreadTtl: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
+    setThreadTtlFallback: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
     listActiveThreads: vi.fn().mockReturnValue(Promise.resolve(ok([]))),
   } as unknown as ThreadDatabase;
 }

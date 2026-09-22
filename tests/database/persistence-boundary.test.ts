@@ -134,22 +134,20 @@ describe("Invariant 5: threadId-only write — no arcId persisted on new writes"
 });
 
 // =============================================================================
-// Invariant 6: Universal read fallback resolves threadId ?? arcId
+// Invariant 6: Universal read hydration resolves threadId
 // For any stored record shape, resolveThreadId/hydrateThreadObject correctly
 // resolves the identifier. Tested through the public DB methods that apply
 // the hydration.
 // **Validates: Requirements 9.5, 9.6, 9.7, 9.8, 9.9, 10.8**
 // =============================================================================
 
-describe("Invariant 6: Universal read fallback resolves threadId ?? arcId", () => {
+describe("Invariant 6: Universal read hydration resolves threadId", () => {
   let db: ThreadDatabase;
   beforeEach(() => { db = new ThreadDatabase(createMockLogger()); });
 
   describe("getThread — hydrates threadId from record shape", () => {
     it.each([
-      { desc: "threadId only (post-migration)", record: { id: "thr-1", threadId: "thr-1", accountId: "acct-1" }, expected: "thr-1" },
-      { desc: "arcId only (pre-migration)", record: { id: "thr-2", arcId: "thr-2", accountId: "acct-1" }, expected: "thr-2" },
-      { desc: "both present (threadId wins)", record: { id: "thr-3", threadId: "thr-3", arcId: "old-id", accountId: "acct-1" }, expected: "thr-3" },
+      { desc: "threadId present", record: { id: "thr-1", threadId: "thr-1", accountId: "acct-1" }, expected: "thr-1" },
       { desc: "neither (unassigned)", record: { id: "thr-4", accountId: "acct-1" }, expected: undefined },
     ])("$desc → threadId=$expected", async ({ record, expected }) => {
       const { GetCommand } = await import("@aws-sdk/lib-dynamodb");
@@ -166,9 +164,7 @@ describe("Invariant 6: Universal read fallback resolves threadId ?? arcId", () =
 
   describe("getSignalById — hydrates threadId on signals", () => {
     it.each([
-      { desc: "threadId only", record: { id: "sgn-1", signalLookupId: "ses-1", threadId: "thr-1", accountId: "acct-1" }, expected: "thr-1" },
-      { desc: "arcId only (legacy)", record: { id: "sgn-2", signalLookupId: "ses-2", arcId: "thr-2", accountId: "acct-1" }, expected: "thr-2" },
-      { desc: "both (threadId preferred)", record: { id: "sgn-3", signalLookupId: "ses-3", threadId: "thr-3", arcId: "old", accountId: "acct-1" }, expected: "thr-3" },
+      { desc: "threadId present", record: { id: "sgn-1", signalLookupId: "ses-1", threadId: "thr-1", accountId: "acct-1" }, expected: "thr-1" },
       { desc: "neither (blocked signal)", record: { id: "sgn-4", signalLookupId: "ses-4", accountId: "acct-1" }, expected: undefined },
     ])("$desc → threadId=$expected", async ({ record, expected }) => {
       const { QueryCommand } = await import("@aws-sdk/lib-dynamodb");

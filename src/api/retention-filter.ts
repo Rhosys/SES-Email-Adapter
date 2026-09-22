@@ -17,12 +17,17 @@ export function isSignalVisible(signal: Signal, now: Date = new Date()): boolean
 }
 
 /**
- * Checks whether a thread is still visible to the user based on its TTL.
- * A thread is visible if its TTL is in the future or absent.
+ * Checks whether a thread is still visible to the user based on its retention duration.
+ * A thread is visible if createdAt + retentionDuration is in the future.
+ * Threads without retentionDuration are always visible (retention not yet applied).
+ * Threads with infinite retention (P100Y, Infinity) are always visible.
  */
 export function isThreadVisible(thread: Thread, now: Date = new Date()): boolean {
-  if (!thread.ttl) return true;
-  return thread.ttl * 1000 > now.getTime();
+  if (!thread.retentionDuration) return true;
+  const seconds = durationToSeconds(thread.retentionDuration);
+  if (seconds == null) return true; // infinite retention
+  const createdAtMs = new Date(thread.createdAt).getTime();
+  return createdAtMs + seconds * 1000 > now.getTime();
 }
 
 /**

@@ -84,7 +84,7 @@ describe("Property 2: System signals contain only expected data fields", () => {
     const signal: Signal<InvalidRuleFunctionData> = {
       id: "sgn-test", signalLookupId: "sgn-test", threadId: "arc-1", accountId: "acc-1",
       source: "email", type: "invalid_rule_function", status: "active", labels: [],
-      createdAt: "2025-01-01T00:00:00.000Z", ttl: 1740000000,
+      createdAt: "2025-01-01T00:00:00.000Z", retentionDuration: "P90D",
       data: { resourceName: "My Rule", issue: "syntax error" },
     };
     expect(Object.keys(signal.data).sort()).toEqual(["issue", "resourceName"]);
@@ -97,7 +97,7 @@ describe("Property 2: System signals contain only expected data fields", () => {
     const signal: Signal<InvalidTemplateFunctionData> = {
       id: "sgn-test", signalLookupId: "sgn-test", threadId: "arc-1", accountId: "acc-1",
       source: "email", type: "invalid_template_function", status: "active", labels: [],
-      createdAt: "2025-01-01T00:00:00.000Z", ttl: 1740000000,
+      createdAt: "2025-01-01T00:00:00.000Z", retentionDuration: "P90D",
       data: { resourceName: "Welcome Template", functionName: "formatDate", issue: "formatDate is not defined" },
     };
     expect(Object.keys(signal.data).sort()).toEqual(["functionName", "issue", "resourceName"]);
@@ -110,7 +110,7 @@ describe("Property 2: System signals contain only expected data fields", () => {
     const signal: Signal<AutoSendBlockedData> = {
       id: "sgn-test", signalLookupId: "sgn-test", threadId: "arc-1", accountId: "acc-1",
       source: "email", type: "auto_send_blocked", status: "active", labels: [],
-      createdAt: "2025-01-01T00:00:00.000Z", ttl: 1740000000,
+      createdAt: "2025-01-01T00:00:00.000Z", retentionDuration: "P90D",
       data: { recipientAddress: "inbox@example.com" },
     };
     expect(Object.keys(signal.data).sort()).toEqual(["recipientAddress"]);
