@@ -62,6 +62,13 @@ export type ProcessorMessageType = "inbound_signal" | "side_effect";
 export interface SideEffectPayload {
   signal: Signal;
   thread: Thread;
+  /**
+   * Suppress the notify side-effect for this dispatch. Set for user-initiated bulk reprocessing
+   * (approving a sender from quarantine while the user is live in-app). Carried on the payload
+   * rather than baked into signal.data.matchedRules so it does not pollute the signal's permanent
+   * audit trail — it is a property of THIS dispatch, not a standing rule outcome on the signal.
+   */
+  skipNotify?: boolean;
 }
 
 export interface SqsDispatcher {
@@ -173,6 +180,23 @@ export interface InboundSignalMessage {
   destination: string[];
   dkimVerdict: SESReceiptStatus["status"];
   dmarcVerdict: SESReceiptStatus["status"];
+}
+
+export interface ProcessInboundOptions {
+  /** Skip the dedup/retry lookup and always run the full pipeline (reprocess). */
+  force?: boolean;
+  /** Bypass the DKIM/DMARC spoof block (reprocess of an already-accepted signal). */
+  unsafeSkipDmarc?: boolean;
+  /** Reuse this exact signal id instead of minting a new one (reprocess in place). */
+  forceSignalId?: string;
+  /**
+   * Suppress the notify side-effect for this run. Set when a user-initiated bulk action
+   * (e.g. approving a sender from quarantine, which reprocesses sibling signals) is happening
+   * while the user is live in-app — they are watching the result and do not want a notification
+   * per reprocessed signal. Applied by forcing outcome.suppressNotification before dispatch, so
+   * the notify effect is never enqueued (it does not enter the SQS side-effect payload at all).
+   */
+  skipNotify?: boolean;
 }
 
 /**
@@ -647,7 +671,7 @@ export class IncomingEmailProcessor {
     const autoDraftActions = (signal.data.matchedRules ?? []).flatMap(r => r.actions.filter(a => a.type === "auto_draft" && a.value));
     const effectTypes: string[] = [];
     if (outcome.forwardAddresses.length > 0) effectTypes.push("forward");
-    if (!outcome.suppressNotification) effectTypes.push("notify");
+    if (!outcome.suppressNotification && !payload.skipNotify) effectTypes.push("notify");
     if (autoDraftActions.length > 0) effectTypes.push("auto_draft");
     this.logger.info("Outcome derived from matchedRules — executing side-effects.", { code: "processor.side_effect.outcome_derived", accountId, signalId: signal.id, threadId: thread.id, effectTypes });
 
@@ -674,8 +698,8 @@ export class IncomingEmailProcessor {
       }
     }
 
-    // Notify
-    if (!outcome.suppressNotification) {
+    // Notify — skipped when the dispatch opted out (user-initiated bulk reprocess, in-app).
+    if (!outcome.suppressNotification && !payload.skipNotify) {
       try {
         this.logger.trackPoint("side_effect_notify_start");
         const notifyResult = await this.notifier.notify(accountId, thread, signal, thread.urgency ?? "normal");
@@ -990,7 +1014,7 @@ export class IncomingEmailProcessor {
     return ok(undefined);
   }
 
-  async processInbound(msg: InboundSignalMessage, receiveCount: number, opts?: { force?: boolean; unsafeSkipDmarc?: boolean; forceSignalId?: string }): Promise<Result<void, DbError | InvalidResponseError | NoAccountError>> {
+  async processInbound(msg: InboundSignalMessage, receiveCount: number, opts?: ProcessInboundOptions): Promise<Result<void, DbError | InvalidResponseError | NoAccountError>> {
     try {
       return await this._processInboundUnsafe(msg, receiveCount, opts);
     } catch (e) {
@@ -999,7 +1023,7 @@ export class IncomingEmailProcessor {
     }
   }
 
-  private async _processInboundUnsafe(msg: InboundSignalMessage, receiveCount: number, opts?: { force?: boolean; unsafeSkipDmarc?: boolean; forceSignalId?: string }): Promise<Result<void, DbError | InvalidResponseError | NoAccountError>> {
+  private async _processInboundUnsafe(msg: InboundSignalMessage, receiveCount: number, opts?: ProcessInboundOptions): Promise<Result<void, DbError | InvalidResponseError | NoAccountError>> {
     const { s3Key, idempotencyKey, timestamp, destination } = msg;
     const recipientAddress = destination[0] ?? "";
 
@@ -1045,7 +1069,7 @@ export class IncomingEmailProcessor {
           const auroraResult = await this.executeAuroraUpserts(existing, thread);
           if (auroraResult.isErr()) return err(auroraResult.error);
 
-          const dispatchResult = await this.dispatchSideEffects(existing, thread);
+          const dispatchResult = await this.dispatchSideEffects(existing, thread, opts?.skipNotify ?? false);
           if (dispatchResult.isErr()) return err(dispatchResult.error);
 
           return ok(undefined);
@@ -1776,7 +1800,7 @@ export class IncomingEmailProcessor {
     if (auroraResult.isErr()) return err(dbError(new Error("Aurora upsert failed")));
 
     // Dispatch side-effects via SQS after Aurora succeeds
-    const dispatchResult = await this.dispatchSideEffects(signal, thread);
+    const dispatchResult = await this.dispatchSideEffects(signal, thread, opts?.skipNotify ?? false);
     if (dispatchResult.isErr()) return err(dbError(new Error("Side-effect dispatch failed")));
 
     // Side-effects (forward, auto-reply, auto-draft, notify) are handled by processSideEffect via SQS dispatch.
@@ -1843,9 +1867,9 @@ export class IncomingEmailProcessor {
    * If the SQS send fails, returns err — this causes a batchItemFailure so the
    * message is retried (Aurora succeeded but side-effects won't fire without dispatch).
    */
-  async dispatchSideEffects(signal: Signal, thread: Thread): Promise<Result<void, DbError>> {
+  async dispatchSideEffects(signal: Signal, thread: Thread, skipNotify = false): Promise<Result<void, DbError>> {
     this.logger.trackPoint("side_effect_dispatch_start");
-    const payload: SideEffectPayload = { signal, thread };
+    const payload: SideEffectPayload = { signal, thread, ...(skipNotify ? { skipNotify: true } : {}) };
     const sendResult = await this.sqsDispatcher.sendMessage(payload);
     if (sendResult.isErr()) {
       this.logger.error(`Failed to dispatch side-effect SQS message — side-effects won't fire until retry succeeds: ${sendResult.error.message}`, { code: "processor.side_effect_dispatch_failed", signal, thread, error: sendResult.error });
@@ -2064,7 +2088,7 @@ export class IncomingEmailProcessor {
   // Reprocess — thin wrapper that calls processMessage with force flags
   // ---------------------------------------------------------------------------
 
-  async reprocessSignal(accountId: string, signalId: string, threadId: string): Promise<Result<Signal, ProcessorError | NotFoundError>> {
+  async reprocessSignal(accountId: string, signalId: string, threadId: string, opts?: { skipNotify?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>> {
     const existingResult = await this.threadDb.getSignalById(accountId, signalId, threadId);
     if (existingResult.isErr()) return err(processorError(existingResult.error));
     const existing = existingResult.value;
@@ -2114,7 +2138,7 @@ export class IncomingEmailProcessor {
       dmarcVerdict: "PASS",
     };
 
-    const result = await this.processInbound(msg, 1, { force: true, unsafeSkipDmarc: true, forceSignalId: existing.id });
+    const result = await this.processInbound(msg, 1, { force: true, unsafeSkipDmarc: true, forceSignalId: existing.id, ...(opts?.skipNotify ? { skipNotify: true } : {}) });
     if (result.isErr()) {
       // Best-effort recency repair even on failure — a previous 504 may have saved the thread
       // with updated lastSignalAt while the signal save never completed.
