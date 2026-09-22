@@ -9,7 +9,7 @@ import { handlePostApprovalCalendar } from "../processor/calendar/post-approval-
 import { extractCalendarEvents } from "../processor/calendar/calendar-event-extraction.js";
 import { resolveRetention } from "../retention.js";
 import { buildActiveThread } from "../thread-factory.js";
-import { isEmailSignal } from "../types/index.js";
+import { isEmailSignal, isInboundEmailSignalData } from "../types/index.js";
 import type { Result } from "neverthrow";
 import type { Thread, Signal, MatchedRuleResult, PageParams } from "../types/index.js";
 import type { Pagination } from "../types/index.js";
@@ -126,6 +126,11 @@ export class SignalsApi {
       if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
       if (signal.status !== "quarantine_visible" && signal.status !== "quarantine_hidden") {
         return err(c, 400, "Only quarantined signals can have their status updated", "SIGNAL_NOT_REVIEWABLE");
+      }
+      // Quarantined signals are always inbound received email — narrow so workflow/workflowData
+      // (inbound-only classification) are accessible for grouping-key derivation below.
+      if (!isInboundEmailSignalData(signal.data)) {
+        return err(c, 400, "Only inbound email signals can be reviewed from quarantine", "SIGNAL_NOT_REVIEWABLE");
       }
 
       const body = await zParse(QuarantineResponse, c.req.raw);

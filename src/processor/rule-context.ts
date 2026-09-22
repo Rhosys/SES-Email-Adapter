@@ -1,19 +1,36 @@
 import type { Signal, Thread } from "../types/index.js";
 
+import { isInboundEmailSignalData } from "../types/index.js";
+import type { EmailAddress, Workflow, WorkflowData } from "../types/index.js";
+
 // Curated signal/thread shape exposed to rule conditions and template functions.
 // Keep this an explicit allowlist — never widen by passing the raw Signal/Thread objects.
-export type RuleSignalContext = Pick<Signal["data"], "from" | "subject" | "summary" | "workflow" | "recipientAddress" | "workflowData"> & Pick<Signal, "id">;
+// `body` is the message body — the rendered HTML for inbound (received) email, and the
+// user-authored markdown for outbound drafts. workflow/workflowData are inbound-only
+// classification, absent (undefined) on outbound.
+export interface RuleSignalContext {
+  id: string;
+  from: EmailAddress;
+  subject: string;
+  summary: string;
+  body?: string;
+  workflow?: Workflow;
+  recipientAddress: string;
+  workflowData?: WorkflowData;
+}
 export type RuleThreadContext = Pick<Thread, "id" | "labels" | "urgency" | "summary" | "workflow" | "status">;
 
 export function toRuleSignalContext(signal: Signal): RuleSignalContext {
+  const data = signal.data;
+  const body = isInboundEmailSignalData(data) ? data.htmlBody : data.textBody;
   return {
     id: signal.id,
-    from: signal.data.from,
-    subject: signal.data.subject,
-    summary: signal.data.summary,
-    workflow: signal.data.workflow,
-    recipientAddress: signal.data.recipientAddress,
-    workflowData: signal.data.workflowData,
+    from: data.from,
+    subject: data.subject,
+    summary: data.summary,
+    ...(body !== undefined ? { body } : {}),
+    recipientAddress: data.recipientAddress,
+    ...(isInboundEmailSignalData(data) ? { workflow: data.workflow, workflowData: data.workflowData } : {}),
   };
 }
 

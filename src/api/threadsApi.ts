@@ -413,13 +413,11 @@ export class ThreadsApi {
           cc: (body.cc ?? []) as OutboundEmailSignalData["cc"],
           bcc: (body.bcc ?? []) as OutboundEmailSignalData["bcc"],
           subject: body.subject,
-          ...(body.textBody != null ? { textBody: body.textBody } : {}),
+          ...(body.body != null ? { textBody: body.body } : {}),
           ...(body.linkedSignalId != null ? { linkedSignalId: body.linkedSignalId } : {}),
           attachments: [],
           headers: {},
           recipientAddress: body.from.address,
-          workflow: thread.workflow,
-          workflowData: { workflow: thread.workflow } as Signal["data"]["workflowData"],
           actions: [],
           tags: [],
           summary: "",
@@ -476,7 +474,7 @@ export class ThreadsApi {
         cc: (body.cc ?? []) as OutboundEmailSignalData["cc"],
         bcc: (body.bcc ?? []) as OutboundEmailSignalData["bcc"],
         subject: body.subject,
-        ...(body.textBody != null ? { textBody: body.textBody } : {}),
+        ...(body.body != null ? { textBody: body.body } : {}),
       });
       if (updateResult.isErr()) {
         logger.error(`Failed to replace draft signal: ${updateResult.error.message}`, { code: "api.signal.update_failed", error: updateResult.error });
@@ -896,7 +894,7 @@ export class ThreadsApi {
 
       // If pending_send, only status change to "draft" is allowed
       if (signal.status === "pending_send") {
-        const hasContentFields = body.subject !== undefined || body.textBody !== undefined || body.from !== undefined || body.to !== undefined;
+        const hasContentFields = body.subject !== undefined || body.body !== undefined || body.from !== undefined || body.to !== undefined;
         if (hasContentFields && body.status !== "draft") return err(c, 400, "Pending signals can only be reverted to draft", "INVALID_STATUS_TRANSITION");
         if (body.status !== "draft") return err(c, 400, "Pending signals can only be reverted to draft", "INVALID_STATUS_TRANSITION");
         const updateResult = await threadDb.updateSignalSendStatus(accountId, signal.signalLookupId, { status: "draft", sendInitiatedAt: null });
@@ -908,8 +906,11 @@ export class ThreadsApi {
         return c.json(toApiSignal(updateResult.value), 200);
       }
 
-      // Normal draft edit (subject, textBody, from, to)
-      const updateResult = await threadDb.updateSignal(accountId, signal.signalLookupId, body as Parameters<typeof threadDb.updateSignal>[2]);
+      // Normal draft edit (subject, body, from, to). The API contract uses `body`; the DB stores
+      // the markdown source as `textBody` — map across the boundary here.
+      const { body: draftBody, ...restBody } = body;
+      const signalUpdate = { ...restBody, ...(draftBody != null ? { textBody: draftBody } : {}) };
+      const updateResult = await threadDb.updateSignal(accountId, signal.signalLookupId, signalUpdate as Parameters<typeof threadDb.updateSignal>[2]);
       if (updateResult.isErr()) {
         logger.error(`Failed to update signal: ${updateResult.error.message}`, { code: "api.signal.update_failed", error: updateResult.error });
         return err(c, 500, "Internal Server Error");

@@ -1,5 +1,6 @@
 import type { Logger } from "../logger.js";
 import type { Signal, Thread } from "../types/index.js";
+import { isInboundEmailSignalData } from "../types/index.js";
 import { ok, err } from "../errors.js";
 import type { Result } from "../errors.js";
 
@@ -30,8 +31,8 @@ export function buildWebhookPayload(signal: Signal, thread: Thread | null): Webh
     ...(signal.data.replyTo ? { replyTo: { address: signal.data.replyTo.address, ...(signal.data.replyTo.name ? { name: signal.data.replyTo.name } : {}) } } : {}),
     subject: signal.data.subject,
     alias: signal.data.recipientAddress,
-    workflow: signal.data.workflow,
-    workflowData: signal.data.workflowData as unknown as Record<string, unknown>,
+    workflow: isInboundEmailSignalData(signal.data) ? signal.data.workflow : "",
+    workflowData: isInboundEmailSignalData(signal.data) ? (signal.data.workflowData as unknown as Record<string, unknown>) : {},
     summary: signal.data.summary,
     labels: thread?.labels ?? [],
   };

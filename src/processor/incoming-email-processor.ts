@@ -12,7 +12,7 @@ import type { EmailServiceError } from "../email/email-service.js";
 import type { ProviderSendError } from "../external-exchanges/provider-adapter.js";
 import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, UnsubscribeInfo, InboundEmailSignalData } from "../types/index.js";
 import { deriveGroupingKey } from "../grouping-key.js";
-import { DEFAULT_UNKNOWN_SENDER_POLICY } from "../types/index.js";
+import { DEFAULT_UNKNOWN_SENDER_POLICY, isInboundEmailSignalData } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient, BounceInfo } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
@@ -567,7 +567,7 @@ export class IncomingEmailProcessor {
     }
     if (!senderBelongsToAccount) return ok(false);
 
-    if (signal.data.workflow === "test") return ok(true);
+    if (isInboundEmailSignalData(signal.data) && signal.data.workflow === "test") return ok(true);
 
     const accountResult = await this.accountDb.getAccount(accountId);
     if (accountResult.isErr()) return err(accountResult.error);
@@ -757,7 +757,7 @@ export class IncomingEmailProcessor {
           "signal.subject": signal.data.subject ?? "",
           "sender.name": signal.data.from.name ?? "",
           "sender.address": signal.data.from.address,
-          "thread.workflow": signal.data.workflow ?? "",
+          "thread.workflow": thread.workflow ?? "",
         };
 
         for (const action of autoDraftActions) {
@@ -902,8 +902,6 @@ export class IncomingEmailProcessor {
               attachments: [],
               headers: {},
               recipientAddress: signal.data.from.address,
-              workflow: signal.data.workflow,
-              workflowData: signal.data.workflowData,
               actions: [],
               tags: [],
               summary: "",
@@ -1071,7 +1069,7 @@ export class IncomingEmailProcessor {
         });
       }
       const signalId = generateId("sgn-");
-      const signal: Signal = {
+      const signal: Signal<InboundEmailSignalData> = {
         id: signalId,
         signalLookupId: msg.compositeMailMessageId,
         accountId,
@@ -1213,7 +1211,7 @@ export class IncomingEmailProcessor {
       const blockStatus = effectiveAliasSenderConfig.policy; // block_hidden | block_reject | report_violation
       const now = DateTime.utc().toISO()!;
       const signalId = generateId("sgn-");
-      const signal: Signal = {
+      const signal: Signal<InboundEmailSignalData> = {
         id: signalId,
         signalLookupId: msg.compositeMailMessageId,
         accountId,
@@ -1661,7 +1659,7 @@ export class IncomingEmailProcessor {
     const signalUrgency = outcome.urgency ?? thread.urgency ?? "normal";
     if (!matchedThread) thread.urgency = signalUrgency;
 
-    const signal: Signal = { ...signalShell, threadId: thread.id, data: { ...signalShell.data, matchedRules, urgency: signalUrgency } };
+    const signal: Signal<InboundEmailSignalData> = { ...signalShell, threadId: thread.id, data: { ...signalShell.data, matchedRules, urgency: signalUrgency } };
     this.logger.trackPoint("thread_updated", { threadId: thread.id });
 
     // 12. Pong — handled entirely in side-effect SQS handler (processSideEffect)
@@ -1907,7 +1905,7 @@ export class IncomingEmailProcessor {
    *
    * On unexpected crash: does NOT catch — lets the exception propagate so SQS retries naturally.
    */
-  private async processCalendarAttachment(signal: Signal, thread: Thread, accountId: string, extraction: CalendarAttachmentExtractionResult | null, retentionDuration?: RetentionDuration): Promise<void> {
+  private async processCalendarAttachment(signal: Signal<InboundEmailSignalData>, thread: Thread, accountId: string, extraction: CalendarAttachmentExtractionResult | null, retentionDuration?: RetentionDuration): Promise<void> {
     if (!extraction) return;
 
     for (const invalid of extraction.invalidAttachments) {

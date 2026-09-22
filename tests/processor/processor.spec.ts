@@ -14,7 +14,7 @@ import type { UserCodeExecutorClient } from "../../src/processor/user-code-clien
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator, EmbeddingResult } from "../../src/embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
-import type { Thread, Rule, Signal, Alias, AccountFilteringConfig } from "../../src/types/index.js";
+import type { Thread, Rule, Signal, Alias, AccountFilteringConfig, InboundEmailSignalData } from "../../src/types/index.js";
 import { dbError } from "../../src/errors.js";
 import type { EmailService } from "../../src/email/email-service.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
@@ -285,7 +285,7 @@ describe("IncomingEmailProcessor", () => {
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.id).toMatch(/^sgn-/);
       expect(saved.source).toBe("email");
-      expect(saved.data.workflow).toBe("conversation");
+      expect((saved.data as InboundEmailSignalData).workflow).toBe("conversation");
       expect(saved.accountId).toBe(TEST_ACCOUNT_ID);
     });
 
@@ -925,7 +925,7 @@ describe("IncomingEmailProcessor", () => {
       await processor.processInbound(makeMessage(), 1);
 
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.data.workflow).toBe(validClassification.workflow);
+      expect((saved.data as InboundEmailSignalData).workflow).toBe(validClassification.workflow);
       expect(saved.data.summary).toBe(validClassification.summary);
       expect(saved.data.tags).toEqual(validClassification.tags);
     });
@@ -1316,7 +1316,7 @@ describe("IncomingEmailProcessor", () => {
       expect(threadDb.saveThread).toHaveBeenCalledOnce();
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("active");
-      expect(saved.data.workflow).toBe("onboarding");
+      expect((saved.data as InboundEmailSignalData).workflow).toBe("onboarding");
     });
 
     it("blocks onboarding emails when a block rule targeting the onboarding workflow is active", async () => {
@@ -1367,7 +1367,7 @@ describe("IncomingEmailProcessor", () => {
       await processor.processInbound(makeMessage(), 1);
 
       const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(signal.data.workflow).toBe("conversation"); // unchanged from validClassification mock
+      expect((signal.data as InboundEmailSignalData).workflow).toBe("conversation"); // unchanged from validClassification mock
     });
   });
 
@@ -1545,7 +1545,7 @@ describe("IncomingEmailProcessor", () => {
       expect(threadDb.saveThread).not.toHaveBeenCalled();
       const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.status).toBe("block_hidden");
-      expect(signal.data.workflow).toBe("notice");
+      expect((signal.data as InboundEmailSignalData).workflow).toBe("notice");
     });
 
     it("does not call notifier for a blocked notice email", async () => {
@@ -1601,7 +1601,7 @@ describe("IncomingEmailProcessor", () => {
 
       expect(sqsDispatcher.sendMessage).toHaveBeenCalledOnce();
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
-      expect(payload.signal.data.workflow).toBe("test");
+      expect((payload.signal.data as InboundEmailSignalData).workflow).toBe("test");
     });
 
     it("dispatches side-effect payload with signal containing from address and subject for pong", async () => {
@@ -1717,8 +1717,8 @@ describe("IncomingEmailProcessor", () => {
       await processor.processInbound(makeMessage(), 1);
 
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.data.workflow).toBe("notice");
-      expect(saved.data.workflowData).toMatchObject({ workflow: "notice", noticeType: "bounce" });
+      expect((saved.data as InboundEmailSignalData).workflow).toBe("notice");
+      expect((saved.data as InboundEmailSignalData).workflowData).toMatchObject({ workflow: "notice", noticeType: "bounce" });
     });
 
     it("logs a WARN naming the failed address and diagnostic detail", async () => {
@@ -1746,7 +1746,7 @@ describe("IncomingEmailProcessor", () => {
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.data.summary).toContain("no-reply@mindstone.com");
       expect(saved.data.summary).toContain("does not exist");
-      expect(saved.data.workflowData).toMatchObject({
+      expect((saved.data as InboundEmailSignalData).workflowData).toMatchObject({
         failedAddress: "no-reply@mindstone.com",
         bounceReason: "smtp; 550-5.1.1 The email account that you tried to reach does not exist",
       });
@@ -1799,7 +1799,7 @@ describe("IncomingEmailProcessor", () => {
 
       expect(processingDb.suppressAddress).not.toHaveBeenCalled();
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.data.workflowData).toMatchObject({ noticeType: "bounce" });
+      expect((saved.data as InboundEmailSignalData).workflowData).toMatchObject({ noticeType: "bounce" });
     });
 
     it("treats a 5.x.x status as permanent even when Action says delayed (status is the authoritative signal)", async () => {
@@ -1886,7 +1886,7 @@ describe("IncomingEmailProcessor", () => {
       await processor.processInbound(makeMessage(), 1);
 
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.data.workflow).toBe("content");
+      expect((saved.data as InboundEmailSignalData).workflow).toBe("content");
     });
 
     it("assign_workflow still updates thread workflow during rule evaluation (C.2 — existing behavior)", async () => {
@@ -1937,7 +1937,7 @@ describe("IncomingEmailProcessor", () => {
       await processor.processInbound(makeMessage(), 1);
 
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.data.workflow).toBe("notification");
+      expect((saved.data as InboundEmailSignalData).workflow).toBe("notification");
       // Thread also gets last-wins
       const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
       expect(arc.workflow).toBe("notification");

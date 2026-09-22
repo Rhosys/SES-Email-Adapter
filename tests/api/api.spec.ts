@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Thread, Signal, View, Label, Rule, Domain, Account, Alias, ForwardingTarget, EmailTemplate } from "../../src/types/index.js";
+import type { Thread, Signal, View, Label, Rule, Domain, Account, Alias, ForwardingTarget, EmailTemplate, InboundEmailSignalData } from "../../src/types/index.js";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
 import type { AuthService, AccessService, AccountUser, IForwardingService } from "../../src/api/app.js";
@@ -535,7 +535,7 @@ describe("API", () => {
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
       expect(res.status).toBe(200);
       const body = await res.json() as { thread: { threadId: string; workflow: string }; signal: { status: string } };
-      expect(body.thread.workflow).toBe(s.data.workflow);
+      expect(body.thread.workflow).toBe((s.data as InboundEmailSignalData).workflow);
       expect(body.signal.status).toBe("active");
       expect(threadDb.createThread).toHaveBeenCalledOnce();
       expect(threadDb.unblockSignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, s.signalLookupId, expect.any(String));

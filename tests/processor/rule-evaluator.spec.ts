@@ -4,7 +4,7 @@ import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import type { RuleAnnotationStore } from "../../src/processor/rule-evaluator.js";
 import type { UserCodeExecutorClient } from "../../src/processor/user-code-client.js";
 import { userCodeError } from "../../src/processor/user-code-client.js";
-import type { Rule, Signal, Thread } from "../../src/types/index.js";
+import type { Rule, Signal, Thread, InboundEmailSignalData } from "../../src/types/index.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 
 // ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ function makeSignal(overrides: Partial<Omit<Signal, "data">> & { data?: Partial<
       to: [{ address: "user@example.com" }],
       cc: [],
       subject: "Test email",
-      textBody: "Hello world",
+      htmlBody: "<p>Hello world</p>",
       attachments: [],
       headers: { "x-custom": "value" },
       recipientAddress: "user@example.com",
@@ -253,10 +253,10 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
  * Validates: Requirements 4.1, 4.2, 4.4
  */
 describe("JS rule context — Property 2: context preparation produces exactly the specified fields", () => {
-  const EXPECTED_SIGNAL_KEYS = ["id", "from", "subject", "summary", "workflow", "recipientAddress", "workflowData"];
+  const EXPECTED_SIGNAL_KEYS = ["id", "from", "subject", "summary", "body", "workflow", "recipientAddress", "workflowData"];
   const EXPECTED_THREAD_KEYS = ["id", "labels", "urgency", "summary", "workflow", "status"];
 
-  it("executionContext.signal has exactly the 7 specified fields — sensitive fields excluded", async () => {
+  it("executionContext.signal has exactly the specified fields — sensitive fields excluded", async () => {
     const mockExecutor = { invoke: vi.fn().mockResolvedValue(ok({ value: false })), validateAst: vi.fn(), validateAstBatch: vi.fn() };
     const evaluator = new JsonLogicRuleEvaluator(createMockLogger(), mockExecutor, { annotateRuleError: vi.fn().mockResolvedValue(ok(undefined)) });
 
@@ -279,9 +279,10 @@ describe("JS rule context — Property 2: context preparation produces exactly t
       from: signal.data.from,
       subject: signal.data.subject,
       summary: signal.data.summary,
-      workflow: signal.data.workflow,
+      body: (signal.data as InboundEmailSignalData).htmlBody,
+      workflow: (signal.data as InboundEmailSignalData).workflow,
       recipientAddress: signal.data.recipientAddress,
-      workflowData: signal.data.workflowData,
+      workflowData: (signal.data as InboundEmailSignalData).workflowData,
     });
     // Sensitive fields must not leak
     expect(ctx.signal).not.toHaveProperty("s3Key");

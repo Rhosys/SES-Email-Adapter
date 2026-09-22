@@ -9,7 +9,7 @@ import type { UserCodeExecutorClient } from "../../src/processor/user-code-clien
 import type { SignalClassifier, ClassificationOutput } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
-import type { Signal, Alias } from "../../src/types/index.js";
+import type { Signal, Alias, InboundEmailSignalData } from "../../src/types/index.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 import { BillingHandler } from "../../src/billing/billing-handler.js";
 import type { HandlerRegistry } from "../../src/workflow/registry.js";
@@ -216,7 +216,7 @@ describe("SYSTEM account workflow override", () => {
     const processor = buildProcessor({ classifierWorkflow: "conversation" });
     await processor.processInbound(makeMessage(), 1);
 
-    const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
+    const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal<InboundEmailSignalData>;
     expect(signal.data.workflow).toBe("healthcheck");
     expect(signal.data.workflowData).toEqual({ workflow: "healthcheck" });
   });
@@ -225,7 +225,7 @@ describe("SYSTEM account workflow override", () => {
     const processor = buildProcessor({ classifierWorkflow: "payments" });
     await processor.processInbound(makeMessage(), 1);
 
-    const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
+    const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal<InboundEmailSignalData>;
     expect(signal.data.workflow).toBe("healthcheck");
   });
 
@@ -235,7 +235,7 @@ describe("SYSTEM account workflow override", () => {
     const processor = buildProcessor({ fromAddress: "sender@platform.email.rhosys.cloud" });
     await processor.processInbound(makeMessage(), 1);
 
-    const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
+    const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal<InboundEmailSignalData>;
     expect(signal.data.workflow).toBe("healthcheck");
     expect(signal.data.workflowData).toEqual({ workflow: "healthcheck" });
   });

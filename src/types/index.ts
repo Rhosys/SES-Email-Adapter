@@ -491,8 +491,6 @@ interface EmailSignalDataBase {
   headers: Record<string, string>;
   // Envelope recipient — the address that actually received this email
   recipientAddress: string;
-  workflow: Workflow;
-  workflowData: WorkflowData;
   tags: string[];
   s3Key: string;
   matchedRules?: MatchedRuleResult[];
@@ -510,6 +508,8 @@ interface EmailSignalDataBase {
 // Inbound email signal (source: "email") — no textBody, htmlBody stored with truncation guard
 // ---------------------------------------------------------------------------
 export interface InboundEmailSignalData extends EmailSignalDataBase {
+  workflow: Workflow;
+  workflowData: WorkflowData;
   htmlBody?: string;
   /** Set to true when htmlBody was truncated before storage. Full content recoverable from S3 via s3Key. */
   htmlBodyTruncated?: boolean;
@@ -608,6 +608,12 @@ export type AnySignal =
 // Type guard functions for narrowing AnySignal by type field
 export function isEmailSignal(signal: AnySignal): signal is Signal<EmailSignalData> {
   return signal.type === "email";
+}
+
+// Narrows an email signal's data to the inbound (received) shape. Inbound signals carry the
+// workflow classification (workflow / workflowData); outbound (user-composed) drafts do not.
+export function isInboundEmailSignalData(data: EmailSignalData): data is InboundEmailSignalData {
+  return "workflow" in data;
 }
 
 export function isDeliverabilitySignal(signal: AnySignal): signal is Signal<DeliverabilitySignalData> {

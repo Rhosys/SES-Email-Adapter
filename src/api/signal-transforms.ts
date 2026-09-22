@@ -112,31 +112,40 @@ function workflowKeepsUnsubscribe(workflow: Workflow): boolean {
   return UNSUBSCRIBE_WORKFLOWS.has(workflow);
 }
 
-function toApiEmailSignalData(data: EmailSignalData): Api.InboundEmailSignalData | Api.OutboundEmailSignalData {
-  if ("sendInitiatedAt" in data && data.sendInitiatedAt !== undefined) {
-    // Outbound email (user-composed)
+function toApiEmailSignalData(data: EmailSignalData, source: DbSignal["source"]): Api.InboundEmailSignalData | Api.OutboundEmailSignalData {
+  // A user-composed message (draft or sent) is outbound. Keying on `source` — not on
+  // `sendInitiatedAt` — is what surfaces the body of a saved-but-unsent draft: an unsent draft
+  // has no sendInitiatedAt, so the old check misrouted it to the inbound serializer and dropped
+  // its body entirely.
+  if (source === "user") {
+    // Outbound email (user-composed). DB stores the markdown source in textBody; the API
+    // contract calls it `body` in both directions (matching inbound). htmlBody is only present
+    // on sent messages that rendered an HTML part, so fall back to it when textBody is absent.
+    const outboundData = data as import("../types/index.js").OutboundEmailSignalData;
+    const outboundBody = outboundData.textBody ?? outboundData.htmlBody;
     const outbound: Api.OutboundEmailSignalData = {
       from: data.from,
       to: data.to,
       cc: data.cc,
-      bcc: data.bcc,
+      bcc: outboundData.bcc,
       ...(data.replyTo ? { replyTo: data.replyTo } : {}),
       subject: data.subject,
-      ...(data.htmlBody ? { body: data.htmlBody } : {}),
+      ...(outboundBody ? { body: outboundBody } : {}),
       attachments: (data.attachments ?? []).map(a => ({
         filename: a.filename,
         mimeType: a.mimeType,
         sizeBytes: a.sizeBytes,
         ...((a as unknown as { url?: string }).url ? { url: (a as unknown as { url: string }).url } : {}),
       })),
-      sendInitiatedAt: data.sendInitiatedAt,
-      ...(data.sentAt ? { sentAt: data.sentAt } : {}),
-      ...(data.sendFailureReason ? { sendFailureReason: data.sendFailureReason } : {}),
+      sendInitiatedAt: outboundData.sendInitiatedAt ?? "",
+      ...(outboundData.sentAt ? { sentAt: outboundData.sentAt } : {}),
+      ...(outboundData.sendFailureReason ? { sendFailureReason: outboundData.sendFailureReason } : {}),
     };
     return outbound;
   }
 
   // Inbound email
+  const inboundData = data as InboundEmailSignalData;
   const inbound: Api.InboundEmailSignalData = {
     receivedAt: data.receivedAt,
     summary: data.summary,
@@ -146,7 +155,7 @@ function toApiEmailSignalData(data: EmailSignalData): Api.InboundEmailSignalData
     cc: data.cc,
     ...(data.replyTo ? { replyTo: data.replyTo } : {}),
     subject: data.subject,
-    ...(data.htmlBody ? { body: data.htmlBody } : {}),
+    ...(inboundData.htmlBody ? { body: inboundData.htmlBody } : {}),
     attachments: (data.attachments ?? []).map(a => ({
       filename: a.filename,
       mimeType: a.mimeType,
@@ -155,10 +164,10 @@ function toApiEmailSignalData(data: EmailSignalData): Api.InboundEmailSignalData
     })),
     headers: data.headers ?? {},
     recipientAddress: data.recipientAddress,
-    workflow: data.workflow as Api.InboundEmailSignalData["workflow"],
-    ...(data.workflowData ? { workflowData: data.workflowData as Api.InboundEmailSignalData["workflowData"] } : {}),
+    workflow: inboundData.workflow as Api.InboundEmailSignalData["workflow"],
+    ...(inboundData.workflowData ? { workflowData: inboundData.workflowData as Api.InboundEmailSignalData["workflowData"] } : {}),
     ...(data.matchedRules ? { matchedRules: collapseMatchedRules(data.matchedRules) as Api.InboundEmailSignalData["matchedRules"] } : {}),
-    ...(data.unsubscribe && workflowKeepsUnsubscribe(data.workflow) ? { unsubscribe: data.unsubscribe } : {}),
+    ...(inboundData.unsubscribe && workflowKeepsUnsubscribe(inboundData.workflow) ? { unsubscribe: inboundData.unsubscribe } : {}),
   };
   return inbound;
 }
@@ -212,17 +221,17 @@ export function toApiSignal(signal: AnySignal): Api.Signal {
   switch (signal.type) {
     case "email": {
       const emailData = signal.data as EmailSignalData;
-      if ("sendInitiatedAt" in emailData && emailData.sendInitiatedAt !== undefined) {
+      if (signal.source === "user") {
         return {
           ...base,
           type: "email" as const,
-          data: toApiEmailSignalData(emailData) as Api.OutboundEmailSignalData,
+          data: toApiEmailSignalData(emailData, signal.source) as Api.OutboundEmailSignalData,
         } as Api.Signal;
       }
       return {
         ...base,
         type: "email" as const,
-        data: toApiEmailSignalData(emailData) as Api.InboundEmailSignalData,
+        data: toApiEmailSignalData(emailData, signal.source) as Api.InboundEmailSignalData,
       } as Api.Signal;
     }
     case "deliverability": {

@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import type { Thread, Workflow, WorkflowData, EmailSignalData, Signal } from "../types/index.js";
-import { isEmailSignal } from "../types/index.js";
+import { isEmailSignal, isInboundEmailSignalData } from "../types/index.js";
 import type { AnySignal } from "../types/index.js";
 import type { IEmailTheme } from "../email/email-theme.js";
 
@@ -115,7 +115,7 @@ export function mapThreadToCard(input: DigestMapperInput): DigestCard {
   const urgency = thread.urgency ?? "normal";
   const { color: urgencyColor, label: urgencyLabel } = urgencyDisplay(urgency, theme);
 
-  const workflowData = emailSignal?.data.workflowData ?? null;
+  const workflowData = emailSignal && isInboundEmailSignalData(emailSignal.data) ? emailSignal.data.workflowData : null;
   const workflowDetail = workflowData ? buildWorkflowDetail(thread.workflow, workflowData) : "";
 
   const labels = thread.labels.filter(l => !l.startsWith("_")).join(", ");

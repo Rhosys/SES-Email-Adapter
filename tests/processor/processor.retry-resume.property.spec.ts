@@ -12,7 +12,7 @@ import type { ContentSanitizerClient } from "../../src/processor/content-sanitiz
 import type { SignalClassifier } from "../../src/classifier/classifier.js";
 import type { EmbeddingGenerator } from "../../src/embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../../src/database/thread-matcher.js";
-import type { Signal, Thread, Alias, AliasSender, Workflow } from "../../src/types/index.js";
+import type { Signal, Thread, Alias, AliasSender, Workflow, InboundEmailSignalData } from "../../src/types/index.js";
 import { dbError } from "../../src/errors.js";
 import { createMockLogger, type MockLogger } from "../helpers/mock-logger.js";
 import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
@@ -216,7 +216,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
     return {
       id: signal.threadId!,
       accountId: signal.accountId,
-      workflow: signal.data.workflow,
+      workflow: (signal.data as InboundEmailSignalData).workflow,
       labels: [],
       status: "active",
       summary: signal.data.summary,

@@ -9,6 +9,7 @@ import type { Result } from "neverthrow";
 import { ok } from "../errors.js";
 import type { DbError } from "../errors.js";
 import type { Signal, Thread, AuthData } from "../types/index.js";
+import { isInboundEmailSignalData } from "../types/index.js";
 import type { WorkflowHandler } from "./types.js";
 import type { DeviceStore } from "../notifier/device-store.js";
 import type { Deliverer, OtpPayload } from "../notifier/types.js";
@@ -29,6 +30,11 @@ export class AuthWorkflowHandler implements WorkflowHandler {
   ) {}
 
   async execute(signal: Signal, thread: Thread, accountId: string): Promise<Result<void, DbError>> {
+    // The auth workflow only ever runs on inbound classified email — outbound drafts carry no
+    // workflow classification and never reach a workflow handler.
+    if (!isInboundEmailSignalData(signal.data)) {
+      return ok(undefined);
+    }
     const workflowData = signal.data.workflowData as AuthData;
 
     if (!workflowData.code) {
