@@ -1243,7 +1243,7 @@ export class IncomingEmailProcessor {
       };
       const saveResult = await this.threadDb.saveSignal(signal);
       if (saveResult.isErr()) return err(saveResult.error);
-      this.logger.track("Blocked email — sender explicitly blocked for this alias (pre-classify fast path).", { code: "processor.sender_block_early", signal, senderETLD1, policy: blockStatus });
+      this.logger.track(`Blocked email — sender explicitly blocked for this alias (pre-classify fast path). ${recipientAddress}`, { code: "processor.sender_block_early", signal, alias: recipientAddress, sender: parsed.from.address, senderETLD1, policy: blockStatus });
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, blockStatus);
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal, error: repResult.error });
@@ -1483,7 +1483,7 @@ export class IncomingEmailProcessor {
       const blockedSignal = buildSignal({ status: blockStatus, accountId, compositeMailMessageId: msg.compositeMailMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(ttl !== undefined ? { ttl } : {}) }, this.logger);
       const saveResult = await this.threadDb.saveSignal(blockedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
-      this.logger.track("Blocked email — sender explicitly blocked for this alias.", { code: "processor.sender_block", signal: blockedSignal, thread, senderETLD1, policy: blockStatus });
+      this.logger.track(`Blocked email — sender explicitly blocked for this alias ${recipientAddress}`, { code: "processor.sender_block", signal: blockedSignal, thread, alias: recipientAddress, sender: parsed.from.address, senderETLD1, policy: blockStatus });
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, blockStatus);
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: blockedSignal, thread, error: repResult.error });
