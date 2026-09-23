@@ -686,13 +686,13 @@ export class IncomingEmailProcessor {
           this.logger.trackPoint("side_effect_forward_start");
           const forwardResult = await this.forwardingService.forward(toAddress, signal, thread);
           if (forwardResult.isErr()) {
-            this.logger.track(`Side-effect forward failed — will force retry: ${"message" in forwardResult.error ? forwardResult.error.message : "errorName" in forwardResult.error ? forwardResult.error.errorName : forwardResult.error.kind}`, { code: "processor.side_effect.forward_failed", signal, thread, payload, toAddress, error: forwardResult.error });
+            this.logger.track(`Side-effect forward failed — will force retry: ${"message" in forwardResult.error ? forwardResult.error.message : "errorName" in forwardResult.error ? forwardResult.error.errorName : forwardResult.error.kind}`, { code: "processor.side_effect.forward_failed", signal, thread, payload, toAddress, error: forwardResult.error, receiveCount });
             criticalFailures.push(forwardResult.error);
           } else {
             this.logger.trackPoint("side_effect_forward_complete");
           }
         } catch (e) {
-          this.logger.track(`Side-effect forward threw unexpectedly — will force retry: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.forward_error", signal, thread, payload, toAddress, error: e });
+          this.logger.track(`Side-effect forward threw unexpectedly — will force retry: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.forward_error", signal, thread, payload, toAddress, error: e, receiveCount });
           criticalFailures.push(e);
         }
       }
@@ -704,11 +704,11 @@ export class IncomingEmailProcessor {
         this.logger.trackPoint("side_effect_notify_start");
         const notifyResult = await this.notifier.notify(accountId, thread, signal, thread.urgency ?? "normal");
         if (notifyResult.isErr()) {
-          this.logger.track(`Side-effect notification failed: ${notifyResult.error.message}`, { code: "processor.side_effect.notify_failed", signal, thread, payload, error: notifyResult.error });
+          this.logger.track(`Side-effect notification failed: ${notifyResult.error.message}`, { code: "processor.side_effect.notify_failed", signal, thread, payload, error: notifyResult.error, receiveCount });
         }
         this.logger.trackPoint("side_effect_notify_complete");
       } catch (e) {
-        this.logger.error(`Side-effect notification threw unexpectedly: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.notify_error", signal, thread, payload, error: e });
+        this.logger.error(`Side-effect notification threw unexpectedly: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.notify_error", signal, thread, payload, error: e, receiveCount });
       }
     }
 
@@ -717,7 +717,7 @@ export class IncomingEmailProcessor {
     const dispatchResult = await this.handlerRegistry.dispatch(signal, thread, accountId);
     this.logger.trackPoint("side_effect_workflow_complete");
     if (dispatchResult.isErr()) {
-      this.logger.track(`Side-effect workflow dispatch failed — will force retry: ${dispatchResult.error.message}`, { code: "processor.side_effect.workflow_dispatch_failed", signal, thread, payload, error: dispatchResult.error });
+      this.logger.track(`Side-effect workflow dispatch failed — will force retry: ${dispatchResult.error.message}`, { code: "processor.side_effect.workflow_dispatch_failed", signal, thread, payload, error: dispatchResult.error, receiveCount });
       criticalFailures.push(dispatchResult.error);
     }
 
@@ -727,7 +727,7 @@ export class IncomingEmailProcessor {
     // "test", or the account is new with no threads yet, or onboarding hasn't seen a test).
     const pongResult = await this.shouldPong(accountId, signal);
     if (pongResult.isErr()) {
-      this.logger.track("Failed to evaluate pong eligibility — skipping pong.", { code: "processor.side_effect.pong_eligibility_failed", accountId, signalId: signal.id, error: pongResult.error });
+      this.logger.track("Failed to evaluate pong eligibility — skipping pong.", { code: "processor.side_effect.pong_eligibility_failed", accountId, signalId: signal.id, error: pongResult.error, receiveCount });
     }
     if (pongResult.isOk() && pongResult.value) {
       try {
@@ -756,14 +756,14 @@ export class IncomingEmailProcessor {
           // Already logged an ERROR with full context inside sendReply — retrying would hit
           // the exact same hop count again and never succeed, so this is handled, not failed.
         } else if (sendResult.isErr()) {
-          this.logger.track(`Side-effect pong failed — will force retry: ${"message" in sendResult.error ? sendResult.error.message : sendResult.error.kind}`, { code: "processor.side_effect.pong_failed", signal, thread, payload, error: sendResult.error });
+          this.logger.track(`Side-effect pong failed — will force retry: ${"message" in sendResult.error ? sendResult.error.message : sendResult.error.kind}`, { code: "processor.side_effect.pong_failed", signal, thread, payload, error: sendResult.error, receiveCount });
           criticalFailures.push(sendResult.error);
         } else {
           this.logger.trackPoint("side_effect_pong_complete");
           await this.markTestEmailReceived(accountId);
         }
       } catch (e) {
-        this.logger.track(`Side-effect pong failed — will force retry: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.pong_failed", signal, thread, payload, error: e });
+        this.logger.track(`Side-effect pong failed — will force retry: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.pong_failed", signal, thread, payload, error: e, receiveCount });
         criticalFailures.push(e);
       }
     }
@@ -817,12 +817,13 @@ export class IncomingEmailProcessor {
                   templateName: tmpl.name,
                   functionName: fn.name,
                   error: response.error,
+                  receiveCount,
                 });
                 {
                   const sigId = generateId("sgn-");
                   const sigTs = DateTime.utc().toISO()!;
                   const invalidFnResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, retentionDuration: SYSTEM_SIGNAL_RETENTION, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
-                  if (invalidFnResult.isErr()) { this.logger.warn("Failed to save invalid_template_function signal", { code: "processor.save_invalid_fn_signal_failed", accountId, threadId: thread.id, error: invalidFnResult.error }); }
+                  if (invalidFnResult.isErr()) { this.logger.warn("Failed to save invalid_template_function signal", { code: "processor.save_invalid_fn_signal_failed", accountId, threadId: thread.id, error: invalidFnResult.error, receiveCount }); }
                 }
                 actionVars[`fn.${fn.name}`] = "";
                 preventAutoSend = true;
@@ -840,12 +841,13 @@ export class IncomingEmailProcessor {
                     templateName: tmpl.name,
                     functionName: fn.name,
                     issue,
+                    receiveCount,
                   });
                   {
                     const sigId = generateId("sgn-");
                     const sigTs = DateTime.utc().toISO()!;
                     const invalidReturnResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "invalid_template_function", status: "active", labels: [], createdAt: sigTs, retentionDuration: SYSTEM_SIGNAL_RETENTION, data: { resourceName: tmpl.name, functionName: fn.name, issue } });
-                    if (invalidReturnResult.isErr()) { this.logger.warn("Failed to save invalid_template_function signal", { code: "processor.save_invalid_fn_signal_failed", accountId, threadId: thread.id, error: invalidReturnResult.error }); }
+                    if (invalidReturnResult.isErr()) { this.logger.warn("Failed to save invalid_template_function signal", { code: "processor.save_invalid_fn_signal_failed", accountId, threadId: thread.id, error: invalidReturnResult.error, receiveCount }); }
                   }
                   actionVars[`fn.${fn.name}`] = "";
                   preventAutoSend = true;
@@ -874,12 +876,13 @@ export class IncomingEmailProcessor {
                 fromAddress: signal.data.from.address,
                 replyToAddress: signal.data.replyTo.address,
                 recipientAddress: signal.data.recipientAddress,
+                receiveCount,
               });
               {
                 const sigId = generateId("sgn-");
                 const sigTs = DateTime.utc().toISO()!;
                 const autoSendBlockedResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "auto_send_blocked", status: "active", labels: [], createdAt: sigTs, retentionDuration: SYSTEM_SIGNAL_RETENTION, data: { recipientAddress: signal.data.recipientAddress } });
-                if (autoSendBlockedResult.isErr()) { this.logger.warn("Failed to save auto_send_blocked signal", { code: "processor.save_auto_send_blocked_failed", accountId, threadId: thread.id, error: autoSendBlockedResult.error }); }
+                if (autoSendBlockedResult.isErr()) { this.logger.warn("Failed to save auto_send_blocked signal", { code: "processor.save_auto_send_blocked_failed", accountId, threadId: thread.id, error: autoSendBlockedResult.error, receiveCount }); }
               }
             }
           }
@@ -895,11 +898,12 @@ export class IncomingEmailProcessor {
               signal, thread, payload,
               fromAddress: signal.data.from.address,
               recipientAddress: signal.data.recipientAddress,
+              receiveCount,
             });
             const sigId = generateId("sgn-");
             const sigTs = DateTime.utc().toISO()!;
             const autoSendBlockedResult = await this.threadDb.saveSignal({ id: sigId, signalLookupId: sigId, threadId: thread.id, accountId, source: "email", type: "auto_send_blocked", status: "active", labels: [], createdAt: sigTs, retentionDuration: SYSTEM_SIGNAL_RETENTION, data: { recipientAddress: signal.data.recipientAddress } });
-            if (autoSendBlockedResult.isErr()) { this.logger.warn("Failed to save auto_send_blocked signal", { code: "processor.save_auto_send_blocked_failed", accountId, threadId: thread.id, error: autoSendBlockedResult.error }); }
+            if (autoSendBlockedResult.isErr()) { this.logger.warn("Failed to save auto_send_blocked signal", { code: "processor.save_auto_send_blocked_failed", accountId, threadId: thread.id, error: autoSendBlockedResult.error, receiveCount }); }
           }
 
           const sendInitiatedAt = shouldAutoSend ? now : undefined;
@@ -936,7 +940,7 @@ export class IncomingEmailProcessor {
 
           const draftSaveResult = await this.threadDb.saveSignal(draft);
           if (draftSaveResult.isErr()) {
-            this.logger.track(`Side-effect auto-draft save failed — will force retry: ${draftSaveResult.error.message}`, { code: "processor.side_effect.auto_draft_failed", signal, thread, payload, error: draftSaveResult.error });
+            this.logger.track(`Side-effect auto-draft save failed — will force retry: ${draftSaveResult.error.message}`, { code: "processor.side_effect.auto_draft_failed", signal, thread, payload, error: draftSaveResult.error, receiveCount });
             criticalFailures.push(draftSaveResult.error);
             continue;
           }
@@ -948,7 +952,7 @@ export class IncomingEmailProcessor {
               300,
             );
             if (dispatchResult.isErr()) {
-              this.logger.track(`Side-effect auto-draft SQS dispatch failed — draft remains pending_send, will not send automatically: ${dispatchResult.error.message}`, { code: "processor.side_effect.auto_draft_dispatch_failed", signal, thread, payload, signalId: draft.id, error: dispatchResult.error });
+              this.logger.track(`Side-effect auto-draft SQS dispatch failed — draft remains pending_send, will not send automatically: ${dispatchResult.error.message}`, { code: "processor.side_effect.auto_draft_dispatch_failed", signal, thread, payload, signalId: draft.id, error: dispatchResult.error, receiveCount });
             }
           }
 
@@ -958,7 +962,7 @@ export class IncomingEmailProcessor {
         }
         this.logger.trackPoint("side_effect_auto_draft_complete");
       } catch (e) {
-        this.logger.track(`Side-effect auto-draft threw unexpectedly: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.auto_draft_error", signal, thread, payload, error: e });
+        this.logger.track(`Side-effect auto-draft threw unexpectedly: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.auto_draft_error", signal, thread, payload, error: e, receiveCount });
       }
     }
 
@@ -976,9 +980,9 @@ export class IncomingEmailProcessor {
         // Find the calendar signal linked to this email signal
         const calendarSignalResult = await this.threadDb.getLinkedCalendarSignal(accountId, thread.id, signal.id);
         if (calendarSignalResult.isErr()) {
-          this.logger.track(`Calendar forward failed — could not find linked calendar signal: ${calendarSignalResult.error.message}`, { code: "processor.side_effect.calendar_forward_no_signal", signal, thread, payload, error: calendarSignalResult.error });
+          this.logger.track(`Calendar forward failed — could not find linked calendar signal: ${calendarSignalResult.error.message}`, { code: "processor.side_effect.calendar_forward_no_signal", signal, thread, payload, error: calendarSignalResult.error, receiveCount });
         } else if (!calendarSignalResult.value) {
-          this.logger.track("Calendar forward skipped — no linked calendar signal found.", { code: "processor.side_effect.calendar_forward_no_signal", signal, thread, payload });
+          this.logger.track("Calendar forward skipped — no linked calendar signal found.", { code: "processor.side_effect.calendar_forward_no_signal", signal, thread, payload, receiveCount });
         } else {
           const calendarSignal = calendarSignalResult.value;
           const forwardResult = await this.calendarForwarder.forwardInvite(
@@ -992,14 +996,14 @@ export class IncomingEmailProcessor {
             this.logger,
           );
           if (forwardResult.isErr()) {
-            this.logger.track(`Calendar forward failed — will force retry: ${"message" in forwardResult.error ? forwardResult.error.message : forwardResult.error.errorName}`, { code: "processor.side_effect.calendar_forward_failed", signal, thread, payload, error: forwardResult.error });
+            this.logger.track(`Calendar forward failed — will force retry: ${"message" in forwardResult.error ? forwardResult.error.message : forwardResult.error.errorName}`, { code: "processor.side_effect.calendar_forward_failed", signal, thread, payload, error: forwardResult.error, receiveCount });
             criticalFailures.push(forwardResult.error);
           } else {
             this.logger.trackPoint("side_effect_calendar_forward_complete");
           }
         }
       } catch (e) {
-        this.logger.track(`Calendar forward threw unexpectedly — will force retry: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.calendar_forward_error", signal, thread, payload, error: e });
+        this.logger.track(`Calendar forward threw unexpectedly — will force retry: ${e instanceof Error ? e.message : e}`, { code: "processor.side_effect.calendar_forward_error", signal, thread, payload, error: e, receiveCount });
         criticalFailures.push(e);
       }
     }
@@ -1018,7 +1022,7 @@ export class IncomingEmailProcessor {
     try {
       return await this._processInboundUnsafe(msg, receiveCount, opts);
     } catch (e) {
-      this.logger.warn(`processInbound threw an unhandled exception — the message will be retried: ${e instanceof Error ? e.message : e}`, { code: "processor.unhandled_exception", error: e, compositeMailMessageId: msg.compositeMailMessageId });
+      this.logger.warn(`processInbound threw an unhandled exception — the message will be retried: ${e instanceof Error ? e.message : e}`, { code: "processor.unhandled_exception", error: e, compositeMailMessageId: msg.compositeMailMessageId, msg, receiveCount, opts });
       return err(dbError(e));
     }
   }
@@ -1032,12 +1036,12 @@ export class IncomingEmailProcessor {
     const resolved = await this.resolveAccountIdAndAlias(recipientAddress);
     if (resolved.isErr()) return err(resolved.error);
     if (!resolved.value) {
-      this.logger.track(`No account owns the recipient address ${recipientAddress || destination.join(", ") || "(none)"} — dropping message.`, { code: "processor.no_account_for_recipient", recipientAddress, compositeMailMessageId: msg.compositeMailMessageId, destination });
+      this.logger.track(`No account owns the recipient address ${recipientAddress || destination.join(", ") || "(none)"} — dropping message.`, { code: "processor.no_account_for_recipient", recipientAddress, compositeMailMessageId: msg.compositeMailMessageId, destination, msg, receiveCount, opts });
       return err(noAccountError(recipientAddress, destination, msg.compositeMailMessageId, msg.expectedAccountId));
     }
     const { accountId, aliasConfig } = resolved.value;
     if (msg.expectedAccountId !== undefined && msg.expectedAccountId !== accountId) {
-      this.logger.track("Derived accountId does not match expectedAccountId on the message — proceeding with the derived value.", { code: "processor.account_id_mismatch", expectedAccountId: msg.expectedAccountId, derivedAccountId: accountId, recipientAddress, compositeMailMessageId: msg.compositeMailMessageId });
+      this.logger.track("Derived accountId does not match expectedAccountId on the message — proceeding with the derived value.", { code: "processor.account_id_mismatch", expectedAccountId: msg.expectedAccountId, derivedAccountId: accountId, recipientAddress, compositeMailMessageId: msg.compositeMailMessageId, msg, receiveCount, opts });
     }
 
     // 1. Dedup / retry-resume — a single signal lookup serves both. On force (reprocess)
@@ -1076,7 +1080,7 @@ export class IncomingEmailProcessor {
         }
         // First delivery seeing an existing signal — true duplicate, already fully
         // processed (including dispatch). Dedup and return.
-        this.logger.warn(`Signal ${existing.id} already processed — dedup skip.`, { code: "processor.dedup_skip", levelThreshold: 2, signalId: existing.id, accountId, compositeMailMessageId: msg.compositeMailMessageId });
+        this.logger.warn(`Signal ${existing.id} already processed — dedup skip.`, { code: "processor.dedup_skip", levelThreshold: 2, signalId: existing.id, accountId, compositeMailMessageId: msg.compositeMailMessageId, msg, receiveCount, opts });
         return ok(undefined);
       }
     }
@@ -1090,6 +1094,9 @@ export class IncomingEmailProcessor {
           dmarcVerdict: msg.dmarcVerdict,
           recipientAddress,
           compositeMailMessageId: msg.compositeMailMessageId,
+          msg,
+          receiveCount,
+          opts,
         });
       }
       const signalId = generateId("sgn-");
@@ -1122,12 +1129,12 @@ export class IncomingEmailProcessor {
       };
       const saveResult = await this.threadDb.saveSignal(signal);
       if (saveResult.isErr()) return err(saveResult.error);
-      this.logger.track("Blocked email — DKIM or DMARC verification failed.", { code: "processor.dkim_dmarc_block", signal, dkimVerdict: msg.dkimVerdict, dmarcVerdict: msg.dmarcVerdict });
+      this.logger.track("Blocked email — DKIM or DMARC verification failed.", { code: "processor.dkim_dmarc_block", signal, dkimVerdict: msg.dkimVerdict, dmarcVerdict: msg.dmarcVerdict, msg, receiveCount, opts });
       const dkimCat = statusToMetric(signal.status);
       if (dkimCat) {
         const statsResult = await this.accountDb.incrementStatMetric(accountId, dkimCat, 1, idempotencyKey);
         if (statsResult.isErr()) {
-          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal, error: statsResult.error });
+          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal, error: statsResult.error, msg, receiveCount, opts });
         }
       }
       return ok(undefined);
@@ -1154,7 +1161,7 @@ export class IncomingEmailProcessor {
       if (ensureResult.isErr()) return err(ensureResult.error);
       if (ensureResult.value.created) {
         const aliasStatResult = await this.accountDb.incrementStatMetric(accountId, "totalAliases", 1, idempotencyKey + ".alias");
-        if (aliasStatResult.isErr()) { this.logger.warn("Failed to increment totalAliases stat after auto-create", { code: "processor.stats_alias_increment_failed", accountId, error: aliasStatResult.error }); }
+        if (aliasStatResult.isErr()) { this.logger.warn("Failed to increment totalAliases stat after auto-create", { code: "processor.stats_alias_increment_failed", accountId, error: aliasStatResult.error, msg, receiveCount, opts }); }
       }
     }
 
@@ -1193,6 +1200,9 @@ export class IncomingEmailProcessor {
         accountId,
         droppedCount: sanitizedParsed.droppedAttachments.length,
         dropped: sanitizedParsed.droppedAttachments.map(d => ({ mimeType: d.mimeType, sizeBytes: d.sizeBytes, reason: d.reason, detail: d.detail })),
+        msg,
+        receiveCount,
+        opts,
       });
     }
 
@@ -1268,16 +1278,16 @@ export class IncomingEmailProcessor {
       };
       const saveResult = await this.threadDb.saveSignal(signal);
       if (saveResult.isErr()) return err(saveResult.error);
-      this.logger.track(`Blocked email — sender explicitly blocked for this alias (pre-classify fast path). ${recipientAddress}`, { code: "processor.sender_block_early", signal, alias: recipientAddress, sender: parsed.from.address, senderETLD1, policy: blockStatus });
+      this.logger.track(`Blocked email — sender explicitly blocked for this alias (pre-classify fast path). ${recipientAddress}`, { code: "processor.sender_block_early", signal, alias: recipientAddress, sender: parsed.from.address, senderETLD1, policy: blockStatus, msg, receiveCount, opts });
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, blockStatus);
       if (repResult.isErr()) {
-        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal, error: repResult.error });
+        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal, error: repResult.error, msg, receiveCount, opts });
       }
       const senderBlockCat = statusToMetric(blockStatus);
       if (senderBlockCat) {
         const statsResult = await this.accountDb.incrementStatMetric(accountId, senderBlockCat, 1, idempotencyKey);
         if (statsResult.isErr()) {
-          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal, error: statsResult.error });
+          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal, error: statsResult.error, msg, receiveCount, opts });
         }
       }
       return ok(undefined);
@@ -1326,7 +1336,7 @@ export class IncomingEmailProcessor {
     if (classification.isErr()) {
       const cause = classification.error.cause;
       const reason = cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "unknown cause";
-      this.logger.warn(`Classification failed [${reason}] — proceeding with workflow:none fallback.`, { code: "processor.classification_fallback", accountId, compositeMailMessageId: msg.compositeMailMessageId, error: classification.error });
+      this.logger.warn(`Classification failed [${reason}] — proceeding with workflow:none fallback.`, { code: "processor.classification_fallback", accountId, compositeMailMessageId: msg.compositeMailMessageId, error: classification.error, msg, receiveCount, opts });
       classificationOutput = { workflow: "unspecified", workflowData: { workflow: "unspecified" }, tags: [], summary: "", labels: [], actions: [] };
     } else {
       classificationOutput = classification.value;
@@ -1370,7 +1380,7 @@ export class IncomingEmailProcessor {
     const primaryResult = await this.embeddingGenerator.generateForModel(embedText, readCluster.modelId);
 
     if (primaryResult.isErr()) {
-      this.logger.error(`Primary embedding generation failed — thread matching cannot proceed, message will be retried: ${primaryResult.error.message}`, { code: "embedding.primary_failed", modelId: readCluster.modelId, error: primaryResult.error });
+      this.logger.error(`Primary embedding generation failed — thread matching cannot proceed, message will be retried: ${primaryResult.error.message}`, { code: "embedding.primary_failed", modelId: readCluster.modelId, error: primaryResult.error, msg, receiveCount, opts });
       return err(dbError(primaryResult.error));
     }
     const embedding = primaryResult.value.vector;
@@ -1410,14 +1420,14 @@ export class IncomingEmailProcessor {
       const lookupKey = buildSignalGsi3pk(accountId, firstMsgId);
       const signalResult = await this.threadDb.findSignalByEmailMessageId(lookupKey);
       if (signalResult.isErr()) {
-        this.logger.warn("GSI3 In-Reply-To lookup failed — treating as miss.", { code: "processor.in_reply_to.gsi3_error", accountId, compositeMailMessageId: msg.compositeMailMessageId, error: signalResult.error });
+        this.logger.warn("GSI3 In-Reply-To lookup failed — treating as miss.", { code: "processor.in_reply_to.gsi3_error", accountId, compositeMailMessageId: msg.compositeMailMessageId, error: signalResult.error, msg, receiveCount, opts });
         return null;
       }
       const foundSignal = signalResult.value;
       if (!foundSignal || !foundSignal.threadId) return null;
       const threadResult = await this.threadDb.getThread(accountId, foundSignal.threadId);
       if (threadResult.isErr()) {
-        this.logger.warn("In-Reply-To thread fetch failed — treating as miss.", { code: "processor.in_reply_to.thread_fetch_error", accountId, compositeMailMessageId: msg.compositeMailMessageId, error: threadResult.error });
+        this.logger.warn("In-Reply-To thread fetch failed — treating as miss.", { code: "processor.in_reply_to.thread_fetch_error", accountId, compositeMailMessageId: msg.compositeMailMessageId, error: threadResult.error, msg, receiveCount, opts });
         return null;
       }
       return threadResult.value;
@@ -1428,7 +1438,7 @@ export class IncomingEmailProcessor {
       this.logger.trackPoint("thread_matcher_similarity_search");
       const matchResult = await this.threadMatcher.findMatch(accountId, recipientAddress, embedding);
       if (matchResult.isErr()) {
-        this.logger.warn("Similarity search failed — treating as miss.", { code: "processor.thread_matcher.similarity_search_failed", accountId, compositeMailMessageId: msg.compositeMailMessageId, error: matchResult.error });
+        this.logger.warn("Similarity search failed — treating as miss.", { code: "processor.thread_matcher.similarity_search_failed", accountId, compositeMailMessageId: msg.compositeMailMessageId, error: matchResult.error, msg, receiveCount, opts });
         return null;
       }
       return matchResult.value;
@@ -1452,6 +1462,9 @@ export class IncomingEmailProcessor {
         tier15ThreadId: tier15Thread?.id ?? null,
         tier2ThreadId: tier2Thread?.id ?? null,
         selectedTier: tier1Thread ? "groupingKey" : tier15Thread ? "inReplyTo" : "similarity",
+        msg,
+        receiveCount,
+        opts,
       });
     }
 
@@ -1506,16 +1519,16 @@ export class IncomingEmailProcessor {
       const blockedSignal = buildSignal({ status: blockStatus, accountId, compositeMailMessageId: msg.compositeMailMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: SPAM_QUARANTINE_RETENTION }, this.logger);
       const saveResult = await this.threadDb.saveSignal(blockedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
-      this.logger.track(`Blocked email — sender explicitly blocked for this alias ${recipientAddress}`, { code: "processor.sender_block", signal: blockedSignal, thread, alias: recipientAddress, sender: parsed.from.address, senderETLD1, policy: blockStatus });
+      this.logger.track(`Blocked email — sender explicitly blocked for this alias ${recipientAddress}`, { code: "processor.sender_block", signal: blockedSignal, thread, alias: recipientAddress, sender: parsed.from.address, senderETLD1, policy: blockStatus, msg, receiveCount, opts });
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, blockStatus);
       if (repResult.isErr()) {
-        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: blockedSignal, thread, error: repResult.error });
+        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: blockedSignal, thread, error: repResult.error, msg, receiveCount, opts });
       }
       const senderBlockCat = statusToMetric(blockStatus);
       if (senderBlockCat) {
         const statsResult = await this.accountDb.incrementStatMetric(accountId, senderBlockCat, 1, idempotencyKey);
         if (statsResult.isErr()) {
-          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal: blockedSignal, thread, error: statsResult.error });
+          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal: blockedSignal, thread, error: statsResult.error, msg, receiveCount, opts });
         }
       }
       return ok(undefined);
@@ -1615,16 +1628,16 @@ export class IncomingEmailProcessor {
       const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs, ...spamRetentionArgs }, this.logger);
       const saveResult = await this.threadDb.saveSignal({ ...blockSignal, data: { ...blockSignal.data, matchedRules } });
       if (saveResult.isErr()) return err(saveResult.error);
-      this.logger.track(`Blocked email — rule matched with block disposition. accountId=${accountId}, signalId=${blockSignal.id}, alias=${recipientAddress}, subject="${parsed.subject}", sender=${parsed.from.address}`, { code: "processor.rule_block", signal: blockSignal, thread, disposition: outcome.blockDisposition, matchedRules: matchedRules.map(r => r.ruleId) });
+      this.logger.track(`Blocked email — rule matched with block disposition. accountId=${accountId}, signalId=${blockSignal.id}, alias=${recipientAddress}, subject="${parsed.subject}", sender=${parsed.from.address}`, { code: "processor.rule_block", signal: blockSignal, thread, disposition: outcome.blockDisposition, matchedRules: matchedRules.map(r => r.ruleId), msg, receiveCount, opts });
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, outcome.blockDisposition);
       if (repResult.isErr()) {
-        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: blockSignal, thread, error: repResult.error });
+        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: blockSignal, thread, error: repResult.error, msg, receiveCount, opts });
       }
       const blockCat = statusToMetric(outcome.blockDisposition);
       if (blockCat) {
         const statsResult = await this.accountDb.incrementStatMetric(accountId, blockCat, 1, idempotencyKey);
         if (statsResult.isErr()) {
-          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal: blockSignal, thread, error: statsResult.error });
+          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal: blockSignal, thread, error: statsResult.error, msg, receiveCount, opts });
         }
       }
       return ok(undefined);
@@ -1643,13 +1656,13 @@ export class IncomingEmailProcessor {
       this.logger.info("Quarantined email — rule or sender filter matched.", { code: "processor.quarantine", accountId, threadId: thread.id, signalId: quarantinedSignal.id, status: quarantineStatus, matchedRules: matchedRules.map(r => r.ruleId) });
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, quarantineStatus);
       if (repResult.isErr()) {
-        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: quarantinedSignal, thread, error: repResult.error });
+        this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: quarantinedSignal, thread, error: repResult.error, msg, receiveCount, opts });
       }
       const quarantineCat = statusToMetric(quarantineStatus);
       if (quarantineCat) {
         const statsResult = await this.accountDb.incrementStatMetric(accountId, quarantineCat, 1, idempotencyKey);
         if (statsResult.isErr()) {
-          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal: quarantinedSignal, thread, error: statsResult.error });
+          this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal: quarantinedSignal, thread, error: statsResult.error, msg, receiveCount, opts });
         }
       }
       return ok(undefined);
@@ -1697,7 +1710,7 @@ export class IncomingEmailProcessor {
     const secondaryResults = await this.embeddingGenerator.generateForSecondaryClusters(embedText);
     for (const result of secondaryResults) {
       if (result.isErr()) {
-        this.logger.warn("Secondary embedding generation failed. We will run the full re-index anyway before switching over — revalidate all WARNINGS to check for failures in generating Aurora embeddings.", { code: "embedding.secondary_failed", signal, thread, modelId: result.error.modelId, error: result.error });
+        this.logger.warn("Secondary embedding generation failed. We will run the full re-index anyway before switching over — revalidate all WARNINGS to check for failures in generating Aurora embeddings.", { code: "embedding.secondary_failed", signal, thread, modelId: result.error.modelId, error: result.error, msg, receiveCount, opts });
       }
     }
 
@@ -1775,7 +1788,7 @@ export class IncomingEmailProcessor {
         ...(allAssets.length > 0 ? { assets: allAssets } : {}),
       });
       if (resourceResult.isErr()) {
-        this.logger.error(`Resource save failed: ${resourceResult.error.message}`, { code: "processor.resource_save_failed", threadId: thread.id, workflow: signal.data.workflow, error: resourceResult.error });
+        this.logger.error(`Resource save failed: ${resourceResult.error.message}`, { code: "processor.resource_save_failed", threadId: thread.id, workflow: signal.data.workflow, error: resourceResult.error, msg, receiveCount, opts });
       }
       this.logger.trackPoint("resource_saved", { threadId: thread.id, workflow: signal.data.workflow, status: resourceResult.isOk() ? resourceResult.value.status : null });
     }
@@ -1784,7 +1797,7 @@ export class IncomingEmailProcessor {
     if (allowedCat) {
       const statsResult = await this.accountDb.incrementStatMetric(accountId, allowedCat, 1, idempotencyKey);
       if (statsResult.isErr()) {
-        this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal, thread, error: statsResult.error });
+        this.logger.warn("Stats increment failed — dashboard may be slightly behind.", { code: "processor.stats_increment_failed", signal, thread, error: statsResult.error, msg, receiveCount, opts });
       }
     }
 
