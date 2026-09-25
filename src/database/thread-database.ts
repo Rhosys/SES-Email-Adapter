@@ -153,9 +153,9 @@ export class ThreadDatabase {
       // collides across multiple signals we must pick deterministically: choose the oldest by createdAt —
       // the thread the Message-ID was first associated with — so retries always resolve the same way.
       const ordered = [...items].sort((a, b) => String((a as Partial<Signal>).createdAt ?? "").localeCompare(String((b as Partial<Signal>).createdAt ?? "")));
-      // Signals with an undefined threadId are blocked/quarantined — they aren't threaded yet, so they are
+      // Signals with a nullish threadId are blocked/quarantined — they aren't threaded yet, so they are
       // not up for reply-threading validation and cannot be a consequential collision. Exclude them entirely.
-      const threaded = ordered.filter(i => (i as Partial<Signal>).threadId !== undefined);
+      const threaded = ordered.filter(i => (i as Partial<Signal>).threadId != null);
       if (threaded.length > 1) {
         // A Message-ID is supposed to be globally unique, so GSI3 should hold at most one threaded signal per
         // key. Compare the colliding signals to decide whether the duplicate is consequential: if every match

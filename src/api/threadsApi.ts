@@ -41,7 +41,7 @@ import {
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
 export interface SignalReprocessor {
-  reprocessSignal(accountId: string, signalId: string, threadId: string, opts?: { skipNotify?: boolean; userApproved?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
+  reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; userApproved?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
 }
 
 export interface ListThreadsParams extends PageParams {
@@ -967,7 +967,10 @@ export class ThreadsApi {
       const threadId = c.req.param("threadId")!;
       const id = c.req.param("id")!;
       logger.info("Reprocessing signal", { code: "api.threads.reprocess", accountId, threadId, signalId: id });
-      const result = await signalReprocessor.reprocessSignal(accountId, id, threadId);
+      const lookupResult = await threadDb.getSignalById(accountId, id, threadId);
+      if (lookupResult.isErr()) { logger.error(`Failed to load signal for reprocess: ${lookupResult.error.message}`, { code: "api.reprocess.get_signal_failed", accountId, signalId: id, threadId, error: lookupResult.error }); return err(c, 500, "Internal Server Error"); }
+      if (!lookupResult.value) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
+      const result = await signalReprocessor.reprocessSignal(accountId, lookupResult.value.signalLookupId);
       if (result.isErr()) {
         const { error } = result;
         if (error.kind === "not_found") return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");

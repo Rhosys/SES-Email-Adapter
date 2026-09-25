@@ -17,7 +17,7 @@ import { ListSignalsResponse } from "./schemas.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
 export interface SignalReprocessor {
-  reprocessSignal(accountId: string, signalId: string, threadId: string, opts?: { skipNotify?: boolean; userApproved?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
+  reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; userApproved?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
 }
 
 // Upper bound on quarantine-partition pages walked when collecting cascade siblings (100 per page).
@@ -111,13 +111,10 @@ export class SignalsApi {
       const signalId = c.req.param("id")!;
       logger.info("Processing quarantine response", { code: "api.signals.quarantine_response", accountId, signalId });
 
-      // Signal is quarantined or blocked — try both partitions. Remember which one it was found in:
-      // the approval replay must load it from that same partition.
-      let partition: "QUARANTINED" | "BLOCKED" = "QUARANTINED";
+      // Signal is quarantined or blocked — try both partitions
       let signalResult = await threadDb.getSignalById(accountId, signalId, "QUARANTINED");
       if (signalResult.isErr()) { logger.error("Failed to get quarantined signal.", { code: "api.quarantine_response.get_signal_failed", error: signalResult.error }); return err(c, 500, "Internal Server Error"); }
       if (!signalResult.value) {
-        partition = "BLOCKED";
         signalResult = await threadDb.getSignalById(accountId, signalId, "BLOCKED");
         if (signalResult.isErr()) { logger.error("Failed to get blocked signal.", { code: "api.quarantine_response.get_signal_failed", error: signalResult.error }); return err(c, 500, "Internal Server Error"); }
       }
@@ -247,16 +244,16 @@ export class SignalsApi {
       //    The primary drives the HTTP response — its failure is the only one that fails the request.
       //    userApproved: the user's decision overrides any rule/policy that would re-quarantine or
       //    block the replay (e.g. SR-02 onboarding-with-action, SR-05 security alert).
-      const primaryResult = await signalReprocessor.reprocessSignal(accountId, signal.id, partition, { skipNotify: true, userApproved: true });
+      const primaryResult = await signalReprocessor.reprocessSignal(accountId, signal.signalLookupId, { skipNotify: true, userApproved: true });
       if (primaryResult.isErr()) { logger.error("Failed to reprocess primary signal on quarantine approval.", { code: "api.quarantine_response.reprocess_primary_failed", accountId, signalId, error: primaryResult.error }); return err(c, 500, "Internal Server Error"); }
       const activatedSignal = primaryResult.value;
-      if (!activatedSignal.threadId) { logger.error("Primary reprocess produced a signal with no threadId — the approval did not land it on a thread.", { code: "api.quarantine_response.reprocess_no_thread", accountId, signalId, status: activatedSignal.status }); return err(c, 500, "Internal Server Error"); }
+      if (!activatedSignal.threadId) { logger.error("Primary reprocess produced a signal with no threadId — the approval did not land it on a thread.", { code: "api.quarantine_response.reprocess_no_thread", accountId, signalId, signal: activatedSignal }); return err(c, 500, "Internal Server Error"); }
 
       // 3. Replay each sibling IN SERIES (never Promise.all): each iteration's Aurora upsert must be
       //    visible to the next iteration's similarity search. Best-effort — a sibling failure is
       //    logged and skipped, never rolls back, never affects the response.
       for (const sibling of await collectSiblings()) {
-        const siblingResult = await signalReprocessor.reprocessSignal(accountId, sibling.id, "QUARANTINED", { skipNotify: true, userApproved: true });
+        const siblingResult = await signalReprocessor.reprocessSignal(accountId, sibling.signalLookupId, { skipNotify: true, userApproved: true });
         if (siblingResult.isOk() && !siblingResult.value.threadId) logger.warn("Sibling reprocess on approval did not land the signal on a thread — skipping.", { code: "api.quarantine_response.reprocess_sibling_no_thread", accountId, siblingSignalId: sibling.id, status: siblingResult.value.status });
         if (siblingResult.isErr()) logger.warn("Failed to reprocess sibling quarantined signal on approval — skipping.", { code: "api.quarantine_response.reprocess_sibling_failed", accountId, siblingSignalId: sibling.id, error: siblingResult.error });
       }

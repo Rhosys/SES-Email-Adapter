@@ -2118,11 +2118,11 @@ export class IncomingEmailProcessor {
   // Reprocess — thin wrapper that calls processMessage with force flags
   // ---------------------------------------------------------------------------
 
-  async reprocessSignal(accountId: string, signalId: string, threadId: string, opts?: { skipNotify?: boolean; userApproved?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>> {
-    const existingResult = await this.threadDb.getSignalById(accountId, signalId, threadId);
+  async reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; userApproved?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>> {
+    const existingResult = await this.threadDb.getSignalByMessageId(accountId, signalLookupId);
     if (existingResult.isErr()) return err(processorError(existingResult.error));
     const existing = existingResult.value;
-    if (!existing) return err(notFoundError("signal", signalId));
+    if (!existing) return err(notFoundError("signal", signalLookupId));
     if (existing.type !== "email") return err(processorError("Only email signals can be reprocessed"));
 
     const s3Key = existing.data.s3Key;
@@ -2132,32 +2132,35 @@ export class IncomingEmailProcessor {
     const recipientAddress = existing.data.recipientAddress;
     const timestamp = existing.data.receivedAt ?? existing.createdAt;
 
-    // QUARANTINED / BLOCKED are pre-thread partitions, not threads: there is no thread to empty,
-    // no embeddings to delete, no TTL to set and no recency to repair.
-    const isRealThread = threadId !== "QUARANTINED" && threadId !== "BLOCKED";
+    // The signal's real source thread. Nullish for quarantined/blocked signals — those were never
+    // attached to a thread, so there is nothing to clean up or repair. Thread mutation below is
+    // gated on this being a real id.
+    const sourceThreadId = existing.threadId;
 
     // Pre-process cleanup: if this is the only signal on the source thread, the thread
     // will be empty after reprocessing moves it. Delete embeddings from Aurora (prevents
     // future vector matches to an empty thread) and set a 5-year TTL if absent.
-    const otherSignalsResult = isRealThread ? await this.threadDb.listSignals(accountId, threadId, { limit: 2 }) : null;
-    if (otherSignalsResult?.isErr()) {
-      this.logger.warn("Failed to list source-thread signals before reprocess — skipping emptied-thread cleanup.", { code: "processor.reprocess.pre_list_failed", accountId, threadId, signalId, error: otherSignalsResult.error });
-    }
-    if (otherSignalsResult?.isOk()) {
-      const otherSignals = otherSignalsResult.value.items.filter(s => s.id !== signalId);
-      if (otherSignals.length === 0) {
-        const deleteEmbResult = await this.threadMatcher.deleteEmbeddingsForThread(accountId, threadId);
-        if (deleteEmbResult.isErr()) {
-          this.logger.warn("Failed to delete embeddings for thread being emptied by reprocess.", { code: "processor.reprocess.pre_embedding_cleanup_failed", accountId, threadId, error: deleteEmbResult.error });
-        }
+    if (sourceThreadId != null) {
+      const otherSignalsResult = await this.threadDb.listSignals(accountId, sourceThreadId, { limit: 2 });
+      if (otherSignalsResult.isErr()) {
+        this.logger.warn("Failed to list source-thread signals before reprocess — skipping emptied-thread cleanup.", { code: "processor.reprocess.pre_list_failed", accountId, threadId: sourceThreadId, signalId: existing.id, error: otherSignalsResult.error });
+      }
+      if (otherSignalsResult.isOk()) {
+        const otherSignals = otherSignalsResult.value.items.filter(s => s.id !== existing.id);
+        if (otherSignals.length === 0) {
+          const deleteEmbResult = await this.threadMatcher.deleteEmbeddingsForThread(accountId, sourceThreadId);
+          if (deleteEmbResult.isErr()) {
+            this.logger.warn("Failed to delete embeddings for thread being emptied by reprocess.", { code: "processor.reprocess.pre_embedding_cleanup_failed", accountId, threadId: sourceThreadId, error: deleteEmbResult.error });
+          }
 
-        // Give the emptied thread a 5-year sweep TTL only if it has none yet (infinite-retention
-        // orphan). if_not_exists in setThreadTtlFallback keeps any existing retention-derived ttl,
-        // so no read of the persisted ttl is needed here.
-        const fiveYearsTtl = Math.floor(Date.now() / 1000) + (5 * 365 * 24 * 60 * 60);
-        const ttlResult = await this.threadDb.setThreadTtlFallback(accountId, threadId, fiveYearsTtl);
-        if (ttlResult.isErr()) {
-          this.logger.warn("Failed to set 5-year TTL on thread being emptied by reprocess.", { code: "processor.reprocess.pre_ttl_set_failed", accountId, threadId, error: ttlResult.error });
+          // Give the emptied thread a 5-year sweep TTL only if it has none yet (infinite-retention
+          // orphan). if_not_exists in setThreadTtlFallback keeps any existing retention-derived ttl,
+          // so no read of the persisted ttl is needed here.
+          const fiveYearsTtl = Math.floor(Date.now() / 1000) + (5 * 365 * 24 * 60 * 60);
+          const ttlResult = await this.threadDb.setThreadTtlFallback(accountId, sourceThreadId, fiveYearsTtl);
+          if (ttlResult.isErr()) {
+            this.logger.warn("Failed to set 5-year TTL on thread being emptied by reprocess.", { code: "processor.reprocess.pre_ttl_set_failed", accountId, threadId: sourceThreadId, error: ttlResult.error });
+          }
         }
       }
     }
@@ -2179,7 +2182,7 @@ export class IncomingEmailProcessor {
     if (result.isErr()) {
       // Best-effort recency repair even on failure — a previous 504 may have saved the thread
       // with updated lastSignalAt while the signal save never completed.
-      if (isRealThread) await this.repairThreadRecency(accountId, threadId);
+      if (sourceThreadId != null) await this.repairThreadRecency(accountId, sourceThreadId);
       return err(processorError(result.error));
     }
 
@@ -2191,7 +2194,7 @@ export class IncomingEmailProcessor {
 
     // Always repair the source thread's recency — even if the signal stayed on the same thread,
     // a partial prior invocation (504) may have left lastSignalAt pointing at stale data.
-    if (isRealThread) await this.repairThreadRecency(accountId, threadId);
+    if (sourceThreadId != null) await this.repairThreadRecency(accountId, sourceThreadId);
 
     return ok(freshResult.value);
   }
@@ -2475,7 +2478,10 @@ function buildSignal(opts: {
     },
   };
 
-  if (threadId !== undefined) signal.threadId = threadId;
+  // A signal with no thread (quarantined/blocked, pending user action) stores threadId: null
+  // explicitly rather than omitting the attribute, so every downstream check is a single nullish
+  // test instead of interrogating the QUARANTINED/BLOCKED partition sentinel.
+  signal.threadId = threadId ?? null;
   if (retentionDuration !== undefined) signal.retentionDuration = retentionDuration;
   if (gsi3pk !== undefined) signal.gsi3pk = gsi3pk;
 

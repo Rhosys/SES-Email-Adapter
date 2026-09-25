@@ -269,10 +269,13 @@ describe("Quarantine response — handler + real processor", () => {
 
   it("approve → the signal ends up active on a thread and the sender allow is recorded", async () => {
     const quarantined = makeQuarantinedSignal();
-    // Both the handler's initial load AND the processor's reprocess load hit getSignalById(…,"QUARANTINED").
+    // The handler's initial load resolves the quarantined signal via getSignalById.
     vi.mocked(threadDb.getSignalById).mockResolvedValue(ok(quarantined));
-    // The processor re-fetches by message id at the end of reprocess to return the re-homed signal.
-    vi.mocked(threadDb.getSignalByMessageId).mockResolvedValue(ok({ ...quarantined, status: "active", threadId: "arc-001" } as Signal));
+    // reprocess reads by message id twice: the entry load sees the still-quarantined signal (no
+    // thread), then the post-reprocess re-fetch returns it re-homed and active on a thread.
+    vi.mocked(threadDb.getSignalByMessageId)
+      .mockResolvedValueOnce(ok(quarantined))
+      .mockResolvedValue(ok({ ...quarantined, status: "active", threadId: "arc-001" } as Signal));
     // The handler fetches the landed thread for the response.
     vi.mocked(threadDb.getThread).mockResolvedValue(ok(makeThread({ id: "arc-001" })));
 
@@ -302,7 +305,8 @@ describe("Quarantine response — handler + real processor", () => {
 
   describe("cascade to sibling quarantined signals", () => {
     // Wire the processor's reprocess reads so BOTH primary and any sibling replay to completion.
-    // getSignalById / getSignalByMessageId key off the signal id so each reprocess sees its own signal.
+    // getSignalByMessageId keys off the signalLookupId so each reprocess resolves its own signal;
+    // getSignalById still backs the handler's initial per-signal load.
     function wireReprocessReads(signals: Signal[]) {
       const byId = new Map(signals.map(s => [s.id, s]));
       vi.mocked(threadDb.getSignalById).mockImplementation((_a, id) => Promise.resolve(ok(byId.get(id) ?? null)));
@@ -512,18 +516,17 @@ describe("Quarantine response — handler + real processor", () => {
       expect(threadDb.getThread.mock.calls.some(c => c[1] === "QUARANTINED")).toBe(false);
     });
 
-    it("approve → a signal found in the BLOCKED partition is replayed from BLOCKED", async () => {
+    it("approve → a quarantined signal found only via the BLOCKED lookup is still approved onto a thread", async () => {
       const blocked = makeQuarantinedSignal();
-      const { store } = wireStore([]);
-      store.set(blocked.signalLookupId, blocked);
+      const { store } = wireStore([blocked]);
       vi.mocked(threadDb.getSignalById).mockImplementation((_a, id, partition) =>
-        Promise.resolve(ok(partition === "BLOCKED" && id === blocked.id ? (store.get(blocked.signalLookupId)!.threadId ? null : blocked) : null)));
+        Promise.resolve(ok(partition === "BLOCKED" && id === blocked.id ? blocked : null)));
 
       const res = await post("active");
 
       expect(res.status).toBe(200);
-      const partitions = threadDb.getSignalById.mock.calls.map(c => c[2]);
-      expect(partitions.filter(p => p === "BLOCKED").length).toBe(2); // handler lookup + processor replay
+      expect(threadDb.getSignalById.mock.calls.map(c => c[2])).toEqual(["QUARANTINED", "BLOCKED"]);
+      expect(store.get(blocked.signalLookupId)!.threadId).toBeTruthy();
     });
 
     it("approve → 500 and no replay when saving the sender approval fails", async () => {
@@ -583,7 +586,7 @@ describe("Quarantine response — handler + real processor", () => {
       const res = await post("active");
       expect(res.status).toBe(200);
       expect(store.get("SES#msg-primary")!.threadId).toBeTruthy();
-      expect(store.get("SES#msg-sib-a")!.threadId).toBeUndefined();
+      expect(store.get("SES#msg-sib-a")!.threadId).toBeFalsy();
       expect(codes(apiLogger, "warn")).toContain("api.quarantine_response.sibling_list_failed");
     });
 
@@ -601,7 +604,7 @@ describe("Quarantine response — handler + real processor", () => {
       expect(res.status).toBe(200);
       expect(threadDb.listPreThreadSignals.mock.calls[1]![2]).toMatchObject({ cursor: "page-2" });
       expect(store.get("SES#msg-old-sib")!.threadId).toBeTruthy();
-      expect(store.get("SES#msg-other")!.threadId).toBeUndefined();
+      expect(store.get("SES#msg-other")!.threadId).toBeFalsy();
     });
 
     it("approve → stops at the page cap and logs the truncation", async () => {
@@ -642,8 +645,8 @@ describe("Quarantine response — handler + real processor", () => {
       const res = await req(stubApp, "POST", `${A}/signals/SES%23msg-primary/quarantineResponse`, { status: "active" });
 
       expect(res.status).toBe(200);
-      expect(reprocessSignal).toHaveBeenNthCalledWith(1, TEST_ACCOUNT_ID, "SES#msg-primary", "QUARANTINED", { skipNotify: true, userApproved: true });
-      expect(reprocessSignal).toHaveBeenNthCalledWith(2, TEST_ACCOUNT_ID, "SES#msg-sib-a", "QUARANTINED", { skipNotify: true, userApproved: true });
+      expect(reprocessSignal).toHaveBeenNthCalledWith(1, TEST_ACCOUNT_ID, "SES#msg-primary", { skipNotify: true, userApproved: true });
+      expect(reprocessSignal).toHaveBeenNthCalledWith(2, TEST_ACCOUNT_ID, "SES#msg-sib-a", { skipNotify: true, userApproved: true });
       expect(codes(apiLogger, "warn")).toContain("api.quarantine_response.reprocess_sibling_no_thread");
     });
 
@@ -773,11 +776,11 @@ describe("Quarantine response — handler + real processor", () => {
       vi.mocked(threadDb.getSignalByMessageId).mockImplementation((_a, id) => Promise.resolve(ok(store.get(id) ?? null)));
       classifier.classify.mockResolvedValue(ok({ workflow: "onboarding", workflowData: { workflow: "onboarding", onboardingType: "welcome", service: "acme" }, tags: [], summary: "", labels: [], actions: [] }));
 
-      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, q.id, "QUARANTINED");
+      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, q.signalLookupId);
 
       expect(result.isOk()).toBe(true);
       expect(result._unsafeUnwrap().status).toBe("quarantine_hidden");
-      expect(result._unsafeUnwrap().threadId).toBeUndefined();
+      expect(result._unsafeUnwrap().threadId).toBeNull();
     });
 
     it("logs (does not drop) a source-thread list failure before reprocess", async () => {
@@ -785,7 +788,7 @@ describe("Quarantine response — handler + real processor", () => {
       vi.mocked(threadDb.listSignals).mockResolvedValue(err(new Error("ddb down")) as never);
       vi.mocked(threadDb.getSignalByMessageId).mockResolvedValue(ok({ ...makeQuarantinedSignal(), status: "active", threadId: "arc-001" } as Signal));
 
-      await processor.reprocessSignal(TEST_ACCOUNT_ID, "SES#msg-primary", "arc-001");
+      await processor.reprocessSignal(TEST_ACCOUNT_ID, "SES#msg-primary");
 
       expect(codes(processorLogger, "warn")).toContain("processor.reprocess.pre_list_failed");
     });

@@ -846,7 +846,7 @@ describe("IncomingEmailProcessor", () => {
       expect(threadDb.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_visible");
-      expect(saved.threadId).toBeUndefined();
+      expect(saved.threadId).toBeNull();
     });
 
     it("filter mode quarantine_visible: unknown sender → quarantine_visible", async () => {
@@ -1437,7 +1437,7 @@ describe("IncomingEmailProcessor", () => {
         vi.fn().mockReturnValue(Promise.resolve(ok(storedSignal)));
       vi.mocked(accountDb.getAliasByGlobalAddress).mockReturnValue(Promise.resolve(ok(DEFAULT_EMAIL_CONFIG)));
 
-      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "sgn-reprocess", "thr-test");
+      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "ses-msg-reprocess");
 
       expect(result.isOk()).toBe(true);
       // Re-derivation ran against the recipient address from the stored signal.
@@ -1462,18 +1462,23 @@ describe("IncomingEmailProcessor", () => {
   // -------------------------------------------------------------------------
   describe("reprocess thread recency repair", () => {
     const OLD_THREAD = "thr-old";
-    // Signal returned by getSignalByMessageId after reprocess — reassigned to a new thread.
-    const reassignedSignal = {
-      id: "sgn-reprocess", signalLookupId: "ses-msg-reprocess", accountId: TEST_ACCOUNT_ID, threadId: "thr-new",
+    // Signal as it exists BEFORE reprocess — attached to its source thread. Recency repair keys off
+    // this thread (the one the signal is being moved off of), not the reprocess lookup argument.
+    const sourceSignal = {
+      id: "sgn-reprocess", signalLookupId: "ses-msg-reprocess", accountId: TEST_ACCOUNT_ID, threadId: OLD_THREAD,
       status: "active", source: "email", type: "email", labels: [], createdAt: "2024-01-15T10:00:00Z",
       data: { s3Key: "emails/msg-reprocess", recipientAddress: "user@example.com", receivedAt: "2024-01-15T10:00:00Z" },
     };
+    // Signal returned by getSignalByMessageId after reprocess — reassigned to a new thread.
+    const reassignedSignal = { ...sourceSignal, threadId: "thr-new" };
 
     beforeEach(() => {
-      (threadDb as unknown as { getSignalById: ReturnType<typeof vi.fn> }).getSignalById =
-        vi.fn().mockReturnValue(Promise.resolve(ok(reassignedSignal)));
+      // getSignalByMessageId is called twice: first the entry lookup (signal on its source thread),
+      // then the post-reprocess re-fetch (reassigned to the new thread).
       (threadDb as unknown as { getSignalByMessageId: ReturnType<typeof vi.fn> }).getSignalByMessageId =
-        vi.fn().mockReturnValue(Promise.resolve(ok(reassignedSignal)));
+        vi.fn()
+          .mockReturnValueOnce(Promise.resolve(ok(sourceSignal)))
+          .mockReturnValue(Promise.resolve(ok(reassignedSignal)));
       vi.mocked(accountDb.getAliasByGlobalAddress).mockReturnValue(Promise.resolve(ok(DEFAULT_EMAIL_CONFIG)));
       vi.mocked(threadDb.getThread).mockReturnValue(Promise.resolve(ok({ id: OLD_THREAD, accountId: TEST_ACCOUNT_ID, status: "active", lastSignalAt: "2024-05-01T00:00:00Z" } as never)));
     });
@@ -1485,7 +1490,7 @@ describe("IncomingEmailProcessor", () => {
         { data: { receivedAt: "2024-03-01T00:00:00Z" } },
       ] } as never)));
 
-      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "sgn-reprocess", OLD_THREAD);
+      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "ses-msg-reprocess");
 
       expect(result.isOk()).toBe(true);
       expect(threadDb.updateThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, OLD_THREAD, "active", "2024-04-10T00:00:00Z", {});
@@ -1494,7 +1499,7 @@ describe("IncomingEmailProcessor", () => {
     it("sets the old thread's lastSignalAt to the Unix epoch when no signals remain", async () => {
       vi.mocked(threadDb.listSignals).mockReturnValue(Promise.resolve(ok({ items: [] } as never)));
 
-      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "sgn-reprocess", OLD_THREAD);
+      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "ses-msg-reprocess");
 
       expect(result.isOk()).toBe(true);
       expect(threadDb.updateThread).toHaveBeenCalledWith(TEST_ACCOUNT_ID, OLD_THREAD, "active", "1970-01-01T00:00:00.000Z", {});
@@ -1509,7 +1514,7 @@ describe("IncomingEmailProcessor", () => {
         { data: { receivedAt: "2024-05-01T00:00:00Z" } },
       ] } as never)));
 
-      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "sgn-reprocess", OLD_THREAD);
+      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "ses-msg-reprocess");
 
       expect(result.isOk()).toBe(true);
       expect(threadDb.updateThread).not.toHaveBeenCalled();
