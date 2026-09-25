@@ -17,8 +17,11 @@ import { ListSignalsResponse } from "./schemas.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
 export interface SignalReprocessor {
-  reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
+  reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; userApproved?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
 }
+
+// Upper bound on quarantine-partition pages walked when collecting cascade siblings (100 per page).
+const SIBLING_MAX_PAGES = 20;
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
@@ -123,7 +126,9 @@ export class SignalsApi {
       }
       // Quarantined signals are always inbound received email — narrow so workflow/workflowData
       // (inbound-only classification) are accessible for grouping-key derivation below.
-      if (!isInboundEmailSignalData(signal.data)) {
+      // Check the signal type too, not just the data shape: approval replays through reprocessSignal,
+      // which only accepts email signals — anything else would fail there as an opaque 500.
+      if (!isEmailSignal(signal) || !isInboundEmailSignalData(signal.data)) {
         return err(c, 400, "Only inbound email signals can be reviewed from quarantine", "SIGNAL_NOT_REVIEWABLE");
       }
 
@@ -138,16 +143,29 @@ export class SignalsApi {
       // Enumerate the OTHER quarantine_visible signals this same decision must cascade to: same
       // alias + same sender eTLD+1, inbound email, excluding the primary. The user made one decision
       // about a sender; every visible quarantined message from that sender to that alias inherits it.
-      // One page (limit 100) only — a sender with >100 quarantined messages to one alias is
-      // pathological; the tail resolves on a later action. Best-effort: a failure to enumerate must
-      // not fail the primary decision, so on error we log and cascade to nothing.
+      // The quarantine partition is account-wide (every sender, every alias), so walk every page —
+      // a single page would silently miss older siblings once the account holds >100 quarantined
+      // signals. Capped at SIBLING_MAX_PAGES; hitting the cap is logged, the tail resolves on a
+      // later action. Best-effort: a failure to enumerate must not fail the primary decision, so on
+      // error we log and cascade to whatever was collected so far.
       const collectSiblings = async (): Promise<Signal[]> => {
-        const listResult = await threadDb.listPreThreadSignals(accountId, "quarantined", { limit: 100 });
-        if (listResult.isErr()) {
-          logger.warn("Failed to enumerate sibling quarantined signals — cascading to primary only.", { code: "api.quarantine_response.sibling_list_failed", accountId, signalId, error: listResult.error });
-          return [];
+        const candidates: Signal[] = [];
+        let cursor: string | undefined;
+        for (let pageNo = 0; ; pageNo++) {
+          if (pageNo >= SIBLING_MAX_PAGES) {
+            logger.warn("Sibling quarantined signal enumeration hit the page cap — cascading to the signals collected so far.", { code: "api.quarantine_response.sibling_list_truncated", accountId, signalId, pages: pageNo });
+            break;
+          }
+          const listResult = await threadDb.listPreThreadSignals(accountId, "quarantined", { limit: 100, ...(cursor ? { cursor } : {}) });
+          if (listResult.isErr()) {
+            logger.warn("Failed to enumerate sibling quarantined signals — cascading to the signals collected so far.", { code: "api.quarantine_response.sibling_list_failed", accountId, signalId, error: listResult.error });
+            break;
+          }
+          candidates.push(...listResult.value.items);
+          cursor = listResult.value.nextCursor;
+          if (!cursor) break;
         }
-        return listResult.value.items.filter((s) => {
+        return candidates.filter((s) => {
           if (s.signalLookupId === signal.signalLookupId) return false;
           if (s.status !== "quarantine_visible") return false;
           if (!isInboundEmailSignalData(s.data)) return false;
@@ -224,16 +242,19 @@ export class SignalsApi {
       //    thread match, so siblings collapse onto the thread the primary anchors. skipNotify: the
       //    user is live in-app performing this action and does not want a notification per signal.
       //    The primary drives the HTTP response — its failure is the only one that fails the request.
-      const primaryResult = await signalReprocessor.reprocessSignal(accountId, signal.signalLookupId, { skipNotify: true });
+      //    userApproved: the user's decision overrides any rule/policy that would re-quarantine or
+      //    block the replay (e.g. SR-02 onboarding-with-action, SR-05 security alert).
+      const primaryResult = await signalReprocessor.reprocessSignal(accountId, signal.signalLookupId, { skipNotify: true, userApproved: true });
       if (primaryResult.isErr()) { logger.error("Failed to reprocess primary signal on quarantine approval.", { code: "api.quarantine_response.reprocess_primary_failed", accountId, signalId, error: primaryResult.error }); return err(c, 500, "Internal Server Error"); }
       const activatedSignal = primaryResult.value;
-      if (!activatedSignal.threadId) { logger.error("Primary reprocess produced a signal with no threadId.", { code: "api.quarantine_response.reprocess_no_thread", accountId, signalId, signal: activatedSignal }); return err(c, 500, "Internal Server Error"); }
+      if (!activatedSignal.threadId) { logger.error("Primary reprocess produced a signal with no threadId — the approval did not land it on a thread.", { code: "api.quarantine_response.reprocess_no_thread", accountId, signalId, signal: activatedSignal }); return err(c, 500, "Internal Server Error"); }
 
       // 3. Replay each sibling IN SERIES (never Promise.all): each iteration's Aurora upsert must be
       //    visible to the next iteration's similarity search. Best-effort — a sibling failure is
       //    logged and skipped, never rolls back, never affects the response.
       for (const sibling of await collectSiblings()) {
-        const siblingResult = await signalReprocessor.reprocessSignal(accountId, sibling.signalLookupId, { skipNotify: true });
+        const siblingResult = await signalReprocessor.reprocessSignal(accountId, sibling.signalLookupId, { skipNotify: true, userApproved: true });
+        if (siblingResult.isOk() && !siblingResult.value.threadId) logger.warn("Sibling reprocess on approval did not land the signal on a thread — skipping.", { code: "api.quarantine_response.reprocess_sibling_no_thread", accountId, siblingSignalId: sibling.id, status: siblingResult.value.status });
         if (siblingResult.isErr()) logger.warn("Failed to reprocess sibling quarantined signal on approval — skipping.", { code: "api.quarantine_response.reprocess_sibling_failed", accountId, siblingSignalId: sibling.id, error: siblingResult.error });
       }
 

@@ -199,6 +199,14 @@ export interface ProcessInboundOptions {
    * the notify effect is never enqueued (it does not enter the SQS side-effect payload at all).
    */
   skipNotify?: boolean;
+  /**
+   * The user explicitly approved this signal from quarantine. Their decision is final: any
+   * quarantine/block outcome from rules (e.g. SR-02/SR-03 onboarding, SR-05 security alert, a
+   * user quarantine rule) or from the unknown-sender fallback is overridden so the replay lands
+   * the signal on a thread. Without this, the replay re-derives the same quarantine and the
+   * approval silently leaves the signal where it was (or moves it to blocked).
+   */
+  userApproved?: boolean;
 }
 
 /**
@@ -1619,6 +1627,16 @@ export class IncomingEmailProcessor {
       }
     }
 
+    // Explicit user approval from quarantine overrides every derived quarantine/block outcome.
+    // The explicit per-sender block short-circuit above is NOT overridden — the approval path
+    // writes the sender allow before replaying, so reaching it means a genuine later block.
+    if (opts?.userApproved && (outcome.blockDisposition !== null || outcome.quarantine)) {
+      this.logger.info("User approval overrides derived quarantine/block outcome.", { code: "processor.user_approved_override", accountId, compositeMailMessageId: msg.compositeMailMessageId, overridden: outcome.blockDisposition ?? (outcome.quarantineHidden ? "quarantine_hidden" : "quarantine_visible"), matchedRules: matchedRules.map(r => r.ruleId) });
+      outcome.blockDisposition = null;
+      outcome.quarantine = false;
+      outcome.quarantineHidden = false;
+    }
+
     const buildArgs = { accountId, compositeMailMessageId: msg.compositeMailMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(gsi3pk !== undefined ? { gsi3pk } : {}), ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}) };
 
     // Blocked/quarantined mail is never subject to the account's (possibly infinite) retention —
@@ -2100,7 +2118,7 @@ export class IncomingEmailProcessor {
   // Reprocess — thin wrapper that calls processMessage with force flags
   // ---------------------------------------------------------------------------
 
-  async reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>> {
+  async reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; userApproved?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>> {
     const existingResult = await this.threadDb.getSignalByMessageId(accountId, signalLookupId);
     if (existingResult.isErr()) return err(processorError(existingResult.error));
     const existing = existingResult.value;
@@ -2124,6 +2142,9 @@ export class IncomingEmailProcessor {
     // future vector matches to an empty thread) and set a 5-year TTL if absent.
     if (sourceThreadId != null) {
       const otherSignalsResult = await this.threadDb.listSignals(accountId, sourceThreadId, { limit: 2 });
+      if (otherSignalsResult.isErr()) {
+        this.logger.warn("Failed to list source-thread signals before reprocess — skipping emptied-thread cleanup.", { code: "processor.reprocess.pre_list_failed", accountId, threadId: sourceThreadId, signalId: existing.id, error: otherSignalsResult.error });
+      }
       if (otherSignalsResult.isOk()) {
         const otherSignals = otherSignalsResult.value.items.filter(s => s.id !== existing.id);
         if (otherSignals.length === 0) {
@@ -2157,7 +2178,7 @@ export class IncomingEmailProcessor {
       dmarcVerdict: "PASS",
     };
 
-    const result = await this.processInbound(msg, 1, { force: true, unsafeSkipDmarc: true, forceSignalId: existing.id, ...(opts?.skipNotify ? { skipNotify: true } : {}) });
+    const result = await this.processInbound(msg, 1, { force: true, unsafeSkipDmarc: true, forceSignalId: existing.id, ...(opts?.skipNotify ? { skipNotify: true } : {}), ...(opts?.userApproved ? { userApproved: true } : {}) });
     if (result.isErr()) {
       // Best-effort recency repair even on failure — a previous 504 may have saved the thread
       // with updated lastSignalAt while the signal save never completed.

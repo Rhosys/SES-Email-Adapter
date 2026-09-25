@@ -41,7 +41,7 @@ import {
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
 export interface SignalReprocessor {
-  reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
+  reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; userApproved?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
 }
 
 export interface ListThreadsParams extends PageParams {

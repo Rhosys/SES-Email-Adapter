@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { ok } from "neverthrow";
+import { ok, err } from "neverthrow";
 import type { Thread, Signal, Alias, InboundEmailSignalData } from "../../src/types/index.js";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
@@ -7,6 +7,7 @@ import type { AuthService, AccessService } from "../../src/api/app.js";
 import type { ThreadDatabase } from "../../src/database/thread-database.js";
 import type { AccountDatabase } from "../../src/database/account-database.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
+import type { MockLogger } from "../helpers/mock-logger.js";
 import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
@@ -147,6 +148,10 @@ function makeParsedMime(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function codes(logger: MockLogger, method?: string): unknown[] {
+  return logger.calls.filter(c => !method || c.method === method).map(c => c.context?.code);
+}
+
 async function req(app: ReturnType<typeof createApp>, method: string, path: string, body?: unknown): Promise<Response> {
   return app.fetch(new Request(`http://localhost${path}`, {
     method, headers: { "Content-Type": "application/json", Authorization: "Bearer valid" },
@@ -168,12 +173,16 @@ describe("Quarantine response — handler + real processor", () => {
   let contentStore: { getContent: ReturnType<typeof vi.fn>; saveRawEmail: ReturnType<typeof vi.fn>; saveIcsContentAsCalendar: ReturnType<typeof vi.fn>; createReadUrl: ReturnType<typeof vi.fn>; createContentUploadTicket: ReturnType<typeof vi.fn>; getRawEmailUrl: ReturnType<typeof vi.fn> };
   let processor: IncomingEmailProcessor;
   let app: ReturnType<typeof createApp>;
+  let apiLogger: MockLogger;
+  let processorLogger: MockLogger;
 
   beforeEach(() => {
     vi.clearAllMocks();
     threadDb = makeThreadDb();
     accountDb = makeAccountDb();
     processingDb = makeProcessingDbMock();
+    apiLogger = createMockLogger();
+    processorLogger = createMockLogger();
 
     contentSanitizer = { invoke: vi.fn().mockResolvedValue(ok({ success: true as const, parsed: makeParsedMime(), urlMapping: {} })) };
     classifier = { classify: vi.fn().mockResolvedValue(ok({ ...CLASSIFICATION })) };
@@ -203,7 +212,7 @@ describe("Quarantine response — handler + real processor", () => {
       auroraWriter: auroraWriter as never,
       threadMatcher: threadMatcher as never,
       ruleEvaluator: new JsonLogicRuleEvaluator(createMockLogger(), { invoke: vi.fn(), validateAst: vi.fn(), validateAstBatch: vi.fn() } as never, { annotateRuleError: vi.fn().mockResolvedValue(ok(undefined)) } as never),
-      logger: createMockLogger(),
+      logger: processorLogger,
       notifier: notifier as never,
       forwardingService: { forward: vi.fn().mockResolvedValue(ok(undefined)), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) } as never,
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } as never,
@@ -225,7 +234,7 @@ describe("Quarantine response — handler + real processor", () => {
       accountDb: accountDb as unknown as AccountDatabase,
       auth: makeAuth(),
       access: makeAccess(),
-      logger: createMockLogger(),
+      logger: apiLogger,
       signalReprocessor: processor,
       contentCdnBaseUrl: "https://cdn.test",
     }));
@@ -403,6 +412,385 @@ describe("Quarantine response — handler + real processor", () => {
       expect(accountDb.saveSender).not.toHaveBeenCalled();
       const dismissed = threadDb.saveSignal.mock.calls.map(c => c[0] as Signal).filter(s => s.status === "block_hidden");
       expect(dismissed.length).toBe(2);
+    });
+  });
+
+  // ── EDGE CASES — stateful store so assertions see what the REAL processor wrote ──
+
+  describe("edge cases", () => {
+    // A tiny in-memory signal/thread store behind the vi.fn() doubles. Unlike wireReprocessReads,
+    // getSignalByMessageId returns whatever the processor actually saved, so a replay that
+    // re-quarantines or blocks the signal is visible to the handler exactly as in production.
+    function wireStore(signals: Signal[]) {
+      const store = new Map<string, Signal>(signals.map(sg => [sg.signalLookupId, sg]));
+      const threads = new Map<string, Thread>();
+      const isQuarantine = (sg: Signal) => sg.status === "quarantine_visible" || sg.status === "quarantine_hidden";
+      vi.mocked(threadDb.getSignalById).mockImplementation((_a, id, partition) => {
+        const found = [...store.values()].find(sg => sg.id === id && (
+          partition === "QUARANTINED" ? !sg.threadId && isQuarantine(sg)
+            : partition === "BLOCKED" ? !sg.threadId && !isQuarantine(sg)
+              : sg.threadId === partition));
+        return Promise.resolve(ok(found ?? null));
+      });
+      vi.mocked(threadDb.saveSignal).mockImplementation((sg: Signal) => { store.set(sg.signalLookupId, sg); return Promise.resolve(ok(undefined)); });
+      vi.mocked(threadDb.getSignalByMessageId).mockImplementation((_a, lookupId) => Promise.resolve(ok(store.get(lookupId) ?? null)));
+      vi.mocked(threadDb.listPreThreadSignals).mockImplementation(() => Promise.resolve(ok({ items: [...store.values()].filter(sg => !sg.threadId && isQuarantine(sg)) })));
+      vi.mocked(threadDb.saveThread).mockImplementation((t: Thread) => { threads.set(t.id, t); return Promise.resolve(ok(undefined)); });
+      vi.mocked(threadDb.getThread).mockImplementation((_a, id) => Promise.resolve(ok(threads.get(id) ?? null)));
+      return { store, threads };
+    }
+
+    const post = (status: string, id = "SES%23msg-primary") => req(app, "POST", `${A}/signals/${id}/quarantineResponse`, { status });
+
+    // ── approve: the replay must honor the user's decision over rules / policy ──
+
+    const overrideCases: Array<{ name: string; classification: ClassificationOutput; extraRules?: unknown[] }> = [
+      {
+        name: "SR-02 onboarding-with-action (quarantine_visible)",
+        classification: { workflow: "onboarding", workflowData: { workflow: "onboarding", onboardingType: "verification", service: "acme" }, tags: [], summary: "Verify", labels: [], actions: [{ url: "https://acme.com/verify", text: "Verify" }] } as unknown as ClassificationOutput,
+      },
+      {
+        name: "SR-03 onboarding (quarantine_hidden)",
+        classification: { workflow: "onboarding", workflowData: { workflow: "onboarding", onboardingType: "welcome", service: "acme" }, tags: [], summary: "Welcome", labels: [], actions: [] } as unknown as ClassificationOutput,
+      },
+      {
+        name: "SR-05 security alert (quarantine_hidden)",
+        classification: { workflow: "auth", workflowData: { workflow: "auth", authType: "security_alert", service: "acme" }, tags: [], summary: "Alert", labels: [], actions: [] } as ClassificationOutput,
+      },
+      {
+        name: "SR-04 notice (block_hidden) after a reclassification",
+        classification: { workflow: "notice", workflowData: { workflow: "notice", noticeType: "other", provider: "acme" }, tags: [], summary: "Notice", labels: [], actions: [] } as unknown as ClassificationOutput,
+      },
+      {
+        name: "a user quarantine rule",
+        classification: CLASSIFICATION,
+        extraRules: [{ id: "user-q", accountId: TEST_ACCOUNT_ID, name: "Quarantine everything", condition: JSON.stringify(true), actions: [{ type: "quarantine_visible" }], status: "enabled", priorityOrder: 5000, createdAt: "", updatedAt: "" }],
+      },
+    ];
+
+    it.each(overrideCases)("approve → lands on a thread despite $name", async ({ classification, extraRules }) => {
+      const { store, threads } = wireStore([makeQuarantinedSignal()]);
+      classifier.classify.mockResolvedValue(ok(classification));
+      if (extraRules) accountDb.listEnabledRules.mockResolvedValue(ok([...SYSTEM_RULES, ...extraRules]));
+
+      const res = await post("active");
+
+      expect(res.status).toBe(200);
+      const saved = store.get("SES#msg-primary")!;
+      expect(saved.threadId).toBeTruthy();
+      expect(threads.has(saved.threadId!)).toBe(true);
+      const body = await res.json() as { thread: { threadId: string }; signal: { signalId: string; status: string } };
+      expect(body.thread.threadId).toBe(saved.threadId);
+      expect(body.signal.signalId).toBe("SES#msg-primary");
+      expect(codes(processorLogger)).toContain("processor.user_approved_override");
+    });
+
+    it("approve → lands on a thread even when the sender allow is not yet readable (stale getSender)", async () => {
+      const { store } = wireStore([makeQuarantinedSignal()]);
+      // Default getSender mock returns null: the replay sees an unknown sender under a quarantine policy.
+      const res = await post("active");
+      expect(res.status).toBe(200);
+      expect(store.get("SES#msg-primary")!.threadId).toBeTruthy();
+    });
+
+    it("approve → the signal id survives the replay (reprocess in place, no duplicate id)", async () => {
+      const { store } = wireStore([makeQuarantinedSignal({ id: "SES#msg-primary" })]);
+      await post("active");
+      expect(store.size).toBe(1);
+      expect(store.get("SES#msg-primary")!.id).toBe("SES#msg-primary");
+    });
+
+    it("approve → a quarantine_hidden primary can be approved", async () => {
+      const { store } = wireStore([makeQuarantinedSignal({ status: "quarantine_hidden" })]);
+      const res = await post("active");
+      expect(res.status).toBe(200);
+      expect(store.get("SES#msg-primary")!.threadId).toBeTruthy();
+    });
+
+    it("approve → never touches the QUARANTINED pseudo-thread (no embedding delete, TTL write, list or recency repair)", async () => {
+      wireStore([makeQuarantinedSignal()]);
+      await post("active");
+      expect(threadMatcher.deleteEmbeddingsForThread).not.toHaveBeenCalled();
+      expect(threadDb.setThreadTtlFallback).not.toHaveBeenCalled();
+      expect(threadDb.listSignals.mock.calls.some(c => c[1] === "QUARANTINED")).toBe(false);
+      expect(threadDb.getThread.mock.calls.some(c => c[1] === "QUARANTINED")).toBe(false);
+    });
+
+    it("approve → a quarantined signal found only via the BLOCKED lookup is still approved onto a thread", async () => {
+      const blocked = makeQuarantinedSignal();
+      const { store } = wireStore([blocked]);
+      vi.mocked(threadDb.getSignalById).mockImplementation((_a, id, partition) =>
+        Promise.resolve(ok(partition === "BLOCKED" && id === blocked.id ? blocked : null)));
+
+      const res = await post("active");
+
+      expect(res.status).toBe(200);
+      expect(threadDb.getSignalById.mock.calls.map(c => c[2])).toEqual(["QUARANTINED", "BLOCKED"]);
+      expect(store.get(blocked.signalLookupId)!.threadId).toBeTruthy();
+    });
+
+    it("approve → 500 and no replay when saving the sender approval fails", async () => {
+      wireStore([makeQuarantinedSignal()]);
+      accountDb.saveSender.mockResolvedValueOnce(err(new Error("ddb down")) as never);
+      const res = await post("active");
+      expect(res.status).toBe(500);
+      expect(contentSanitizer.invoke).not.toHaveBeenCalled();
+      expect(codes(apiLogger, "error")).toContain("api.quarantine_response.save_sender_failed");
+    });
+
+    it("approve → 500 when the primary replay fails, and siblings are not touched", async () => {
+      wireStore([makeQuarantinedSignal({ id: "SES#msg-primary" }), makeQuarantinedSignal({ id: "SES#msg-sib-a" })]);
+      contentSanitizer.invoke.mockResolvedValue(err({ kind: "invalid_response", message: "sanitizer down" }) as never);
+      const res = await post("active");
+      expect(res.status).toBe(500);
+      expect(contentSanitizer.invoke).toHaveBeenCalledTimes(1);
+      expect(threadDb.listPreThreadSignals).not.toHaveBeenCalled();
+      expect(codes(apiLogger, "error")).toContain("api.quarantine_response.reprocess_primary_failed");
+    });
+
+    it("approve → 500 when the primary's stored record has no s3Key", async () => {
+      wireStore([makeQuarantinedSignal({ data: { s3Key: "" } })]);
+      const res = await post("active");
+      expect(res.status).toBe(500);
+      expect(codes(apiLogger, "error")).toContain("api.quarantine_response.reprocess_primary_failed");
+    });
+
+    it("approve → 500 when the landed thread cannot be loaded (error or missing)", async () => {
+      wireStore([makeQuarantinedSignal()]);
+      vi.mocked(threadDb.getThread).mockResolvedValue(err(new Error("ddb down")) as never);
+      expect((await post("active")).status).toBe(500);
+
+      wireStore([makeQuarantinedSignal()]);
+      vi.mocked(threadDb.getThread).mockResolvedValue(ok(null));
+      expect((await post("active")).status).toBe(500);
+      expect(codes(apiLogger, "error").filter(c => c === "api.quarantine_response.get_thread_failed").length).toBe(2);
+    });
+
+    it("approve → 500 (not a silent success) when the reprocessor returns a signal with no thread", async () => {
+      const stubApp = createApp(makeAppDeps({
+        threadDb: threadDb as unknown as ThreadDatabase, accountDb: accountDb as unknown as AccountDatabase,
+        auth: makeAuth(), access: makeAccess(), logger: apiLogger, contentCdnBaseUrl: "https://cdn.test",
+        signalReprocessor: { reprocessSignal: vi.fn().mockResolvedValue(ok(makeQuarantinedSignal())) },
+      }));
+      vi.mocked(threadDb.getSignalById).mockResolvedValue(ok(makeQuarantinedSignal()));
+      const res = await req(stubApp, "POST", `${A}/signals/SES%23msg-primary/quarantineResponse`, { status: "active" });
+      expect(res.status).toBe(500);
+      expect(codes(apiLogger, "error")).toContain("api.quarantine_response.reprocess_no_thread");
+    });
+
+    // ── approve: sibling enumeration ──
+
+    it("approve → a sibling list failure still approves the primary and is logged", async () => {
+      const { store } = wireStore([makeQuarantinedSignal({ id: "SES#msg-primary" }), makeQuarantinedSignal({ id: "SES#msg-sib-a" })]);
+      vi.mocked(threadDb.listPreThreadSignals).mockResolvedValue(err(new Error("ddb down")) as never);
+      const res = await post("active");
+      expect(res.status).toBe(200);
+      expect(store.get("SES#msg-primary")!.threadId).toBeTruthy();
+      expect(store.get("SES#msg-sib-a")!.threadId).toBeFalsy();
+      expect(codes(apiLogger, "warn")).toContain("api.quarantine_response.sibling_list_failed");
+    });
+
+    it("approve → walks every page of the quarantine partition, not just the first", async () => {
+      const primary = makeQuarantinedSignal({ id: "SES#msg-primary" });
+      const other = makeQuarantinedSignal({ id: "SES#msg-other", data: { from: { address: "x@other.net" } } });
+      const oldSibling = makeQuarantinedSignal({ id: "SES#msg-old-sib" });
+      const { store } = wireStore([primary, other, oldSibling]);
+      vi.mocked(threadDb.listPreThreadSignals)
+        .mockResolvedValueOnce(ok({ items: [other], nextCursor: "page-2" }))
+        .mockResolvedValueOnce(ok({ items: [oldSibling] }));
+
+      const res = await post("active");
+
+      expect(res.status).toBe(200);
+      expect(threadDb.listPreThreadSignals.mock.calls[1]![2]).toMatchObject({ cursor: "page-2" });
+      expect(store.get("SES#msg-old-sib")!.threadId).toBeTruthy();
+      expect(store.get("SES#msg-other")!.threadId).toBeFalsy();
+    });
+
+    it("approve → stops at the page cap and logs the truncation", async () => {
+      wireStore([makeQuarantinedSignal()]);
+      vi.mocked(threadDb.listPreThreadSignals).mockResolvedValue(ok({ items: [], nextCursor: "more" }));
+      const res = await post("active");
+      expect(res.status).toBe(200);
+      expect(threadDb.listPreThreadSignals).toHaveBeenCalledTimes(20);
+      expect(codes(apiLogger, "warn")).toContain("api.quarantine_response.sibling_list_truncated");
+    });
+
+    it("approve → a sender subdomain shares the eTLD+1 and is cascaded", async () => {
+      const { store } = wireStore([makeQuarantinedSignal({ id: "SES#msg-primary" }), makeQuarantinedSignal({ id: "SES#msg-sub", data: { from: { address: "noreply@mail.acme.com" } } })]);
+      await post("active");
+      expect(store.get("SES#msg-sub")!.threadId).toBeTruthy();
+    });
+
+    it("approve → the primary is replayed exactly once even though it is listed in its own partition", async () => {
+      wireStore([makeQuarantinedSignal({ id: "SES#msg-primary" })]);
+      vi.mocked(threadDb.listPreThreadSignals).mockResolvedValue(ok({ items: [makeQuarantinedSignal({ id: "SES#msg-primary" })] }));
+      await post("active");
+      expect(contentSanitizer.invoke).toHaveBeenCalledTimes(1);
+    });
+
+    it("approve → a sibling replay that lands nowhere is logged, not swallowed", async () => {
+      const reprocessSignal = vi.fn()
+        .mockResolvedValueOnce(ok({ ...makeQuarantinedSignal(), status: "active", threadId: "arc-001" }))
+        .mockResolvedValueOnce(ok(makeQuarantinedSignal({ id: "SES#msg-sib-a" })));
+      const stubApp = createApp(makeAppDeps({
+        threadDb: threadDb as unknown as ThreadDatabase, accountDb: accountDb as unknown as AccountDatabase,
+        auth: makeAuth(), access: makeAccess(), logger: apiLogger, contentCdnBaseUrl: "https://cdn.test",
+        signalReprocessor: { reprocessSignal },
+      }));
+      vi.mocked(threadDb.getSignalById).mockResolvedValue(ok(makeQuarantinedSignal()));
+      vi.mocked(threadDb.listPreThreadSignals).mockResolvedValue(ok({ items: [makeQuarantinedSignal({ id: "SES#msg-sib-a" })] }));
+      vi.mocked(threadDb.getThread).mockResolvedValue(ok(makeThread()));
+
+      const res = await req(stubApp, "POST", `${A}/signals/SES%23msg-primary/quarantineResponse`, { status: "active" });
+
+      expect(res.status).toBe(200);
+      expect(reprocessSignal).toHaveBeenNthCalledWith(1, TEST_ACCOUNT_ID, "SES#msg-primary", { skipNotify: true, userApproved: true });
+      expect(reprocessSignal).toHaveBeenNthCalledWith(2, TEST_ACCOUNT_ID, "SES#msg-sib-a", { skipNotify: true, userApproved: true });
+      expect(codes(apiLogger, "warn")).toContain("api.quarantine_response.reprocess_sibling_no_thread");
+    });
+
+    // ── reject / block ──
+
+    it.each(["block_hidden", "block_reject", "report_violation"] as const)("%s → blocks the primary and records that disposition", async (status) => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeQuarantinedSignal()));
+      const res = await post(status);
+      expect(res.status).toBe(200);
+      expect(threadDb.updateSignalStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "SES#msg-primary", status);
+      expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, ALIAS, SENDER_ETLD1, status);
+    });
+
+    it("reject → 500 and no sender disposition when blocking the primary fails", async () => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeQuarantinedSignal()));
+      vi.mocked(threadDb.updateSignalStatus).mockResolvedValueOnce(err(new Error("ddb down")) as never);
+      const res = await post("block_reject");
+      expect(res.status).toBe(500);
+      expect(accountDb.saveSender).not.toHaveBeenCalled();
+      expect(codes(apiLogger, "error")).toContain("api.quarantine_response.block_failed");
+    });
+
+    it("reject → 500 and no sibling cascade when saving the sender disposition fails", async () => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeQuarantinedSignal()));
+      accountDb.saveSender.mockResolvedValueOnce(err(new Error("ddb down")) as never);
+      const res = await post("block_reject");
+      expect(res.status).toBe(500);
+      expect(threadDb.listPreThreadSignals).not.toHaveBeenCalled();
+    });
+
+    it("reject → a sibling block failure is logged and the cascade continues", async () => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeQuarantinedSignal()));
+      vi.mocked(threadDb.listPreThreadSignals).mockResolvedValue(ok({ items: [makeQuarantinedSignal({ id: "SES#msg-sib-a" }), makeQuarantinedSignal({ id: "SES#msg-sib-b" })] }));
+      vi.mocked(threadDb.updateSignalStatus)
+        .mockImplementationOnce((_a, id, st) => Promise.resolve(ok({ id, status: st } as never)))
+        .mockResolvedValueOnce(err(new Error("ddb down")) as never);
+      const res = await post("block_reject");
+      expect(res.status).toBe(200);
+      expect(threadDb.updateSignalStatus.mock.calls.map(c => c[1])).toEqual(["SES#msg-primary", "SES#msg-sib-a", "SES#msg-sib-b"]);
+      expect(codes(apiLogger, "warn")).toContain("api.quarantine_response.sibling_block_failed");
+    });
+
+    // ── dismiss ──
+
+    it("dismiss → 500 when saving the primary fails, and no sibling is dismissed", async () => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeQuarantinedSignal()));
+      vi.mocked(threadDb.saveSignal).mockResolvedValueOnce(err(new Error("ddb down")) as never);
+      const res = await post("dismiss");
+      expect(res.status).toBe(500);
+      expect(threadDb.listPreThreadSignals).not.toHaveBeenCalled();
+    });
+
+    it("dismiss → a sibling save failure is logged and the cascade continues", async () => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeQuarantinedSignal()));
+      vi.mocked(threadDb.listPreThreadSignals).mockResolvedValue(ok({ items: [makeQuarantinedSignal({ id: "SES#msg-sib-a" }), makeQuarantinedSignal({ id: "SES#msg-sib-b" })] }));
+      vi.mocked(threadDb.saveSignal)
+        .mockResolvedValueOnce(ok(undefined) as never)
+        .mockResolvedValueOnce(err(new Error("ddb down")) as never)
+        .mockResolvedValueOnce(ok(undefined) as never);
+      const res = await post("dismiss");
+      expect(res.status).toBe(200);
+      expect(threadDb.saveSignal).toHaveBeenCalledTimes(3);
+      expect(codes(apiLogger, "warn")).toContain("api.quarantine_response.sibling_dismiss_failed");
+    });
+
+    it("dismiss → folds the original SR-00 reason into the dismiss trace; without one, uses the plain text", async () => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeQuarantinedSignal()));
+      const body = await (await post("dismiss")).json() as Signal;
+      expect(body.status).toBe("block_hidden");
+      expect(body.data.matchedRules!.at(-1)!.text).toBe(`Sender ${SENDER_ETLD1} is not in approved senders — dismissed by user from quarantine`);
+
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeQuarantinedSignal({ data: { matchedRules: [] } })));
+      const bare = await (await post("dismiss")).json() as Signal;
+      expect(bare.data.matchedRules!.at(-1)!.text).toBe("Dismissed by user from quarantine");
+    });
+
+    // ── request validation / lookup ──
+
+    it("500 when the QUARANTINED lookup errors; 500 when the BLOCKED fallback lookup errors", async () => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(err(new Error("ddb down")) as never);
+      expect((await post("active")).status).toBe(500);
+
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(null)).mockResolvedValueOnce(err(new Error("ddb down")) as never);
+      expect((await post("active")).status).toBe(500);
+      expect(codes(apiLogger, "error").filter(c => c === "api.quarantine_response.get_signal_failed").length).toBe(2);
+    });
+
+    it.each(["active", "block_hidden", "block_reject", "dismiss"] as const)("400 when a %s decision targets a non-quarantined signal", async (status) => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(null)).mockResolvedValueOnce(ok(makeQuarantinedSignal({ status: "block_hidden" })));
+      const res = await post(status);
+      expect(res.status).toBe(400);
+      expect(accountDb.saveSender).not.toHaveBeenCalled();
+    });
+
+    it("400 when the quarantined signal is not an email signal", async () => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok({ ...makeQuarantinedSignal(), type: "calendar_event" } as unknown as Signal));
+      const res = await post("active");
+      expect(res.status).toBe(400);
+      expect(accountDb.saveSender).not.toHaveBeenCalled();
+    });
+
+    it("400 when the quarantined email signal carries outbound (non-inbound) data", async () => {
+      const q = makeQuarantinedSignal();
+      const { workflow: _w, ...outboundData } = q.data as InboundEmailSignalData;
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok({ ...q, data: outboundData } as unknown as Signal));
+      const res = await post("active");
+      expect(res.status).toBe(400);
+    });
+
+    it("400 for an unknown decision status, with no writes", async () => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeQuarantinedSignal()));
+      const res = await post("approve_everything");
+      expect(res.status).toBe(400);
+      expect(accountDb.saveSender).not.toHaveBeenCalled();
+      expect(threadDb.saveSignal).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Processor reprocess — userApproved is scoped to the approval path ──
+
+  describe("reprocessSignal without userApproved", () => {
+    it("still honors a quarantine rule (the override is opt-in)", async () => {
+      const q = makeQuarantinedSignal();
+      const store = new Map<string, Signal>([[q.signalLookupId, q]]);
+      vi.mocked(threadDb.getSignalById).mockResolvedValue(ok(q));
+      vi.mocked(threadDb.saveSignal).mockImplementation((sg: Signal) => { store.set(sg.signalLookupId, sg); return Promise.resolve(ok(undefined)); });
+      vi.mocked(threadDb.getSignalByMessageId).mockImplementation((_a, id) => Promise.resolve(ok(store.get(id) ?? null)));
+      classifier.classify.mockResolvedValue(ok({ workflow: "onboarding", workflowData: { workflow: "onboarding", onboardingType: "welcome", service: "acme" }, tags: [], summary: "", labels: [], actions: [] }));
+
+      const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, q.signalLookupId);
+
+      expect(result.isOk()).toBe(true);
+      expect(result._unsafeUnwrap().status).toBe("quarantine_hidden");
+      expect(result._unsafeUnwrap().threadId).toBeNull();
+    });
+
+    it("logs (does not drop) a source-thread list failure before reprocess", async () => {
+      vi.mocked(threadDb.getSignalById).mockResolvedValue(ok({ ...makeQuarantinedSignal(), status: "active", threadId: "arc-001" } as Signal));
+      vi.mocked(threadDb.listSignals).mockResolvedValue(err(new Error("ddb down")) as never);
+      vi.mocked(threadDb.getSignalByMessageId).mockResolvedValue(ok({ ...makeQuarantinedSignal(), status: "active", threadId: "arc-001" } as Signal));
+
+      await processor.reprocessSignal(TEST_ACCOUNT_ID, "SES#msg-primary");
+
+      expect(codes(processorLogger, "warn")).toContain("processor.reprocess.pre_list_failed");
     });
   });
 });
