@@ -176,8 +176,7 @@ export class ThreadDatabase {
           this.logger.error("DEVELOPER REVIEW REQUIRED: multiple signal records share one Message-ID but resolve to DIFFERENT threads — the oldest by createdAt was chosen, but this indicates a data integrity bug that must be investigated.", context);
         }
       }
-      const item = hydrateThreadObject(ordered[0] as { threadId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string });
-      return ok(item as { threadId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string });
+      return ok(ordered[0] as ThreadedSignalRef);
     } catch (e) {
       return err(dbError(e));
     }
@@ -418,6 +417,11 @@ export class ThreadDatabase {
    * Gives a thread a bounded sweep TTL when it has none — used when a thread is emptied by reprocess
    * so an infinite-retention orphan doesn't linger forever. if_not_exists keeps any existing
    * retention-derived ttl untouched, so the caller never reads the DB-internal ttl to decide.
+   *
+   * The attribute_exists(pk) guard is load-bearing: without it a bare UpdateItem VIVIFIES a partial
+   * thread item (pk/sk/ttl, no status), which a later getThread reads back with an undefined status —
+   * exactly the state that made updateThread emit an UpdateExpression referencing an undefined :status.
+   * A vanished thread needs no TTL, so the conditional miss is a benign no-op.
    */
   async setThreadTtlFallback(accountId: string, threadId: string, fallbackTtl: number): Promise<Result<void, DbError>> {
     try {
