@@ -35,6 +35,12 @@ export interface UpdateThreadFields {
   followupAt?: string;
 }
 
+/**
+ * Narrow projection returned by findSignalByEmailMessageId — a Message-ID lookup resolves to the
+ * thread a reply belongs on, so callers only need the signal's threading identity, not its body.
+ */
+export type ThreadedSignalRef = Pick<Signal, "id" | "signalLookupId" | "threadId" | "accountId" | "status" | "source" | "type">;
+
 // ---------------------------------------------------------------------------
 // Stale pending_send coercion — read-time only, DynamoDB record is NOT mutated
 // ---------------------------------------------------------------------------
@@ -59,15 +65,12 @@ function resolveThreadId(record: Record<string, unknown>): string | undefined {
   return record.threadId as string | undefined;
 }
 
-function hydrateThreadObject<T>(record: T): T {
+function hydrateThreadObject(record: Omit<Thread, "threadId"> & { threadId?: string }): Thread {
   const r = record as Record<string, unknown>;
   const threadId = resolveThreadId(r);
-  if (threadId === undefined) return record;
   // Migrate legacy senderAddress → sender object at read time
-  if (!r.sender && r.senderAddress) {
-    r.sender = { address: r.senderAddress as string };
-  }
-  return { ...record, threadId, ...(r.sender ? { sender: r.sender } : {}) };
+  const sender = (r.sender as Thread["sender"] | undefined) ?? (r.senderAddress ? { address: r.senderAddress as string } : undefined);
+  return { ...record, threadId, ...(sender ? { sender } : {}) } as Thread;
 }
 
 // Threads with a stale/placeholder lastSignalAt (e.g. never-updated legacy records) don't
@@ -81,11 +84,9 @@ function hasRecentSignal(thread: Thread): boolean {
 // hydrateSignal — defaults fields that may be absent on legacy DDB items
 // ---------------------------------------------------------------------------
 
-function hydrateSignal<T>(item: T): T {
-  const hydrated = hydrateThreadObject(item);
-  const record = hydrated as Record<string, unknown>;
-  if (!record["labels"]) { return { ...hydrated, labels: [] }; }
-  return hydrated;
+function hydrateSignal<T extends { labels?: unknown }>(item: T): T {
+  if (!item.labels) { return { ...item, labels: [] }; }
+  return item;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +139,7 @@ export class ThreadDatabase {
     }
   }
 
-  async findSignalByEmailMessageId(gsi3pk: string): Promise<Result<{ threadId?: string; id: string; signalLookupId: string; accountId: string; status: string; source: string; type: string } | null, DbError>> {
+  async findSignalByEmailMessageId(gsi3pk: string): Promise<Result<ThreadedSignalRef | null, DbError>> {
     try {
       const res = await dynamo.send(new QueryCommand({
         TableName: SIGNALS_TABLE,
@@ -429,11 +430,13 @@ export class ThreadDatabase {
         TableName: SIGNALS_TABLE,
         Key: { pk: threadPk(accountId, threadId), sk: ITEM_SK },
         UpdateExpression: "SET #ttl = if_not_exists(#ttl, :fallback)",
+        ConditionExpression: "attribute_exists(pk)",
         ExpressionAttributeNames: { "#ttl": "ttl" },
         ExpressionAttributeValues: { ":fallback": fallbackTtl },
       }));
       return ok(undefined);
     } catch (e) {
+      if (e instanceof Error && e.name === "ConditionalCheckFailedException") return ok(undefined);
       return err(dbError(e));
     }
   }
