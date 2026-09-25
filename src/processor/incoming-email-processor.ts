@@ -53,6 +53,8 @@ import type { SchedulerClient } from "../scheduler/scheduler-client.js";
 import { RSVP_REMINDER_HOURS_BEFORE } from "../scheduler/rsvp-reminder.js";
 import { extractMsgId, buildSignalGsi3pk, extractFirstInReplyTo } from "./message-id.js";
 
+const EPOCH = new Date(0).toISOString(); // 1970-01-01T00:00:00.000Z
+
 // ---------------------------------------------------------------------------
 // Message types
 // ---------------------------------------------------------------------------
@@ -1647,10 +1649,7 @@ export class IncomingEmailProcessor {
     if (outcome.quarantine && !outcome.approveSender) {
       const quarantineStatus = outcome.quarantineHidden ? "quarantine_hidden" : "quarantine_visible";
       const quarantineBase = buildSignal({ status: quarantineStatus, ...buildArgs, ...spamRetentionArgs }, this.logger);
-      // Persist the thread the matcher resolved so approving this quarantined signal reattaches
-      // to it instead of creating a duplicate. Only record an existing thread — a fresh shell is
-      // not persisted here, so the approval path creates the thread itself when there is no match.
-      const quarantinedSignal: Signal = { ...quarantineBase, data: { ...quarantineBase.data, matchedRules, ...(isMatchedThread ? { matchedThreadId: thread.id } : {}) } };
+      const quarantinedSignal: Signal = { ...quarantineBase, data: { ...quarantineBase.data, matchedRules } };
       const saveResult = await this.threadDb.saveSignal(quarantinedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.info("Quarantined email — rule or sender filter matched.", { code: "processor.quarantine", accountId, threadId: thread.id, signalId: quarantinedSignal.id, status: quarantineStatus, matchedRules: matchedRules.map(r => r.ruleId) });
@@ -2174,7 +2173,6 @@ export class IncomingEmailProcessor {
 
   /** Recompute a thread's lastSignalAt from its remaining signals (epoch if it has none left). */
   private async repairThreadRecency(accountId: string, threadId: string): Promise<void> {
-    const EPOCH = new Date(0).toISOString(); // 1970-01-01T00:00:00.000Z
     const threadResult = await this.threadDb.getThread(accountId, threadId);
     if (threadResult.isErr() || !threadResult.value) {
       if (threadResult.isErr()) this.logger.warn("Could not load thread to repair recency after reprocess.", { code: "processor.reprocess.recency_thread_lookup_failed", accountId, threadId, error: threadResult.error });

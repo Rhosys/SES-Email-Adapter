@@ -494,12 +494,6 @@ interface EmailSignalDataBase {
   tags: string[];
   s3Key: string;
   matchedRules?: MatchedRuleResult[];
-  // Thread the processor resolved (via full grouping-key / in-reply-to / similarity matching)
-  // at receive time. Recorded on quarantined signals — whose thread association is otherwise
-  // not persisted — so that approving one reattaches to that thread instead of spawning a
-  // duplicate. Not stored in the signal's `threadId` field because a set threadId would move
-  // the signal out of the QUARANTINED partition and hide it from the quarantine list.
-  matchedThreadId?: string;
   // Unsubscribe info derived from List-Unsubscribe / List-Unsubscribe-Post headers
   unsubscribe?: UnsubscribeInfo;
 }
