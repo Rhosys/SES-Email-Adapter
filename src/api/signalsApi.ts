@@ -17,7 +17,7 @@ import { ListSignalsResponse } from "./schemas.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
 export interface SignalReprocessor {
-  reprocessSignal(accountId: string, signalId: string, threadId: string, opts?: { skipNotify?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
+  reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
 }
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
@@ -224,16 +224,16 @@ export class SignalsApi {
       //    thread match, so siblings collapse onto the thread the primary anchors. skipNotify: the
       //    user is live in-app performing this action and does not want a notification per signal.
       //    The primary drives the HTTP response — its failure is the only one that fails the request.
-      const primaryResult = await signalReprocessor.reprocessSignal(accountId, signal.id, "QUARANTINED", { skipNotify: true });
+      const primaryResult = await signalReprocessor.reprocessSignal(accountId, signal.signalLookupId, { skipNotify: true });
       if (primaryResult.isErr()) { logger.error("Failed to reprocess primary signal on quarantine approval.", { code: "api.quarantine_response.reprocess_primary_failed", accountId, signalId, error: primaryResult.error }); return err(c, 500, "Internal Server Error"); }
       const activatedSignal = primaryResult.value;
-      if (!activatedSignal.threadId) { logger.error("Primary reprocess produced a signal with no threadId.", { code: "api.quarantine_response.reprocess_no_thread", accountId, signalId }); return err(c, 500, "Internal Server Error"); }
+      if (!activatedSignal.threadId) { logger.error("Primary reprocess produced a signal with no threadId.", { code: "api.quarantine_response.reprocess_no_thread", accountId, signalId, signal: activatedSignal }); return err(c, 500, "Internal Server Error"); }
 
       // 3. Replay each sibling IN SERIES (never Promise.all): each iteration's Aurora upsert must be
       //    visible to the next iteration's similarity search. Best-effort — a sibling failure is
       //    logged and skipped, never rolls back, never affects the response.
       for (const sibling of await collectSiblings()) {
-        const siblingResult = await signalReprocessor.reprocessSignal(accountId, sibling.id, "QUARANTINED", { skipNotify: true });
+        const siblingResult = await signalReprocessor.reprocessSignal(accountId, sibling.signalLookupId, { skipNotify: true });
         if (siblingResult.isErr()) logger.warn("Failed to reprocess sibling quarantined signal on approval — skipping.", { code: "api.quarantine_response.reprocess_sibling_failed", accountId, siblingSignalId: sibling.id, error: siblingResult.error });
       }
 

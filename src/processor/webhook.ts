@@ -6,7 +6,7 @@ import type { Result } from "../errors.js";
 
 export interface WebhookPayload {
   id: string;
-  threadId: string | undefined;
+  threadId: string | null;
   receivedAt: string;
   from: { address: string; name?: string };
   to: Array<{ address: string; name?: string }>;
@@ -23,7 +23,7 @@ export interface WebhookPayload {
 export function buildWebhookPayload(signal: Signal, thread: Thread | null): WebhookPayload {
   return {
     id: signal.id,
-    threadId: signal.threadId,
+    threadId: signal.threadId ?? null,
     receivedAt: signal.data.receivedAt,
     from: { address: signal.data.from.address, ...(signal.data.from.name ? { name: signal.data.from.name } : {}) },
     to: signal.data.to.map(a => ({ address: a.address, ...(a.name ? { name: a.name } : {}) })),

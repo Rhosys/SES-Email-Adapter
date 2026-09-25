@@ -260,10 +260,13 @@ describe("Quarantine response — handler + real processor", () => {
 
   it("approve → the signal ends up active on a thread and the sender allow is recorded", async () => {
     const quarantined = makeQuarantinedSignal();
-    // Both the handler's initial load AND the processor's reprocess load hit getSignalById(…,"QUARANTINED").
+    // The handler's initial load resolves the quarantined signal via getSignalById.
     vi.mocked(threadDb.getSignalById).mockResolvedValue(ok(quarantined));
-    // The processor re-fetches by message id at the end of reprocess to return the re-homed signal.
-    vi.mocked(threadDb.getSignalByMessageId).mockResolvedValue(ok({ ...quarantined, status: "active", threadId: "arc-001" } as Signal));
+    // reprocess reads by message id twice: the entry load sees the still-quarantined signal (no
+    // thread), then the post-reprocess re-fetch returns it re-homed and active on a thread.
+    vi.mocked(threadDb.getSignalByMessageId)
+      .mockResolvedValueOnce(ok(quarantined))
+      .mockResolvedValue(ok({ ...quarantined, status: "active", threadId: "arc-001" } as Signal));
     // The handler fetches the landed thread for the response.
     vi.mocked(threadDb.getThread).mockResolvedValue(ok(makeThread({ id: "arc-001" })));
 
@@ -293,7 +296,8 @@ describe("Quarantine response — handler + real processor", () => {
 
   describe("cascade to sibling quarantined signals", () => {
     // Wire the processor's reprocess reads so BOTH primary and any sibling replay to completion.
-    // getSignalById / getSignalByMessageId key off the signal id so each reprocess sees its own signal.
+    // getSignalByMessageId keys off the signalLookupId so each reprocess resolves its own signal;
+    // getSignalById still backs the handler's initial per-signal load.
     function wireReprocessReads(signals: Signal[]) {
       const byId = new Map(signals.map(s => [s.id, s]));
       vi.mocked(threadDb.getSignalById).mockImplementation((_a, id) => Promise.resolve(ok(byId.get(id) ?? null)));

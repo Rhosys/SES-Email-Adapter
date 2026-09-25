@@ -571,7 +571,7 @@ export interface SignalBase {
   // Inbound (SES) signals: "ses-{sesMessageId}" — enables O(1) dedup lookup.
   // User/system signals: same as `id` (the sgn- prefixed ID).
   signalLookupId: string;
-  threadId?: string;        // Undefined while signal is blocked pending user action
+  threadId?: string | null; // Null while the signal is quarantined/blocked and pending user action — it belongs to no thread
   gsi3pk?: string;       // GSI3 key for In-Reply-To lookup (ACCT#{accountId}#MSGID#{msgId})
   accountId: string;
   source: SignalSource;
