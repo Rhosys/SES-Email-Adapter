@@ -10,7 +10,7 @@ import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, NoAc
 import type { AccessService } from "../api/accountsApi.js";
 import type { EmailServiceError } from "../email/email-service.js";
 import type { ProviderSendError } from "../external-exchanges/provider-adapter.js";
-import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, UnsubscribeInfo, InboundEmailSignalData } from "../types/index.js";
+import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, UnsubscribeInfo, InboundEmailSignalData, NoticeData, HealthcheckData } from "../types/index.js";
 import { deriveGroupingKey } from "../grouping-key.js";
 import { DEFAULT_UNKNOWN_SENDER_POLICY, isEmailSignal, isInboundEmailSignalData } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
@@ -1356,7 +1356,7 @@ export class IncomingEmailProcessor {
         provider: senderETLD1,
         ...(failedAddress ? { failedAddress } : {}),
         ...(bounceInfo.diagnosticCode || bounceInfo.status ? { bounceReason: bounceInfo.diagnosticCode ?? bounceInfo.status } : {}),
-      } as unknown as WorkflowData;
+      } satisfies NoticeData;
       classificationOutput.summary = describeBounceFailure(bounceInfo, failedAddress);
     }
 
@@ -1392,7 +1392,7 @@ export class IncomingEmailProcessor {
     // regardless of classifier output.
     if (isSystemAccount(accountId)) {
       classificationOutput.workflow = "healthcheck" as Workflow;
-      classificationOutput.workflowData = { workflow: "healthcheck" } as unknown as WorkflowData;
+      classificationOutput.workflowData = { workflow: "healthcheck" } satisfies HealthcheckData;
     }
 
     // 6. Thread matching (parallel tiers)
