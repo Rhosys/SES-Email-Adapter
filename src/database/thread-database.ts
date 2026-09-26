@@ -277,7 +277,7 @@ export class ThreadDatabase {
         },
         ReturnValues: "ALL_NEW",
       }));
-      return ok(hydrateSignal(result.Attributes as unknown as Signal));
+      return ok(hydrateSignal(result.Attributes as Signal));
     } catch (e) {
       return err(dbError(e));
     }
@@ -408,7 +408,7 @@ export class ThreadDatabase {
         ExpressionAttributeNames: exprNames,
         ReturnValues: "ALL_NEW",
       }));
-      return ok(hydrateThreadObject(result.Attributes as unknown as Thread));
+      return ok(hydrateThreadObject(result.Attributes as Thread));
     } catch (e) {
       return err(dbError(e));
     }
@@ -463,7 +463,7 @@ export class ThreadDatabase {
         ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
         ReturnValues: "ALL_NEW",
       }));
-      return ok(hydrateSignal(result.Attributes as unknown as Signal));
+      return ok(hydrateSignal(result.Attributes as Signal));
     } catch (e) {
       return err(dbError(e));
     }
@@ -512,7 +512,7 @@ export class ThreadDatabase {
         ExpressionAttributeNames: exprNames,
         ReturnValues: "ALL_NEW",
       }));
-      return ok(hydrateSignal(result.Attributes as unknown as Signal));
+      return ok(hydrateSignal(result.Attributes as Signal));
     } catch (e) {
       return err(dbError(e));
     }
@@ -681,7 +681,7 @@ export class ThreadDatabase {
           return sig.type === "calendar_event" && sig.data?.linkedSignalId === emailSignalId;
         },
       );
-      return ok(calendarSignal ? hydrateSignal(calendarSignal as unknown as Signal<CalendarEventData>) : null);
+      return ok(calendarSignal ? hydrateSignal(calendarSignal as Signal<CalendarEventData>) : null);
     } catch (e) {
       return err(dbError(e));
     }
@@ -709,7 +709,7 @@ export class ThreadDatabase {
       const responses = signals.filter((s) => {
         const sig = s as { type?: string; data?: { veventUid?: string } };
         return sig.type === "calendar_response" && sig.data?.veventUid === veventUid;
-      }) as unknown as Signal<import("../types/calendar.js").CalendarResponseData>[];
+      }) as Signal<import("../types/calendar.js").CalendarResponseData>[];
       const responseSignal = responses.reduce<typeof responses[number] | undefined>(
         (latest, s) => (latest === undefined || s.data.respondedAt > latest.data.respondedAt ? s : latest),
         undefined,

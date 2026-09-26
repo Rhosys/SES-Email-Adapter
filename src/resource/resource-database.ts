@@ -110,7 +110,7 @@ export class ResourceDatabase {
         ExpressionAttributeValues: exprValues,
         ReturnValues: "ALL_NEW",
       }));
-      return ok(result.Attributes as unknown as Resource);
+      return ok(result.Attributes as Resource);
     } catch (e) {
       return err(dbError(e));
     }
@@ -147,7 +147,7 @@ export class ResourceDatabase {
         ExpressionAttributeValues: { ":status": status, ":gsi1pk": buildGsi1pk(accountId, status), ":now": now },
         ReturnValues: "ALL_NEW",
       }));
-      return ok(result.Attributes as unknown as Resource);
+      return ok(result.Attributes as Resource);
     } catch (e) {
       if ((e as { name?: string }).name === "ConditionalCheckFailedException") return ok(null);
       return err(dbError(e));

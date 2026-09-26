@@ -16,7 +16,7 @@ export interface TrackPoint {
 }
 
 export interface LogEntry {
-  level: LogLevel;
+  level: Uppercase<LogLevel>;
   title: string;
   code?: string;
   levelThreshold: number;
@@ -302,7 +302,7 @@ export class RequestLogger implements Logger {
 
     const entry: LogEntry = {
       ...(serializedContext ?? {}),
-      level: level.toUpperCase() as unknown as LogLevel,
+      level: level.toUpperCase() as Uppercase<LogLevel>,
       title,
       ...(code !== undefined ? { code } : {}),
       levelThreshold,
@@ -314,7 +314,7 @@ export class RequestLogger implements Logger {
     };
 
     // Re-assign required fields AFTER spread to guarantee context cannot overwrite them
-    entry.level = level.toUpperCase() as unknown as LogLevel;
+    entry.level = level.toUpperCase() as Uppercase<LogLevel>;
     entry.title = title;
     entry.levelThreshold = levelThreshold;
     entry.invocationId = this.invocationId;
@@ -324,7 +324,7 @@ export class RequestLogger implements Logger {
     // Emit the entry directly — Lambda JSON log format serializes objects natively
     let redacted: Record<string, unknown>;
     try {
-      redacted = redact(entry as unknown as Record<string, unknown>);
+      redacted = redact(entry);
     } catch {
       // Circular reference or other failure
       const fallbackEmitter = level === "error" || level === "critical" ? console.error : level === "warn" ? console.warn : console.log;

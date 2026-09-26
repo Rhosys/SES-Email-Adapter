@@ -122,7 +122,7 @@ export class ReindexWorker {
     targetRegistryId: string,
     modelId: string,
   ): Promise<Result<void, { signalId: string; cause: unknown }>> {
-    const signal = item as unknown as Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId" | "createdAt" | "retentionDuration"> & { data?: Pick<EmailSignalData, "recipientAddress" | "embeddings" | "s3Key"> };
+    const signal = item as Pick<Signal, "id" | "signalLookupId" | "accountId" | "threadId" | "createdAt" | "retentionDuration"> & { data?: Pick<EmailSignalData, "recipientAddress" | "embeddings" | "s3Key"> };
 
     if (!signal.data) {
       return err({ signalId: signal.id ?? "unknown", cause: "no data property on item" });
