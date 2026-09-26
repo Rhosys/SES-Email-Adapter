@@ -14,7 +14,7 @@ import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../retention.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { EmailContentStore } from "./content-store.js";
-import type { Signal, AnySignal, PageParams, ThreadStatus, Workflow, OutboundEmailSignalData } from "../types/index.js";
+import type { Signal, PageParams, ThreadStatus, Workflow, OutboundEmailSignalData } from "../types/index.js";
 import type { CalendarResponseData, DomainMisconfigurationData, Pagination } from "../types/index.js";
 import type { UpdateThreadFields, ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
@@ -202,7 +202,7 @@ export class ThreadsApi {
           return err(c, 500, "Internal Server Error");
         }
         const signal = signalsResult.value.items[0];
-        if (signal) {
+        if (signal && isEmailSignal(signal)) {
           const senderDomain = signal.data.from.address.includes("@") ? signal.data.from.address.split("@").pop()! : signal.data.from.address;
           const senderETLD1 = getDomain(senderDomain) ?? senderDomain;
           const recipientAddress = signal.data.recipientAddress;
@@ -319,7 +319,7 @@ export class ThreadsApi {
         return err(c, 500, "Internal Server Error");
       }
 
-      const signals = result.value.items as unknown as AnySignal[];
+      const signals = result.value.items;
       const calendarEventSignals = signals.filter(isCalendarEventSignal);
       const enrichments = new Map<string, { decision: CalendarResponseData["decision"]; respondedAt: string }>();
 
@@ -735,7 +735,7 @@ export class ThreadsApi {
         logger.error(`Failed to load calendar group for RSVP eligibility: ${groupResult.error.message}`, { code: "api.rsvp.load_group_failed", error: groupResult.error });
         return err(c, 500, "Internal Server Error");
       }
-      const groupSignals = (groupResult.value.items as unknown as AnySignal[])
+      const groupSignals = groupResult.value.items
         .filter(isCalendarEventSignal)
         .filter(s => s.data.veventUid === calendarData.veventUid);
       // All groupSignals share one veventUid, so collapse yields exactly one winner. We respond to

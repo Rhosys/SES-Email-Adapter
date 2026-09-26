@@ -221,7 +221,7 @@ export class ThreadDatabase {
     return ok(signal);
   }
 
-  async listSignals(accountId: string, threadId: string, params: PageParams): Promise<Result<Page<Signal>, DbError>> {
+  async listSignals(accountId: string, threadId: string, params: PageParams): Promise<Result<Page<AnySignal>, DbError>> {
     const limit = Math.min(params.limit ?? 20, 100);
     try {
       const res = await dynamo.send(new QueryCommand({
@@ -233,10 +233,10 @@ export class ThreadDatabase {
         Limit: limit + 1,
         ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
       }));
-      const items = (res.Items ?? []).map(i => hydrateSignal(i as Signal));
+      const items = (res.Items ?? []).map(i => hydrateSignal(i as AnySignal));
       const page = items.slice(0, limit);
       const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
-      return ok({ items: page, ...(nextKey ? { nextCursor: nextKey } : {}) } as Page<Signal>);
+      return ok({ items: page, ...(nextKey ? { nextCursor: nextKey } : {}) });
     } catch (e) {
       return err(dbError(e));
     }

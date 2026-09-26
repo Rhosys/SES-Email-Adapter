@@ -1485,9 +1485,9 @@ describe("IncomingEmailProcessor", () => {
 
     it("recomputes the old thread's lastSignalAt from its newest remaining signal", async () => {
       vi.mocked(threadDb.listSignals).mockReturnValue(Promise.resolve(ok({ items: [
-        { data: { receivedAt: "2024-02-01T00:00:00Z" } },
-        { data: { receivedAt: "2024-04-10T00:00:00Z" } },
-        { data: { receivedAt: "2024-03-01T00:00:00Z" } },
+        { type: "email", data: { receivedAt: "2024-02-01T00:00:00Z" } },
+        { type: "email", data: { receivedAt: "2024-04-10T00:00:00Z" } },
+        { type: "email", data: { receivedAt: "2024-03-01T00:00:00Z" } },
       ] } as never)));
 
       const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "ses-msg-reprocess");
@@ -1511,7 +1511,7 @@ describe("IncomingEmailProcessor", () => {
         vi.fn().mockReturnValue(Promise.resolve(ok(sameThreadSignal)));
       // repairThreadRecency will list signals and find the max matches thread.lastSignalAt — no update
       vi.mocked(threadDb.listSignals).mockReturnValue(Promise.resolve(ok({ items: [
-        { data: { receivedAt: "2024-05-01T00:00:00Z" } },
+        { type: "email", data: { receivedAt: "2024-05-01T00:00:00Z" } },
       ] } as never)));
 
       const result = await processor.reprocessSignal(TEST_ACCOUNT_ID, "ses-msg-reprocess");

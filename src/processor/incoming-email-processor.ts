@@ -12,7 +12,7 @@ import type { EmailServiceError } from "../email/email-service.js";
 import type { ProviderSendError } from "../external-exchanges/provider-adapter.js";
 import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, UnsubscribeInfo, InboundEmailSignalData } from "../types/index.js";
 import { deriveGroupingKey } from "../grouping-key.js";
-import { DEFAULT_UNKNOWN_SENDER_POLICY, isInboundEmailSignalData } from "../types/index.js";
+import { DEFAULT_UNKNOWN_SENDER_POLICY, isEmailSignal, isInboundEmailSignalData } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient, BounceInfo } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
@@ -2195,7 +2195,7 @@ export class IncomingEmailProcessor {
       return;
     }
     const newLastSignalAt = signalsResult.value.items.reduce<string>((max, s) => {
-      const t = s.data.receivedAt ?? s.createdAt;
+      const t = (isEmailSignal(s) ? s.data.receivedAt : undefined) ?? s.createdAt;
       return t > max ? t : max;
     }, "") || EPOCH;
 
