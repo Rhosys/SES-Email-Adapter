@@ -2380,9 +2380,9 @@ function buildSignal(opts: {
   }
 
   const workflowDataUrlFields = ["trackingUrl", "downloadUrl", "managementUrl", "paymentUrl", "documentUrl", "portalUrl", "responseUrl", "ticketUrl", "actionUrl", "muteUrl"] as const;
-  const workflowDataRecord = classification.workflowData as unknown as Record<string, unknown>;
+  const workflowDataByField = new Map(Object.entries(classification.workflowData));
   for (const field of workflowDataUrlFields) {
-    const value = workflowDataRecord[field];
+    const value = workflowDataByField.get(field);
     if (typeof value !== "string") continue;
     const existing = classifiedUrls.get(value);
     if (existing) {
