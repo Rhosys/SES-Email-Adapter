@@ -21,6 +21,16 @@ export class EnumValue {
   }
 }
 
+// The workflow set — the single source of truth. `WorkflowDefinition.name` is typed
+// `Workflow`, so every registry entry below is compile-time checked against this list;
+// adding/removing a workflow here is the only place the set changes.
+export const WORKFLOWS = [
+  "auth", "conversation", "crm", "package", "travel", "payments", "alert", "content",
+  "onboarding", "notice", "healthcare", "job", "support", "events", "healthcheck", "test", "unspecified",
+] as const;
+
+export type Workflow = (typeof WORKFLOWS)[number];
+
 export interface WorkflowFieldDefinition {
   name: string;
   type: string;
@@ -32,7 +42,7 @@ export interface WorkflowFieldDefinition {
 }
 
 export interface WorkflowDefinition {
-  name: string;
+  name: Workflow;
   description: string;
   fields: WorkflowFieldDefinition[];
   /** When false, the classifier is forbidden from assigning this workflow — it is system-assigned only. Default: true. */

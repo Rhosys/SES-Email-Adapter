@@ -2,18 +2,13 @@
 // Workflows (the kind of email this is — drives display, UX, and actions)
 // ---------------------------------------------------------------------------
 
-import { CLASSIFIER_WORKFLOW_REGISTRY } from "./workflow-registry.js";
-
-export const WORKFLOWS = CLASSIFIER_WORKFLOW_REGISTRY.map(w => w.name) as unknown as readonly [
-  "auth", "conversation", "crm", "package", "travel", "payments", "alert", "content",
-  "onboarding", "notice", "healthcare", "job", "support", "events", "healthcheck", "test", "unspecified",
-];
 // NOTE: spam is NOT a workflow. It is expressed via Signal.data.tags (e.g. ["phishing", "credential-harvest"]).
 // A phishing email pretending to be a bank login is workflow:"auth" + tags:["phishing","credential-harvest"].
 // The processor quarantines tagged signals; the workflow captures what kind of
 // email it is (or is pretending to be), which is more actionable than just "spam".
-
-export type Workflow = (typeof WORKFLOWS)[number];
+import type { Workflow } from "./workflow-registry.js";
+export { WORKFLOWS } from "./workflow-registry.js";
+export type { Workflow } from "./workflow-registry.js";
 
 // ---------------------------------------------------------------------------
 // SQS message types — discriminator for routing in the Lambda handler
