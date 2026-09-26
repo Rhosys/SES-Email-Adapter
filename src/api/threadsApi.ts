@@ -6,7 +6,7 @@ import { getDomain } from "tldts";
 import { isValidEmail } from "../email/validate-email.js";
 import { computeUndoWindowSeconds } from "./undo-window.js";
 import { zParse } from "./validate.js";
-import { toApiThread, toApiSignal, withResolvedContentUrls } from "./signal-transforms.js";
+import { toApiThread, toApiSignal } from "./signal-transforms.js";
 import { collapseCalendarSignals } from "./calendar-collapse.js";
 import { recordRsvpResponse } from "../processor/calendar/rsvp-response-recorder.js";
 import type * as Api from "./schemas.js";
@@ -347,23 +347,22 @@ export class ThreadsApi {
 
       const enrichedSignals: Api.Signal[] = [];
       for (const signal of signals) {
-        const withUrls = withResolvedContentUrls(signal, contentCdnBaseUrl);
-        if (isCalendarEventSignal(withUrls)) {
+        if (isCalendarEventSignal(signal)) {
           // Drop snapshots that lost to a later invite/cancellation in their event group.
-          if (collapse.superseded.has(withUrls.id)) continue;
-          const apiSignal = toApiSignal(withUrls) as Extract<Api.Signal, { type: "calendar_event" }>;
-          const calendarEnrichment = collapse.winners.get(withUrls.id) ?? {};
+          if (collapse.superseded.has(signal.id)) continue;
+          const apiSignal = toApiSignal(signal, contentCdnBaseUrl) as Extract<Api.Signal, { type: "calendar_event" }>;
+          const calendarEnrichment = collapse.winners.get(signal.id) ?? {};
           // The account's latest RSVP for this event (decision + when), resolved across the whole
           // response history by respondedAt. Lives on the calendar_event data so the client renders
           // "you responded" from one payload without a second query or reconstructing from cards.
-          const rsvpResponse = enrichments.get(withUrls.data.veventUid);
+          const rsvpResponse = enrichments.get(signal.data.veventUid);
           enrichedSignals.push({
             ...apiSignal,
             data: { ...apiSignal.data, ...calendarEnrichment, ...(rsvpResponse ? { rsvpResponse } : {}) },
           });
           continue;
         }
-        enrichedSignals.push(toApiSignal(withUrls));
+        enrichedSignals.push(toApiSignal(signal, contentCdnBaseUrl));
       }
 
       return c.json(page("signals", enrichedSignals, result.value.nextCursor), 200);
@@ -432,7 +431,7 @@ export class ThreadsApi {
       const draftThreadUpdateResult = await threadDb.updateThread(accountId, thread.id, thread.status, now, {});
       if (draftThreadUpdateResult.isErr()) { logger.warn("Failed to update thread recency after draft creation", { code: "api.thread.create_signal.update_thread_failed", accountId, threadId, error: draftThreadUpdateResult.error }); }
       logger.info("Draft signal created", { code: "api.threads.signal_created", accountId, threadId, signalId: id });
-      return c.json(toApiSignal(createResult.value), 201);
+      return c.json(toApiSignal(createResult.value, contentCdnBaseUrl), 201);
     });
 
     // -------------------------------------------------------------------------
@@ -481,7 +480,7 @@ export class ThreadsApi {
         return err(c, 500, "Internal Server Error");
       }
       logger.info("Draft signal replaced", { code: "api.threads.signal_replaced", accountId, threadId, signalId });
-      return c.json(toApiSignal(updateResult.value), 200);
+      return c.json(toApiSignal(updateResult.value, contentCdnBaseUrl), 200);
     });
 
     // -------------------------------------------------------------------------
@@ -563,7 +562,7 @@ export class ThreadsApi {
       }
 
       logger.info("Draft queued for send", { code: "api.threads.signal_send_queued", accountId, threadId, signalId });
-      return c.json({ ...toApiSignal(updateResult.value), undoExpiresAt }, 200);
+      return c.json({ ...toApiSignal(updateResult.value, contentCdnBaseUrl), undoExpiresAt }, 200);
     });
 
     // -------------------------------------------------------------------------
@@ -791,7 +790,7 @@ export class ThreadsApi {
       }
 
       logger.info("RSVP sent", { code: "api.threads.rsvp_sent", accountId, threadId, signalId, decision: body.decision, responseSignalId: responseSignal.id });
-      return c.json(toApiSignal(responseSignal), 200);
+      return c.json(toApiSignal(responseSignal, contentCdnBaseUrl), 200);
     });
 
     // -------------------------------------------------------------------------
@@ -814,8 +813,7 @@ export class ThreadsApi {
       }
       const signal = signalResult.value;
       if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-      const withUrls = withResolvedContentUrls(signal, contentCdnBaseUrl);
-      return c.json(toApiSignal(withUrls), 200);
+      return c.json(toApiSignal(signal, contentCdnBaseUrl), 200);
     });
 
     // -------------------------------------------------------------------------
@@ -904,7 +902,7 @@ export class ThreadsApi {
           return err(c, 500, "Internal Server Error");
         }
         logger.info("Signal reverted to draft", { code: "api.threads.signal_patched", accountId, threadId, signalId, statusTransition: "pending_send→draft" });
-        return c.json(toApiSignal(updateResult.value), 200);
+        return c.json(toApiSignal(updateResult.value, contentCdnBaseUrl), 200);
       }
 
       // Normal draft edit (subject, body, from, to). The API contract uses `body`; the DB stores
@@ -917,7 +915,7 @@ export class ThreadsApi {
         return err(c, 500, "Internal Server Error");
       }
       logger.info("Signal updated", { code: "api.threads.signal_patched", accountId, threadId, signalId });
-      return c.json(toApiSignal(updateResult.value), 200);
+      return c.json(toApiSignal(updateResult.value, contentCdnBaseUrl), 200);
     });
 
     // -------------------------------------------------------------------------
@@ -982,7 +980,7 @@ export class ThreadsApi {
         return err(c, 500, "Reprocess failed", undefined, error.message);
       }
       logger.info("Signal reprocessed", { code: "api.threads.reprocessed", accountId, threadId, signalId: id });
-      return c.json(toApiSignal(result.value), 200);
+      return c.json(toApiSignal(result.value, contentCdnBaseUrl), 200);
     });
   }
 }

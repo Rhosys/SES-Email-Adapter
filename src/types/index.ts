@@ -419,8 +419,8 @@ export interface Attachment {
 // in the content sanitizer) to embed as a base64 data URI in htmlBody without risking the
 // DynamoDB 400KB item cap. Uploaded to S3 like a regular Attachment instead; only the s3Key
 // is stored, never the bytes. Its `cid:{contentId}` reference is left unresolved in htmlBody
-// at write time and swapped for a CDN url at API read time (see withResolvedContentUrls in
-// src/api/signal-transforms.ts), mirroring how Attachment.url is computed lazily from s3Key.
+// at write time and swapped for a CDN url at API read time (see toApiSignal in
+// src/api/signal-transforms.ts), mirroring how an attachment's CDN url is computed from s3Key.
 export interface InlineImageRef {
   contentId: string;
   mimeType: string;

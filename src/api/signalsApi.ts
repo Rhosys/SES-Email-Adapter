@@ -3,7 +3,7 @@ import type { OpenAPIHono } from "@hono/zod-openapi";
 import { DateTime } from "luxon";
 import { getDomain } from "tldts";
 import { zParse } from "./validate.js";
-import { toApiThread, toApiSignal, withResolvedContentUrls } from "./signal-transforms.js";
+import { toApiThread, toApiSignal } from "./signal-transforms.js";
 import { isEmailSignal, isInboundEmailSignalData } from "../types/index.js";
 import type { Result } from "neverthrow";
 import type { Signal, MatchedRuleResult, PageParams } from "../types/index.js";
@@ -89,8 +89,7 @@ export class SignalsApi {
         items = items.filter(s => isEmailSignal(s) && s.data.from.address.toLowerCase().includes(senderLower));
       }
 
-      const itemsWithUrls = items.map(s => withResolvedContentUrls(s, contentCdnBaseUrl));
-      return c.json(page("signals", itemsWithUrls.map(toApiSignal), result.value.nextCursor), 200);
+      return c.json(page("signals", items.map(s => toApiSignal(s, contentCdnBaseUrl)), result.value.nextCursor), 200);
     });
 
     // -------------------------------------------------------------------------
@@ -242,9 +241,8 @@ export class SignalsApi {
       const threadResult = await threadDb.getThread(accountId, activatedSignal.threadId);
       if (threadResult.isErr() || !threadResult.value) { logger.error("Failed to load thread after primary reprocess.", { code: "api.quarantine_response.get_thread_failed", accountId, signalId, threadId: activatedSignal.threadId, error: threadResult.isErr() ? threadResult.error : undefined }); return err(c, 500, "Internal Server Error"); }
 
-      const signalWithUrls = withResolvedContentUrls(activatedSignal, contentCdnBaseUrl);
       logger.info("Signal activated", { code: "api.signals.activated", accountId, signalId, threadId: activatedSignal.threadId });
-      return c.json({ thread: toApiThread(threadResult.value), signal: toApiSignal(signalWithUrls) }, 200);
+      return c.json({ thread: toApiThread(threadResult.value), signal: toApiSignal(activatedSignal, contentCdnBaseUrl) }, 200);
     });
   }
 }

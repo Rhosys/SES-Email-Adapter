@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toApiSignal, withResolvedContentUrls } from "../../src/api/signal-transforms.js";
+import { toApiSignal } from "../../src/api/signal-transforms.js";
 import type { Signal, InboundEmailSignalData, Attachment } from "../../src/types/index.js";
 import type { Signal as ApiSignal, InboundEmailSignalData as ApiInboundEmailSignalData, Attachment as ApiAttachment } from "../../src/api/schemas.js";
 
@@ -47,7 +47,7 @@ describe("toApiSignal — matchedRules collapse", () => {
       },
     });
 
-    const apiSignal = toApiSignal(signal);
+    const apiSignal = toApiSignal(signal, "https://cdn.example.com");
 
     expect(apiSignal.type).toBe("email");
     const data = apiSignal.data as { matchedRules?: Array<{ ruleId: string; text?: string }> };
@@ -64,7 +64,7 @@ describe("toApiSignal — matchedRules collapse", () => {
       },
     });
 
-    const apiSignal = toApiSignal(signal);
+    const apiSignal = toApiSignal(signal, "https://cdn.example.com");
     const data = apiSignal.data as { matchedRules?: Array<{ ruleId: string }> };
     expect(data.matchedRules).toEqual([{ ruleId: "SR-02", actions: [{ type: "quarantine_visible" }], labelsAdded: [], statusChange: "quarantine_visible" }]);
   });
@@ -87,7 +87,7 @@ describe("toApiSignal — unsubscribe stripping by workflow", () => {
     { workflow: "unspecified" as const, reason: "cannot rule out" },
   ])("keeps unsubscribe for workflow=$workflow ($reason)", ({ workflow }) => {
     const signal = makeInboundSignal({ data: { workflow, unsubscribe } });
-    const data = toApiSignal(signal).data as ApiInboundEmailSignalData;
+    const data = toApiSignal(signal, "https://cdn.example.com").data as ApiInboundEmailSignalData;
     expect(data.unsubscribe).toEqual(unsubscribe);
   });
 
@@ -104,38 +104,24 @@ describe("toApiSignal — unsubscribe stripping by workflow", () => {
     { workflow: "crm" as const, reason: "sales outreach" },
   ])("strips unsubscribe for workflow=$workflow ($reason)", ({ workflow }) => {
     const signal = makeInboundSignal({ data: { workflow, unsubscribe } });
-    const data = toApiSignal(signal).data as ApiInboundEmailSignalData;
+    const data = toApiSignal(signal, "https://cdn.example.com").data as ApiInboundEmailSignalData;
     expect(data.unsubscribe).toBeUndefined();
   });
 
   it("no unsubscribe present stays absent regardless of workflow", () => {
     const signal = makeInboundSignal({ data: { workflow: "content" } });
-    const data = toApiSignal(signal).data as ApiInboundEmailSignalData;
+    const data = toApiSignal(signal, "https://cdn.example.com").data as ApiInboundEmailSignalData;
     expect(data.unsubscribe).toBeUndefined();
   });
 });
 
 // ---------------------------------------------------------------------------
-// withResolvedContentUrls — s3Key -> CDN url resolution, computed lazily at read
-// time (never stored). Covers both Attachment.url and the inline-image cid:
-// substitution for images the sanitizer routed to S3 instead of embedding as a
-// data URI (see MAX_INLINE_DATA_URI_SIZE / MAX_INLINE_DATA_URI_COUNT).
+// toApiSignal resolves s3Key -> CDN url at serialization time (never stored).
+// Covers both attachment url and the inline-image cid: substitution for images
+// the sanitizer routed to S3 instead of embedding as a data URI (see
+// MAX_INLINE_DATA_URI_SIZE / MAX_INLINE_DATA_URI_COUNT).
 // ---------------------------------------------------------------------------
-describe("withResolvedContentUrls", () => {
-  it("adds a CDN url to each attachment computed from its s3Key", () => {
-    const signal = makeInboundSignal({
-      data: {
-        attachments: [
-          { filename: "doc.pdf", mimeType: "application/pdf", sizeBytes: 1024, s3Key: "emails/msg-001/0" },
-        ],
-      },
-    });
-
-    const result = withResolvedContentUrls(signal, "https://cdn.example.com");
-    const attachments = result.data.attachments as Array<{ url?: string }>;
-    expect(attachments[0]?.url).toBe("https://cdn.example.com/emails/msg-001/0");
-  });
-
+describe("toApiSignal — inline image cid: resolution", () => {
   it("replaces a leftover cid: reference in htmlBody with the matching inline image's CDN url", () => {
     const signal = makeInboundSignal({
       data: {
@@ -144,16 +130,14 @@ describe("withResolvedContentUrls", () => {
       },
     });
 
-    const result = withResolvedContentUrls(signal, "https://cdn.example.com");
-    expect((result.data as { htmlBody?: string }).htmlBody).toBe(
-      '<p>Logo: <img src="https://cdn.example.com/emails/msg-001/inline-0"></p>',
-    );
+    const data = toApiSignal(signal, "https://cdn.example.com").data as ApiInboundEmailSignalData;
+    expect(data.body).toBe('<p>Logo: <img src="https://cdn.example.com/emails/msg-001/inline-0"></p>');
   });
 
   it("does not touch htmlBody when there are no inline images to resolve", () => {
     const signal = makeInboundSignal({ data: { htmlBody: "<p>Hello</p>" } });
-    const result = withResolvedContentUrls(signal, "https://cdn.example.com");
-    expect((result.data as { htmlBody?: string }).htmlBody).toBe("<p>Hello</p>");
+    const data = toApiSignal(signal, "https://cdn.example.com").data as ApiInboundEmailSignalData;
+    expect(data.body).toBe("<p>Hello</p>");
   });
 
   it("resolves multiple inline images independently", () => {
@@ -167,8 +151,8 @@ describe("withResolvedContentUrls", () => {
       },
     });
 
-    const result = withResolvedContentUrls(signal, "https://cdn.example.com");
-    expect((result.data as { htmlBody?: string }).htmlBody).toBe(
+    const data = toApiSignal(signal, "https://cdn.example.com").data as ApiInboundEmailSignalData;
+    expect(data.body).toBe(
       '<img src="https://cdn.example.com/emails/msg-001/inline-0"><img src="https://cdn.example.com/emails/msg-001/inline-1">',
     );
   });
@@ -176,12 +160,8 @@ describe("withResolvedContentUrls", () => {
 
 
 // ---------------------------------------------------------------------------
-// Full pipeline: withResolvedContentUrls → toApiSignal — proves attachment
-// URLs survive through to the API response shape. This is the gap the
-// unit-level withResolvedContentUrls tests above don't cover: they verify the
-// intermediate enriched signal, but not that toApiEmailSignalData preserves the
-// dynamically-added `url` property on each attachment through to the final
-// consumer-facing JSON.
+// Attachment pipeline: toApiSignal resolves each attachment's s3Key to a CDN url,
+// filters .ics attachments (surfaced as calendar signals), and never leaks s3Key.
 // ---------------------------------------------------------------------------
 
 const ATTACHMENTS_WITH_S3_KEYS: Attachment[] = [
@@ -192,7 +172,7 @@ const ATTACHMENTS_WITH_S3_KEYS: Attachment[] = [
 
 const CDN_BASE = "https://cdn.example.com";
 
-describe("withResolvedContentUrls → toApiSignal — full attachment pipeline", () => {
+describe("toApiSignal — full attachment pipeline", () => {
   it("quarantined signal: attachments carry resolved CDN urls in the API response", () => {
     const signal = makeInboundSignal({
       status: "quarantine_visible",
@@ -202,8 +182,7 @@ describe("withResolvedContentUrls → toApiSignal — full attachment pipeline",
       },
     });
 
-    const enriched = withResolvedContentUrls(signal, CDN_BASE);
-    const apiSignal: ApiSignal = toApiSignal(enriched);
+    const apiSignal: ApiSignal = toApiSignal(signal, CDN_BASE);
 
     expect(apiSignal.type).toBe("email");
     const data = apiSignal.data as ApiInboundEmailSignalData;
@@ -229,8 +208,7 @@ describe("withResolvedContentUrls → toApiSignal — full attachment pipeline",
       data: { attachments: ATTACHMENTS_WITH_S3_KEYS },
     });
 
-    const enriched = withResolvedContentUrls(signal, CDN_BASE);
-    const apiSignal: ApiSignal = toApiSignal(enriched);
+    const apiSignal: ApiSignal = toApiSignal(signal, CDN_BASE);
     const data = apiSignal.data as ApiInboundEmailSignalData;
 
     // .ics filtered — pdf + pkpass remain.
@@ -241,8 +219,7 @@ describe("withResolvedContentUrls → toApiSignal — full attachment pipeline",
 
   it("signal with no attachments: empty array preserved through the pipeline", () => {
     const signal = makeInboundSignal({ status: "quarantine_visible", data: { attachments: [] } });
-    const enriched = withResolvedContentUrls(signal, CDN_BASE);
-    const apiSignal: ApiSignal = toApiSignal(enriched);
+    const apiSignal: ApiSignal = toApiSignal(signal, CDN_BASE);
     const data = apiSignal.data as ApiInboundEmailSignalData;
     expect(data.attachments).toEqual([]);
   });
@@ -257,8 +234,7 @@ describe("withResolvedContentUrls → toApiSignal — full attachment pipeline",
       },
     });
 
-    const enriched = withResolvedContentUrls(signal, CDN_BASE);
-    const apiSignal: ApiSignal = toApiSignal(enriched);
+    const apiSignal: ApiSignal = toApiSignal(signal, CDN_BASE);
     const data = apiSignal.data as ApiInboundEmailSignalData;
 
     // Attachment URL resolved
@@ -275,8 +251,7 @@ describe("withResolvedContentUrls → toApiSignal — full attachment pipeline",
       data: { attachments: [ATTACHMENTS_WITH_S3_KEYS[0]!] },
     });
 
-    const enriched = withResolvedContentUrls(signal, CDN_BASE);
-    const apiSignal: ApiSignal = toApiSignal(enriched);
+    const apiSignal: ApiSignal = toApiSignal(signal, CDN_BASE);
     const data = apiSignal.data as ApiInboundEmailSignalData;
     const attachment = data.attachments[0]!;
 
@@ -284,26 +259,6 @@ describe("withResolvedContentUrls → toApiSignal — full attachment pipeline",
     expect(attachment.url).toBeDefined();
     // s3Key must NOT leak to the API consumer
     expect(attachment).not.toHaveProperty("s3Key");
-  });
-
-  it("without withResolvedContentUrls: toApiSignal alone produces attachments without url", () => {
-    // This test documents the failure mode: if withResolvedContentUrls is skipped,
-    // attachments come through with no url property — the bug this change fixes.
-    const signal = makeInboundSignal({
-      status: "quarantine_visible",
-      data: { attachments: ATTACHMENTS_WITH_S3_KEYS },
-    });
-
-    const apiSignal: ApiSignal = toApiSignal(signal);
-    const data = apiSignal.data as ApiInboundEmailSignalData;
-
-    // toApiSignal alone does not resolve urls (that's withResolvedContentUrls' job) — and
-    // because it does not run the read-side enrichment, it also does not filter the .ics.
-    // Production always runs withResolvedContentUrls first, so this path is not consumer-facing.
-    expect(data.attachments).toHaveLength(3);
-    for (const attachment of data.attachments) {
-      expect(attachment.url).toBeUndefined();
-    }
   });
 
   it("filters .ics attachments (both text/calendar and .ics filename) from the resolved response", () => {
@@ -319,8 +274,7 @@ describe("withResolvedContentUrls → toApiSignal — full attachment pipeline",
       },
     });
 
-    const enriched = withResolvedContentUrls(signal, CDN_BASE);
-    const apiSignal: ApiSignal = toApiSignal(enriched);
+    const apiSignal: ApiSignal = toApiSignal(signal, CDN_BASE);
     const data = apiSignal.data as ApiInboundEmailSignalData;
 
     expect(data.attachments).toHaveLength(1);
