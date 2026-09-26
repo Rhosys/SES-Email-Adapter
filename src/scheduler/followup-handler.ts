@@ -70,7 +70,7 @@ export class FollowupHandler {
 
     // 3. Active → notify only (reminder on already-visible thread)
     if (thread.status === "active") {
-      return this.notifier.notify(accountId, thread, undefined, thread.urgency ?? "normal", reason);
+      return this.notifier.notifyThread(accountId, thread, thread.urgency ?? "normal", reason);
     }
 
     // 4. Archived → reactivate + notify
@@ -80,7 +80,7 @@ export class FollowupHandler {
       if (updateResult.isErr()) return err(updateResult.error);
 
       const reactivatedThread: Thread = { ...thread, status: "active", updatedAt: now };
-      return this.notifier.notify(accountId, reactivatedThread, undefined, reactivatedThread.urgency ?? "normal", reason);
+      return this.notifier.notifyThread(accountId, reactivatedThread, reactivatedThread.urgency ?? "normal", reason);
     }
 
     // 5. Any other status (e.g. report_violation) → discard without action

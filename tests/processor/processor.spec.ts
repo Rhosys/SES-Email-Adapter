@@ -6,7 +6,9 @@ import { IncomingEmailProcessor, SYSTEM_RULES, extractForwardedAddress } from ".
 import { deriveGroupingKey } from "../../src/grouping-key.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { baseUrgency } from "../../src/processor/priority.js";
-import type { ThreadMatcherPort, RuleEvaluator, Notifier,  ReplySender, InboundSignalMessage, SqsDispatcher } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, RuleEvaluator, ReplySender, InboundSignalMessage, SqsDispatcher } from "../../src/processor/incoming-email-processor.js";
+import type { Notifier } from "../../src/notifier/types.js";
+import { mock } from "vitest-mock-extended";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
 import type { CtxLike } from "./_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
@@ -157,10 +159,7 @@ function makeRuleEvaluator(logger: MockLogger): RuleEvaluator {
 }
 
 function makeNotifier(): Notifier {
-  return {
-    notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    
-  };
+  return mock<Notifier>();
 }
 
 const SHARED_NEW_DEPS = {
@@ -1558,7 +1557,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      expect(notifier.notify).not.toHaveBeenCalled();
+      expect(notifier.notifySignal).not.toHaveBeenCalled();
     });
 
     it("blocks notice emails from untrusted senders (SR-04 rule fires, fallback does not apply)", async () => {

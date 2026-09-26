@@ -1,10 +1,12 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
+import { mock } from "vitest-mock-extended";
+import type { Notifier } from "../../src/notifier/types.js";
 import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 import { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok, err } from "neverthrow";
 import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
-import type { ThreadMatcherPort, InboundSignalMessage, SqsDispatcher, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, InboundSignalMessage, SqsDispatcher, ReplySender, SideEffectPayload } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "./_helpers.js";
@@ -149,10 +151,7 @@ function makeSqsDispatcher(): SqsDispatcher {
 }
 
 function makeNotifier(): Notifier {
-  return {
-    notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    
-  };
+  return mock<Notifier>();
 }
 
 function makeForwarder(): IForwardingService {
@@ -489,8 +488,8 @@ describe("IncomingEmailProcessor integration: end-to-end retry flow", () => {
       );
 
       // Notification was sent (no suppress_notification action)
-      expect(notifier.notify).toHaveBeenCalledOnce();
-      expect(notifier.notify).toHaveBeenCalledWith(TEST_ACCOUNT_ID, arc, signal, "normal");
+      expect(notifier.notifySignal).toHaveBeenCalledOnce();
+      expect(notifier.notifySignal).toHaveBeenCalledWith(TEST_ACCOUNT_ID, arc, signal, "normal");
     });
 
     it("executes pong for a test-workflow signal from an account-owned sender", async () => {
@@ -535,7 +534,7 @@ describe("IncomingEmailProcessor integration: end-to-end retry flow", () => {
 
       await processor.processSideEffect(payload);
 
-      expect(notifier.notify).not.toHaveBeenCalled();
+      expect(notifier.notifySignal).not.toHaveBeenCalled();
     });
 
     it("does not invoke inbound signal pipeline for side-effect messages", async () => {

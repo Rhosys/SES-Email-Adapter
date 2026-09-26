@@ -21,8 +21,17 @@ export class DeviceNotifier implements Notifier {
     this.logger = opts.logger;
   }
 
-  async notify(accountId: string, thread: Thread, signal: Signal | undefined, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>> {
+  async notifySignal(accountId: string, thread: Thread, signal: Signal, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>> {
     const effectiveUrgency: ThreadUrgency = urgency ?? "normal";
+    return this.deliver(accountId, thread, buildSignalPayload(thread, signal, effectiveUrgency, reason), effectiveUrgency, signal);
+  }
+
+  async notifyThread(accountId: string, thread: Thread, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>> {
+    const effectiveUrgency: ThreadUrgency = urgency ?? "normal";
+    return this.deliver(accountId, thread, buildThreadPayload(thread, effectiveUrgency, reason), effectiveUrgency, undefined);
+  }
+
+  private async deliver(accountId: string, thread: Thread, payload: NotificationPayload, effectiveUrgency: ThreadUrgency, signal: Signal | undefined): Promise<Result<void, DbError>> {
     const priority = urgencyToPushPriority(effectiveUrgency);
 
     const devicesResult = await this.deviceStore.listDevices(accountId);
@@ -34,8 +43,6 @@ export class DeviceNotifier implements Notifier {
     if (devices.length === 0) {
       return ok(undefined);
     }
-
-    const payload = buildPayload(thread, signal, effectiveUrgency, reason);
 
     let successCount = 0;
     const failureReasons: string[] = [];
@@ -81,16 +88,28 @@ export class DeviceNotifier implements Notifier {
   }
 }
 
-function buildPayload(thread: Thread, signal: Signal | undefined, urgency: ThreadUrgency, reason?: NotificationReason): NotificationPayload {
-  const from: NotificationPayload["from"] = signal
-    ? { address: signal.data.from.address, ...(signal.data.from.name ? { name: signal.data.from.name } : {}) }
-    : { address: thread.sender.address, ...(thread.sender.name ? { name: thread.sender.name } : {}) };
+function buildSignalPayload(thread: Thread, signal: Signal, urgency: ThreadUrgency, reason?: NotificationReason): NotificationPayload {
   const payload: NotificationPayload = {
     type: "thread:updated",
-    ...(signal ? { signalId: signal.id } : {}),
+    signalId: signal.id,
     threadId: thread.id,
-    from,
-    subject: signal ? signal.data.subject : thread.subject,
+    from: { address: signal.data.from.address, ...(signal.data.from.name ? { name: signal.data.from.name } : {}) },
+    subject: signal.data.subject,
+    workflow: thread.workflow,
+    urgency,
+  };
+  if (reason) {
+    payload.reason = reason;
+  }
+  return payload;
+}
+
+function buildThreadPayload(thread: Thread, urgency: ThreadUrgency, reason?: NotificationReason): NotificationPayload {
+  const payload: NotificationPayload = {
+    type: "thread:updated",
+    threadId: thread.id,
+    from: { address: thread.sender.address, ...(thread.sender.name ? { name: thread.sender.name } : {}) },
+    subject: thread.subject,
     workflow: thread.workflow,
     urgency,
   };

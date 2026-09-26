@@ -1,4 +1,6 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
+import { mock } from "vitest-mock-extended";
+import type { Notifier } from "../../src/notifier/types.js";
 // Feature: calendar-rsvp-reminder, Property 1: RSVP schedule creation guard and computation
 //
 // For any calendar_event signal with a valid ISO startTime: an RSVP reminder schedule
@@ -182,7 +184,7 @@ function buildProcessor(opts: {
     threadMatcher: makeArcMatcher(),
     ruleEvaluator: makeRuleEvaluator3(mockLogger),
     logger: mockLogger,
-    notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+    notifier: mock<Notifier>(),
     forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) },
     retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
     replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "mock-reply-id" })) },

@@ -1,4 +1,6 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
+import { mock } from "vitest-mock-extended";
+import type { Notifier } from "../../src/notifier/types.js";
 import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 import { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
 // Feature: split-embedding-pipeline, Property 4: Embeddings map composition
@@ -239,7 +241,7 @@ threadDb, accountDb, processingDb,
       threadMatcher: makeArcMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       logger: mockLogger,
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: mock<Notifier>(),
       forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) },
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) },

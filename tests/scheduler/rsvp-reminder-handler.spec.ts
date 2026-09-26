@@ -9,6 +9,7 @@ import type { Thread, Signal } from "../../src/types/index.js";
 import type { Notifier } from "../../src/notifier/types.js";
 import type { RsvpReminderMessage } from "../../src/scheduler/rsvp-reminder.js";
 import type { CalendarEventData } from "../../src/types/calendar.js";
+import { mock } from "vitest-mock-extended";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -91,7 +92,7 @@ function makeResponseSignal(): Signal {
 
 function setup() {
   const threadDb = { getSignalById: vi.fn(), getLatestCalendarResponse: vi.fn(), getThread: vi.fn() };
-  const notifier: Notifier = { notify: vi.fn(), notifyBlocked: vi.fn() };
+  const notifier = mock<Notifier>();
   const logger = createMockLogger();
 
   const handler = new RsvpReminderHandler({ threadDb, notifier, logger });
@@ -114,7 +115,7 @@ describe("RsvpReminderHandler", () => {
 
       expect(result.isOk()).toBe(true);
       expect(threadDb.getLatestCalendarResponse).not.toHaveBeenCalled();
-      expect(notifier.notify).not.toHaveBeenCalled();
+      expect(notifier.notifyThread).not.toHaveBeenCalled();
 
       // A scheduled reminder pointing at a missing calendar signal is a data-integrity fault, not a benign discard.
       const errorCalls = logger.calls.filter((c) => c.method === "error");
@@ -130,7 +131,7 @@ describe("RsvpReminderHandler", () => {
 
       expect(result.isOk()).toBe(true);
       expect(threadDb.getLatestCalendarResponse).not.toHaveBeenCalled();
-      expect(notifier.notify).not.toHaveBeenCalled();
+      expect(notifier.notifyThread).not.toHaveBeenCalled();
 
       const trackCalls = logger.calls.filter((c) => c.method === "track");
       expect(trackCalls).toHaveLength(1);
@@ -145,7 +146,7 @@ describe("RsvpReminderHandler", () => {
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(notifier.notify).not.toHaveBeenCalled();
+      expect(notifier.notifyThread).not.toHaveBeenCalled();
 
       const trackCalls = logger.calls.filter((c) => c.method === "track");
       expect(trackCalls).toHaveLength(1);
@@ -159,16 +160,15 @@ describe("RsvpReminderHandler", () => {
       threadDb.getSignalById.mockResolvedValue(ok(signal));
       threadDb.getLatestCalendarResponse.mockResolvedValue(ok(null));
       threadDb.getThread.mockResolvedValue(ok(arc));
-      vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
+      vi.mocked(notifier.notifyThread).mockResolvedValue(ok(undefined));
 
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(notifier.notify).toHaveBeenCalledOnce();
-      expect(notifier.notify).toHaveBeenCalledWith(
+      expect(notifier.notifyThread).toHaveBeenCalledOnce();
+      expect(notifier.notifyThread).toHaveBeenCalledWith(
         ACCOUNT_ID,
         expect.objectContaining({ id: ARC_ID }),
-        expect.objectContaining({ id: SIGNAL_ID }),
         "normal",
         "rsvp_reminder",
       );
@@ -188,7 +188,7 @@ describe("RsvpReminderHandler", () => {
 
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().kind).toBe("db_error");
-      expect(notifier.notify).not.toHaveBeenCalled();
+      expect(notifier.notifyThread).not.toHaveBeenCalled();
     });
 
     it("DB error on getLatestCalendarResponse → returns err (SQS retry)", async () => {
@@ -200,7 +200,7 @@ describe("RsvpReminderHandler", () => {
 
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().kind).toBe("db_error");
-      expect(notifier.notify).not.toHaveBeenCalled();
+      expect(notifier.notifyThread).not.toHaveBeenCalled();
     });
 
     it("DB error on getArc → returns err (SQS retry)", async () => {
@@ -213,7 +213,7 @@ describe("RsvpReminderHandler", () => {
 
       expect(result.isErr()).toBe(true);
       expect(result._unsafeUnwrapErr().kind).toBe("db_error");
-      expect(notifier.notify).not.toHaveBeenCalled();
+      expect(notifier.notifyThread).not.toHaveBeenCalled();
     });
 
     it("arc not found → discard (TRACK arc_missing)", async () => {
@@ -225,7 +225,7 @@ describe("RsvpReminderHandler", () => {
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(notifier.notify).not.toHaveBeenCalled();
+      expect(notifier.notifyThread).not.toHaveBeenCalled();
 
       const trackCalls = logger.calls.filter((c) => c.method === "track");
       expect(trackCalls).toHaveLength(1);

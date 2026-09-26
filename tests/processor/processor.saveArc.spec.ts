@@ -1,4 +1,6 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
+import { mock } from "vitest-mock-extended";
+import type { Notifier } from "../../src/notifier/types.js";
 import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 import { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
 import { describe, it, expect, vi } from "vitest";
@@ -191,7 +193,7 @@ describe("Single saveThread call with complete mutations", () => {
       replySender,
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
       logger: mockLogger,
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: mock<Notifier>(),
       forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) },
       retentionService: retentionService ?? { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "emails/test-ses-id" }) },
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,

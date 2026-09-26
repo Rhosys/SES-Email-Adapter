@@ -1,8 +1,10 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
+import { mock } from "vitest-mock-extended";
+import type { Notifier } from "../../src/notifier/types.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok, err } from "../../src/errors.js";
 import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
-import type { ThreadMatcherPort, Notifier,  SideEffectPayload } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, SideEffectPayload } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
@@ -163,9 +165,8 @@ describe("Side effect caller logging", () => {
   }
 
   it("when notifier.notify() returns err, caller logs at track level", async () => {
-    const notifier: Notifier = {
-      notify: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("push failed"))))),
-    };
+    const notifier = mock<Notifier>();
+    notifier.notifySignal.mockReturnValue(Promise.resolve(err(dbError(new Error("push failed")))));
 
     const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
@@ -197,9 +198,8 @@ describe("Side effect caller logging", () => {
   });
 
   it("when notifier.notify() succeeds, no failure log is emitted", async () => {
-    const notifier: Notifier = {
-      notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))),
-    };
+    const notifier = mock<Notifier>();
+    notifier.notifySignal.mockReturnValue(Promise.resolve(ok(undefined)));
 
     const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...makeStore(),
@@ -243,7 +243,7 @@ describe("Side effect caller logging", () => {
       threadMatcher: makeThreadMatcher(),
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
       forwardingService,
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: mock<Notifier>(),
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) },
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },

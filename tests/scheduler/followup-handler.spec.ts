@@ -5,6 +5,7 @@ import { createMockLogger } from "../helpers/mock-logger.js";
 import type { Thread, ThreadStatus } from "../../src/types/index.js";
 import type { Notifier } from "../../src/notifier/types.js";
 import type { FollowupMessage } from "../../src/scheduler/followup-handler.js";
+import { mock } from "vitest-mock-extended";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -40,7 +41,7 @@ const MESSAGE: FollowupMessage = { sqsMessageAttributeMessageType: "signal_follo
 
 function setup() {
   const threadDb = { getThread: vi.fn(), updateThread: vi.fn() };
-  const notifier: Notifier = { notify: vi.fn(), notifyBlocked: vi.fn() };
+  const notifier = mock<Notifier>();
   const logger = createMockLogger();
 
   const handler = new FollowupHandler({ threadDb: threadDb, notifier, logger });
@@ -61,7 +62,7 @@ describe("FollowupHandler", () => {
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(notifier.notify).not.toHaveBeenCalled();
+      expect(notifier.notifyThread).not.toHaveBeenCalled();
     });
 
     it("logs TRACK when arc is null", async () => {
@@ -84,7 +85,7 @@ describe("FollowupHandler", () => {
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(notifier.notify).not.toHaveBeenCalled();
+      expect(notifier.notifyThread).not.toHaveBeenCalled();
     });
 
     it("logs TRACK with reason deleted", async () => {
@@ -104,26 +105,25 @@ describe("FollowupHandler", () => {
       const { handler, threadDb, notifier } = setup();
       const arc = makeThread({ status: "active", urgency: "high" });
       threadDb.getThread.mockResolvedValue(ok(arc));
-      vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
+      vi.mocked(notifier.notifyThread).mockResolvedValue(ok(undefined));
 
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
       expect(threadDb.updateThread).not.toHaveBeenCalled();
-      expect(notifier.notify).toHaveBeenCalledOnce();
+      expect(notifier.notifyThread).toHaveBeenCalledOnce();
     });
 
     it("passes reason: followup to notifier", async () => {
       const { handler, threadDb, notifier } = setup();
       threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "active" })));
-      vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
+      vi.mocked(notifier.notifyThread).mockResolvedValue(ok(undefined));
 
       await handler.process(MESSAGE);
 
-      expect(notifier.notify).toHaveBeenCalledWith(
+      expect(notifier.notifyThread).toHaveBeenCalledWith(
         ACCOUNT_ID,
         expect.objectContaining({ status: "active" }),
-        undefined,
         expect.any(String),
         "followup",
       );
@@ -135,7 +135,7 @@ describe("FollowupHandler", () => {
       const { handler, threadDb, notifier } = setup();
       threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "archived" })));
       threadDb.updateThread.mockResolvedValue(ok(makeThread({ status: "active" })));
-      vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
+      vi.mocked(notifier.notifyThread).mockResolvedValue(ok(undefined));
 
       const result = await handler.process(MESSAGE);
 
@@ -143,21 +143,20 @@ describe("FollowupHandler", () => {
       expect(threadDb.updateThread).toHaveBeenCalledWith(
         ACCOUNT_ID, ARC_ID, "active", expect.any(String), {},
       );
-      expect(notifier.notify).toHaveBeenCalledOnce();
+      expect(notifier.notifyThread).toHaveBeenCalledOnce();
     });
 
     it("passes reason: followup to notifier after reactivation", async () => {
       const { handler, threadDb, notifier } = setup();
       threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "archived" })));
       threadDb.updateThread.mockResolvedValue(ok(makeThread({ status: "active" })));
-      vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
+      vi.mocked(notifier.notifyThread).mockResolvedValue(ok(undefined));
 
       await handler.process(MESSAGE);
 
-      expect(notifier.notify).toHaveBeenCalledWith(
+      expect(notifier.notifyThread).toHaveBeenCalledWith(
         ACCOUNT_ID,
         expect.objectContaining({ status: "active" }),
-        undefined,
         expect.any(String),
         "followup",
       );
@@ -171,7 +170,7 @@ describe("FollowupHandler", () => {
       const result = await handler.process(MESSAGE);
 
       expect(result.isErr()).toBe(true);
-      expect(notifier.notify).not.toHaveBeenCalled();
+      expect(notifier.notifyThread).not.toHaveBeenCalled();
     });
   });
 
@@ -199,11 +198,11 @@ describe("FollowupHandler", () => {
     it("active arc → reason is followup", async () => {
       const { handler, threadDb, notifier } = setup();
       threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "active" })));
-      vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
+      vi.mocked(notifier.notifyThread).mockResolvedValue(ok(undefined));
 
       await handler.process(MESSAGE);
 
-      const reason = vi.mocked(notifier.notify).mock.calls[0]![4];
+      const reason = vi.mocked(notifier.notifyThread).mock.calls[0]![3];
       expect(reason).toBe("followup");
     });
 
@@ -211,11 +210,11 @@ describe("FollowupHandler", () => {
       const { handler, threadDb, notifier } = setup();
       threadDb.getThread.mockResolvedValue(ok(makeThread({ status: "archived" })));
       threadDb.updateThread.mockResolvedValue(ok(makeThread({ status: "active" })));
-      vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
+      vi.mocked(notifier.notifyThread).mockResolvedValue(ok(undefined));
 
       await handler.process(MESSAGE);
 
-      const reason = vi.mocked(notifier.notify).mock.calls[0]![4];
+      const reason = vi.mocked(notifier.notifyThread).mock.calls[0]![3];
       expect(reason).toBe("followup");
     });
   });
@@ -248,7 +247,7 @@ describe("FollowupHandler", () => {
         const { handler, threadDb, notifier } = setup();
         threadDb.getThread.mockResolvedValue(ok(arc));
         threadDb.updateThread.mockResolvedValue(ok(makeThread({ status: "active" })));
-        vi.mocked(notifier.notify).mockResolvedValue(ok(undefined));
+        vi.mocked(notifier.notifyThread).mockResolvedValue(ok(undefined));
 
         const result = await handler.process(MESSAGE);
 
@@ -263,12 +262,12 @@ describe("FollowupHandler", () => {
         }
 
         if (shouldNotify) {
-          expect(notifier.notify).toHaveBeenCalledOnce();
+          expect(notifier.notifyThread).toHaveBeenCalledOnce();
           // Verify reason is always "followup" when notification is sent
-          const reason = vi.mocked(notifier.notify).mock.calls[0]![4];
+          const reason = vi.mocked(notifier.notifyThread).mock.calls[0]![3];
           expect(reason).toBe("followup");
         } else {
-          expect(notifier.notify).not.toHaveBeenCalled();
+          expect(notifier.notifyThread).not.toHaveBeenCalled();
         }
       },
     );
@@ -281,7 +280,7 @@ describe("FollowupHandler", () => {
 
       expect(result.isOk()).toBe(true);
       expect(threadDb.updateThread).not.toHaveBeenCalled();
-      expect(notifier.notify).not.toHaveBeenCalled();
+      expect(notifier.notifyThread).not.toHaveBeenCalled();
     });
   });
 });

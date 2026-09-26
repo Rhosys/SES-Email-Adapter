@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mock } from "vitest-mock-extended";
+import type { Notifier } from "../../src/notifier/types.js";
 import { ok, err } from "neverthrow";
 import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
-import type { ThreadMatcherPort, SqsDispatcher, Notifier, ReplySender, SideEffectPayload } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, SqsDispatcher, ReplySender, SideEffectPayload } from "../../src/processor/incoming-email-processor.js";
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
@@ -146,7 +148,7 @@ function makeProcessor(opts: { store: ReturnType<typeof makeStore>; logger: Mock
     logger: opts.logger,
     retentionService: { applyPlanRetention: vi.fn() } as unknown as S3RetentionService,
     sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as unknown as SqsDispatcher,
-    notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as unknown as Notifier,
+    notifier: mock<Notifier>(),
     forwardingService: opts.forwardingService ?? { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as IForwardingService,
     replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "msg-001" })) } as unknown as ReplySender,
     draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
@@ -177,7 +179,7 @@ describe("processSideEffect — forward dispatches to ForwardingService", () => 
   it("forward fires after notify completes", async () => {
     const store = makeStore("Paid");
     const forwarder = { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) };
-    const notifier = { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
+    const notifier = mock<Notifier>();
 
     const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...makeSharedNewDeps(),
       ...store,
@@ -190,7 +192,7 @@ describe("processSideEffect — forward dispatches to ForwardingService", () => 
       logger: mockLogger,
       retentionService: { applyPlanRetention: vi.fn() } as unknown as S3RetentionService,
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as unknown as SqsDispatcher,
-      notifier: notifier as unknown as Notifier,
+      notifier: notifier,
       forwardingService: forwarder as unknown as IForwardingService,
       replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "msg-001" })) } as unknown as ReplySender,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,
@@ -216,7 +218,7 @@ describe("processSideEffect — forward dispatches to ForwardingService", () => 
 
     // Forward and notify were called
     expect(forwarder.forward).toHaveBeenCalledOnce();
-    expect(notifier.notify).toHaveBeenCalledOnce();
+    expect(notifier.notifySignal).toHaveBeenCalledOnce();
 
     // Verify forward was called with signal and thread
     const [targetId, fwdSignal, fwdThread] = forwarder.forward.mock.calls[0]!;
@@ -318,7 +320,7 @@ describe("processSideEffect — pong eligibility (sender ownership)", () => {
       logger: opts.logger,
       retentionService: { applyPlanRetention: vi.fn() } as unknown as S3RetentionService,
       sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as unknown as SqsDispatcher,
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) } as unknown as Notifier,
+      notifier: mock<Notifier>(),
       forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) } as unknown as IForwardingService,
       replySender: opts.replySender,
       draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never,

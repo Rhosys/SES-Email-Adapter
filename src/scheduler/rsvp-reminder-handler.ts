@@ -94,6 +94,6 @@ export class RsvpReminderHandler {
 
     // 6. Notify — user has not responded and event is upcoming
     const reason: NotificationReason = "rsvp_reminder";
-    return this.notifier.notify(accountId, thread, signal, thread.urgency ?? "normal", reason);
+    return this.notifier.notifyThread(accountId, thread, thread.urgency ?? "normal", reason);
   }
 }

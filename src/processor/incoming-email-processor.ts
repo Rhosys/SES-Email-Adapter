@@ -39,6 +39,7 @@ import { isSystemAccount } from "../database/system-account-db.js";
 import { parseHopCount, type EmailSendType } from "../email/ses-tags.js";
 import { toRuleSignalContext, toRuleThreadContext } from "./rule-context.js";
 import { buildBounceSuppressionEntry } from "../notifier/bounce-suppression.js";
+import type { Notifier } from "../notifier/types.js";
 import { statusToMetric } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
 import { isReplyTargetSafe } from "./reply-target-validator.js";
@@ -90,11 +91,6 @@ export interface ThreadMatcherPort {
 export interface RuleEvaluator {
   evaluate(rule: Rule, context: { signal: Signal; thread: Thread; isMatchedThread: boolean }): Promise<RuleEvalResult>;
 }
-
-export interface Notifier {
-  notify(accountId: string, thread: Thread, signal: Signal, urgency: ThreadUrgency): Promise<Result<void, DbError>>;
-}
-
 
 /**
  * Failure modes of an outbound send, across both routes: SES rejections, provider-side
@@ -704,7 +700,7 @@ export class IncomingEmailProcessor {
     if (!outcome.suppressNotification && !payload.skipNotify) {
       try {
         this.logger.trackPoint("side_effect_notify_start");
-        const notifyResult = await this.notifier.notify(accountId, thread, signal, thread.urgency ?? "normal");
+        const notifyResult = await this.notifier.notifySignal(accountId, thread, signal, thread.urgency ?? "normal");
         if (notifyResult.isErr()) {
           this.logger.track(`Side-effect notification failed: ${notifyResult.error.message}`, { code: "processor.side_effect.notify_failed", signal, thread, payload, error: notifyResult.error, receiveCount });
         }
