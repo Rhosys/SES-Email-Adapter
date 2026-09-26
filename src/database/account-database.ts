@@ -120,7 +120,7 @@ export class AccountDatabase {
         ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
         ReturnValues: "ALL_NEW",
       }));
-      return ok(res.Attributes! as unknown as Account);
+      return ok(res.Attributes! as Account);
     } catch (e) {
       return err(dbError(e));
     }
@@ -556,7 +556,7 @@ export class AccountDatabase {
         ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
         ReturnValues: "ALL_NEW",
       }));
-      return ok(res.Attributes as unknown as View);
+      return ok(res.Attributes as View);
     } catch (e) {
       return err(dbError(e));
     }
@@ -642,7 +642,7 @@ export class AccountDatabase {
           TableName: ACCOUNTS_TABLE,
           Key: { pk: pk(accountId), sk: `LABEL#${id}` },
         }));
-        return ok(res.Item as unknown as Label);
+        return ok(res.Item as Label);
       } catch (e) {
         return err(dbError(e));
       }
@@ -656,7 +656,7 @@ export class AccountDatabase {
         ExpressionAttributeValues: exprValues,
         ReturnValues: "ALL_NEW",
       }));
-      return ok(res.Attributes as unknown as Label);
+      return ok(res.Attributes as Label);
     } catch (e) {
       return err(dbError(e));
     }
@@ -820,7 +820,7 @@ export class AccountDatabase {
         ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
         ReturnValues: "ALL_NEW",
       }));
-      return ok(res.Attributes as unknown as Rule);
+      return ok(res.Attributes as Rule);
     } catch (e) {
       return err(dbError(e));
     }
@@ -888,7 +888,7 @@ export class AccountDatabase {
   async getDomain(accountId: string, domainName: string): Promise<Result<Domain | null, DbError>> {
     try {
       const res = await dynamo.send(new GetCommand({ TableName: ACCOUNTS_TABLE, Key: { pk: pk(accountId), sk: `DOMAIN#${domainName}` } }));
-      const item = res.Item ? res.Item as unknown as Domain : null;
+      const item = res.Item ? res.Item as Domain : null;
       if (item?.status === "deleted") return ok(null);
       return ok(item);
     } catch (e) {
@@ -1193,7 +1193,7 @@ export class AccountDatabase {
         ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
         ReturnValues: "ALL_NEW",
       }));
-      return ok(res.Attributes as unknown as EmailTemplate);
+      return ok(res.Attributes as EmailTemplate);
     } catch (e) {
       return err(dbError(e));
     }

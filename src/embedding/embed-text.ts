@@ -232,10 +232,10 @@ function getIdentityValues(workflow: string, workflowData: WorkflowData): string
   if (!definition) return [];
 
   const values: string[] = [];
-  const data = workflowData as unknown as Record<string, unknown>;
+  const byName = new Map(Object.entries(workflowData));
   for (const field of definition.fields) {
     if (!field.identity) continue;
-    const value = data[field.name];
+    const value = byName.get(field.name);
     if (value != null && typeof value === "string" && value.trim() !== "") {
       values.push(value);
     }

@@ -47,7 +47,7 @@ export type ThreadedSignalRef = Pick<Signal, "id" | "signalLookupId" | "threadId
 
 export const PENDING_SEND_STALE_HOURS = 4;
 
-export function coerceStaleStatus(signal: Signal): Signal {
+export function coerceStaleStatus<T extends Signal | AnySignal>(signal: T): T {
   if (signal.status !== "pending_send") return signal;
   const sendInitiatedAt = (signal.data as { sendInitiatedAt?: string }).sendInitiatedAt;
   if (!sendInitiatedAt) return { ...signal, status: "draft" };
@@ -105,7 +105,7 @@ export class ThreadDatabase {
   // Signals
   // ---------------------------------------------------------------------------
 
-  async getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>> {
+  async getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<AnySignal | null, DbError>> {
     try {
       const gsi1pk = threadId === "QUARANTINED" ? `ACCT#${accountId}#QUARANTINED`
         : threadId === "BLOCKED" ? `ACCT#${accountId}#BLOCKED`
@@ -121,7 +121,7 @@ export class ThreadDatabase {
       if (items.length > 1) {
         this.logger.error("Signal id is supposed to be unique within a thread but more than one record was found. Returning the first, but this indicates a data integrity bug.", { code: "thread_database.signal_not_unique", accountId, signalId, threadId, count: items.length });
       }
-      return ok(items[0] ? coerceStaleStatus(hydrateSignal(items[0] as Signal)) : null);
+      return ok(items[0] ? coerceStaleStatus(hydrateSignal(items[0] as AnySignal)) : null);
     } catch (e) {
       return err(dbError(e));
     }
@@ -221,7 +221,7 @@ export class ThreadDatabase {
     return ok(signal);
   }
 
-  async listSignals(accountId: string, threadId: string, params: PageParams): Promise<Result<Page<Signal>, DbError>> {
+  async listSignals(accountId: string, threadId: string, params: PageParams): Promise<Result<Page<AnySignal>, DbError>> {
     const limit = Math.min(params.limit ?? 20, 100);
     try {
       const res = await dynamo.send(new QueryCommand({
@@ -233,10 +233,10 @@ export class ThreadDatabase {
         Limit: limit + 1,
         ...(params.cursor ? { ExclusiveStartKey: decodeCursor(params.cursor) } : {}),
       }));
-      const items = (res.Items ?? []).map(i => hydrateSignal(i as Signal));
+      const items = (res.Items ?? []).map(i => hydrateSignal(i as AnySignal));
       const page = items.slice(0, limit);
       const nextKey = items.length > limit && res.LastEvaluatedKey ? encodeCursor(res.LastEvaluatedKey) : null;
-      return ok({ items: page, ...(nextKey ? { nextCursor: nextKey } : {}) } as Page<Signal>);
+      return ok({ items: page, ...(nextKey ? { nextCursor: nextKey } : {}) });
     } catch (e) {
       return err(dbError(e));
     }
@@ -277,7 +277,7 @@ export class ThreadDatabase {
         },
         ReturnValues: "ALL_NEW",
       }));
-      return ok(hydrateSignal(result.Attributes as unknown as Signal));
+      return ok(hydrateSignal(result.Attributes as Signal));
     } catch (e) {
       return err(dbError(e));
     }
@@ -408,7 +408,7 @@ export class ThreadDatabase {
         ExpressionAttributeNames: exprNames,
         ReturnValues: "ALL_NEW",
       }));
-      return ok(hydrateThreadObject(result.Attributes as unknown as Thread));
+      return ok(hydrateThreadObject(result.Attributes as Thread));
     } catch (e) {
       return err(dbError(e));
     }
@@ -463,7 +463,7 @@ export class ThreadDatabase {
         ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
         ReturnValues: "ALL_NEW",
       }));
-      return ok(hydrateSignal(result.Attributes as unknown as Signal));
+      return ok(hydrateSignal(result.Attributes as Signal));
     } catch (e) {
       return err(dbError(e));
     }
@@ -512,7 +512,7 @@ export class ThreadDatabase {
         ExpressionAttributeNames: exprNames,
         ReturnValues: "ALL_NEW",
       }));
-      return ok(hydrateSignal(result.Attributes as unknown as Signal));
+      return ok(hydrateSignal(result.Attributes as Signal));
     } catch (e) {
       return err(dbError(e));
     }
@@ -681,7 +681,7 @@ export class ThreadDatabase {
           return sig.type === "calendar_event" && sig.data?.linkedSignalId === emailSignalId;
         },
       );
-      return ok(calendarSignal ? hydrateSignal(calendarSignal as unknown as Signal<CalendarEventData>) : null);
+      return ok(calendarSignal ? hydrateSignal(calendarSignal as Signal<CalendarEventData>) : null);
     } catch (e) {
       return err(dbError(e));
     }
@@ -709,7 +709,7 @@ export class ThreadDatabase {
       const responses = signals.filter((s) => {
         const sig = s as { type?: string; data?: { veventUid?: string } };
         return sig.type === "calendar_response" && sig.data?.veventUid === veventUid;
-      }) as unknown as Signal<import("../types/calendar.js").CalendarResponseData>[];
+      }) as Signal<import("../types/calendar.js").CalendarResponseData>[];
       const responseSignal = responses.reduce<typeof responses[number] | undefined>(
         (latest, s) => (latest === undefined || s.data.respondedAt > latest.data.respondedAt ? s : latest),
         undefined,

@@ -58,7 +58,12 @@ export type DeliverablePayload = NotificationPayload | OtpPayload;
 // ─── Notifier Interface ──────────────────────────────────────────────────────
 
 export interface Notifier {
-  notify(accountId: string, thread: Thread, signal: Signal | undefined, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>>;
+  /** A new email signal arrived on the thread — the notification's from/subject are taken from
+   *  the signal itself. Only email signals carry from/subject, so the param is email-only. */
+  notifySignal(accountId: string, thread: Thread, signal: Signal, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>>;
+  /** A time-based re-surface of an existing thread (follow-up, RSVP reminder) — there is no
+   *  triggering signal, so the notification's from/subject come from the thread. */
+  notifyThread(accountId: string, thread: Thread, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>>;
   notifyBlocked(accountId: string, signal: Signal): Promise<Result<void, DbError>>;
 }
 

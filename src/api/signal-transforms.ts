@@ -7,12 +7,12 @@ import type {
   Attachment,
   EmailSignalData,
   InboundEmailSignalData,
+  InlineImageRef,
   DeliverabilitySignalData,
   MatchedRuleResult,
   Signal as DbSignal,
   Workflow,
 } from "../types/index.js";
-import { isEmailSignal } from "../types/index.js";
 import type * as Api from "./schemas.js";
 
 // matchedRules is an append-only trace (e.g. a signal dismissed from quarantine gets a second
@@ -38,41 +38,30 @@ function isCalendarAttachment(attachment: Attachment): boolean {
   return false;
 }
 
-// Resolves what the content sanitizer left as s3Key-only references (never a baked-in URL,
-// so CDN config can change without a data migration) into CDN urls, at API read time:
-//  - Attachment.s3Key -> Attachment.url, as before.
-//  - Any `cid:{contentId}` left unresolved in htmlBody (an inline image too large, or past
-//    the per-message budget, to embed as a data URI — see MAX_INLINE_DATA_URI_SIZE /
-//    MAX_INLINE_DATA_URI_COUNT in the content sanitizer) -> the matching InlineImageRef's CDN url.
-// inlineImages itself is intentionally not included on the returned signal — it's write-side
-// plumbing for this substitution, not something the client needs.
-export function withResolvedContentUrls<T extends AnySignal>(signal: T, cdnBase: string): T {
-  if (!isEmailSignal(signal)) return signal;
-
-  // Calendar (.ics) attachments are surfaced as first-class calendar_event / calendar_response
-  // signals — the raw invite file is redundant noise in the attachment list, so it is not
-  // returned to the client. The stored attachment ref is left untouched (the calendar
-  // processor and post-approval handler still read it); this filter is API-read-side only.
-  const attachments = signal.data.attachments
-    .filter((a: Attachment) => !isCalendarAttachment(a))
-    .map((a: Attachment) => ({ ...a, url: `${cdnBase}/${a.s3Key}` }));
-
-  const inlineImages = (signal.data as InboundEmailSignalData).inlineImages;
-  let htmlBody = (signal.data as InboundEmailSignalData).htmlBody;
-  if (htmlBody && inlineImages && inlineImages.length > 0) {
-    for (const ref of inlineImages) {
-      htmlBody = htmlBody.replace(new RegExp(`cid:${escapeRegExp(ref.contentId)}`, "g"), `${cdnBase}/${ref.s3Key}`);
-    }
+// s3Key-only references left by the content sanitizer (never a baked-in URL, so CDN config can
+// change without a data migration) are resolved to CDN urls here, at the moment attachments and
+// htmlBody are shaped for the wire: Attachment.s3Key -> the DTO's `url`, and any unresolved
+// `cid:{contentId}` in htmlBody (an inline image too large, or past the per-message budget, to
+// embed as a data URI — see MAX_INLINE_DATA_URI_SIZE / MAX_INLINE_DATA_URI_COUNT in the content
+// sanitizer) -> the matching InlineImageRef's CDN url. inlineImages itself is never surfaced —
+// it is write-side plumbing for this substitution, not something the client needs.
+function resolveInlineImageUrls(htmlBody: string, inlineImages: InlineImageRef[] | undefined, cdnBase: string): string {
+  if (!inlineImages || inlineImages.length === 0) return htmlBody;
+  let resolved = htmlBody;
+  for (const ref of inlineImages) {
+    resolved = resolved.replace(new RegExp(`cid:${escapeRegExp(ref.contentId)}`, "g"), `${cdnBase}/${ref.s3Key}`);
   }
+  return resolved;
+}
 
-  return {
-    ...signal,
-    data: {
-      ...signal.data,
-      attachments,
-      ...(htmlBody !== undefined ? { htmlBody } : {}),
-    },
-  } as T;
+// Calendar (.ics) attachments are surfaced as first-class calendar_event / calendar_response
+// signals — the raw invite file is redundant noise in the attachment list, so it is not returned
+// to the client. The stored attachment ref is left untouched (the calendar processor and
+// post-approval handler still read it); this filter is API-read-side only.
+function toApiAttachments(attachments: Attachment[], cdnBase: string): Api.Attachment[] {
+  return attachments
+    .filter(a => !isCalendarAttachment(a))
+    .map(a => ({ filename: a.filename, mimeType: a.mimeType, sizeBytes: a.sizeBytes, url: `${cdnBase}/${a.s3Key}` }));
 }
 
 export function toApiThread(thread: DbThread): Api.Thread {
@@ -112,7 +101,7 @@ function workflowKeepsUnsubscribe(workflow: Workflow): boolean {
   return UNSUBSCRIBE_WORKFLOWS.has(workflow);
 }
 
-function toApiEmailSignalData(data: EmailSignalData, source: DbSignal["source"]): Api.InboundEmailSignalData | Api.OutboundEmailSignalData {
+function toApiEmailSignalData(data: EmailSignalData, source: DbSignal["source"], cdnBase: string): Api.InboundEmailSignalData | Api.OutboundEmailSignalData {
   // A user-composed message (draft or sent) is outbound. Keying on `source` — not on
   // `sendInitiatedAt` — is what surfaces the body of a saved-but-unsent draft: an unsent draft
   // has no sendInitiatedAt, so the old check misrouted it to the inbound serializer and dropped
@@ -131,12 +120,7 @@ function toApiEmailSignalData(data: EmailSignalData, source: DbSignal["source"])
       ...(data.replyTo ? { replyTo: data.replyTo } : {}),
       subject: data.subject,
       ...(outboundBody ? { body: outboundBody } : {}),
-      attachments: (data.attachments ?? []).map(a => ({
-        filename: a.filename,
-        mimeType: a.mimeType,
-        sizeBytes: a.sizeBytes,
-        ...((a as unknown as { url?: string }).url ? { url: (a as unknown as { url: string }).url } : {}),
-      })),
+      attachments: toApiAttachments(data.attachments ?? [], cdnBase),
       sendInitiatedAt: outboundData.sendInitiatedAt ?? "",
       ...(outboundData.sentAt ? { sentAt: outboundData.sentAt } : {}),
       ...(outboundData.sendFailureReason ? { sendFailureReason: outboundData.sendFailureReason } : {}),
@@ -155,13 +139,8 @@ function toApiEmailSignalData(data: EmailSignalData, source: DbSignal["source"])
     cc: data.cc,
     ...(data.replyTo ? { replyTo: data.replyTo } : {}),
     subject: data.subject,
-    ...(inboundData.htmlBody ? { body: inboundData.htmlBody } : {}),
-    attachments: (data.attachments ?? []).map(a => ({
-      filename: a.filename,
-      mimeType: a.mimeType,
-      sizeBytes: a.sizeBytes,
-      ...((a as unknown as { url?: string }).url ? { url: (a as unknown as { url: string }).url } : {}),
-    })),
+    ...(inboundData.htmlBody ? { body: resolveInlineImageUrls(inboundData.htmlBody, inboundData.inlineImages, cdnBase) } : {}),
+    attachments: toApiAttachments(data.attachments ?? [], cdnBase),
     headers: data.headers ?? {},
     recipientAddress: data.recipientAddress,
     workflow: inboundData.workflow as Api.InboundEmailSignalData["workflow"],
@@ -209,7 +188,7 @@ function toApiCalendarData(type: string, data: unknown): unknown {
   return data;
 }
 
-export function toApiSignal(signal: AnySignal): Api.Signal {
+export function toApiSignal(signal: AnySignal, cdnBase: string): Api.Signal {
   const base = {
     signalId: signal.id,
     threadId: signal.threadId ?? null,
@@ -225,13 +204,13 @@ export function toApiSignal(signal: AnySignal): Api.Signal {
         return {
           ...base,
           type: "email" as const,
-          data: toApiEmailSignalData(emailData, signal.source) as Api.OutboundEmailSignalData,
+          data: toApiEmailSignalData(emailData, signal.source, cdnBase) as Api.OutboundEmailSignalData,
         } as Api.Signal;
       }
       return {
         ...base,
         type: "email" as const,
-        data: toApiEmailSignalData(emailData, signal.source) as Api.InboundEmailSignalData,
+        data: toApiEmailSignalData(emailData, signal.source, cdnBase) as Api.InboundEmailSignalData,
       } as Api.Signal;
     }
     case "deliverability": {

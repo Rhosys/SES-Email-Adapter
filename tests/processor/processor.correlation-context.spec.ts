@@ -1,8 +1,10 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
+import { mock } from "vitest-mock-extended";
+import type { Notifier } from "../../src/notifier/types.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { ok } from "../../src/errors.js";
 import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
-import type { ThreadMatcherPort, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, ReplySender, SideEffectPayload } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "./_shared-new-deps.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock } from "./_helpers.js";
@@ -117,7 +119,7 @@ describe("processSideEffect — correlation context", () => {
       auroraWriter: { upsertEmbedding: vi.fn(), findMatch: vi.fn() } as unknown as MultiClusterAuroraWriter,
       threadMatcher: { findMatch: vi.fn(), upsertEmbedding: vi.fn(), deleteEmbeddingsForThread: vi.fn() } as unknown as ThreadMatcherPort,
       ruleEvaluator: makeRuleEvaluator3(mockLogger),
-      notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+      notifier: mock<Notifier>(),
       forwardingService: opts.forwardingService,
       retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) },
       replySender: opts.replySender,

@@ -2,8 +2,9 @@ import { DateTime } from "luxon";
 
 import { ok, err } from "../errors.js";
 import type { Result, DbError } from "../errors.js";
-import type { Signal, Thread } from "../types/index.js";
-import type { CalendarEventData, CalendarResponseData } from "../types/calendar.js";
+import type { AnySignal, Signal, Thread } from "../types/index.js";
+import type { CalendarResponseData } from "../types/calendar.js";
+import { isCalendarEventSignal } from "../types/calendar.js";
 import type { Notifier, NotificationReason } from "../notifier/types.js";
 import type { Logger } from "../logger.js";
 import type { RsvpReminderMessage } from "./rsvp-reminder.js";
@@ -13,7 +14,7 @@ import type { RsvpReminderMessage } from "./rsvp-reminder.js";
 // ---------------------------------------------------------------------------
 
 export interface IRsvpReminderThreadDb {
-  getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>>;
+  getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<AnySignal | null, DbError>>;
   getLatestCalendarResponse(accountId: string, threadId: string, veventUid: string): Promise<Result<Signal<CalendarResponseData> | null, DbError>>;
   getThread(accountId: string, threadId: string): Promise<Result<Thread | null, DbError>>;
 }
@@ -52,9 +53,17 @@ export class RsvpReminderHandler {
       return ok(undefined);
     }
 
-    // 2. Extract startTime and veventUid from calendar event data
-    const calendarData = signal.data as unknown as CalendarEventData;
-    const { veventUid, startTime } = calendarData;
+    // 2. Extract startTime and veventUid. The reminder was scheduled against a calendar_event
+    // signal, so a row of any other type is a data-integrity fault (bad write, TTL, wrong id) —
+    // discard after logging, same as the missing-signal case.
+    if (!isCalendarEventSignal(signal)) {
+      this.logger.error("RSVP reminder: scheduled signal is not a calendar event, discarding.", {
+        code: "rsvp_reminder.signal_wrong_type",
+        accountId, calendarSignalId, threadId, signalType: signal.type,
+      });
+      return ok(undefined);
+    }
+    const { veventUid, startTime } = signal.data;
 
     // 3. Check if event has passed
     const eventStart = DateTime.fromISO(startTime, { zone: "utc" });
@@ -94,6 +103,6 @@ export class RsvpReminderHandler {
 
     // 6. Notify — user has not responded and event is upcoming
     const reason: NotificationReason = "rsvp_reminder";
-    return this.notifier.notify(accountId, thread, signal, thread.urgency ?? "normal", reason);
+    return this.notifier.notifyThread(accountId, thread, thread.urgency ?? "normal", reason);
   }
 }

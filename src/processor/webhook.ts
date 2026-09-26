@@ -32,7 +32,7 @@ export function buildWebhookPayload(signal: Signal, thread: Thread | null): Webh
     subject: signal.data.subject,
     alias: signal.data.recipientAddress,
     workflow: isInboundEmailSignalData(signal.data) ? signal.data.workflow : "",
-    workflowData: isInboundEmailSignalData(signal.data) ? (signal.data.workflowData as unknown as Record<string, unknown>) : {},
+    workflowData: isInboundEmailSignalData(signal.data) ? { ...signal.data.workflowData } : {},
     summary: signal.data.summary,
     labels: thread?.labels ?? [],
   };

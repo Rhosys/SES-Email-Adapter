@@ -117,7 +117,7 @@ describe("DeviceNotifier", () => {
         logger: mockLogger(),
       });
 
-      await notifier.notify("acct-1", arc, signal, urgency);
+      await notifier.notifySignal("acct-1", arc, signal, urgency);
 
       expect(wsDeliverer.deliver).toHaveBeenCalledTimes(1);
       expect(fcmDeliverer.deliver).toHaveBeenCalledTimes(expectPush ? 1 : 0);
@@ -136,7 +136,7 @@ describe("DeviceNotifier", () => {
         logger: mockLogger(),
       });
 
-      const result = await notifier.notify("acct-1", arc, signal, "normal");
+      const result = await notifier.notifySignal("acct-1", arc, signal, "normal");
 
       expect(result.isOk()).toBe(true);
     });
@@ -152,7 +152,7 @@ describe("DeviceNotifier", () => {
         logger: mockLogger(),
       });
 
-      await notifier.notify("acct-1", arc, signal, "high");
+      await notifier.notifySignal("acct-1", arc, signal, "high");
 
       expect(wsDeliverer.deliver).toHaveBeenCalledTimes(1);
       expect(fcmDeliverer.deliver).toHaveBeenCalledTimes(1);
@@ -171,7 +171,7 @@ describe("DeviceNotifier", () => {
         logger: mockLogger(),
       });
 
-      const result = await notifier.notify("acct-1", arc, signal, "normal");
+      const result = await notifier.notifySignal("acct-1", arc, signal, "normal");
 
       expect(result.isErr()).toBe(true);
       if (result.isErr()) {
@@ -191,7 +191,7 @@ describe("DeviceNotifier", () => {
         logger: mockLogger(),
       });
 
-      await notifier.notify("acct-1", arc, signal, "high");
+      await notifier.notifySignal("acct-1", arc, signal, "high");
 
       const expectedPayload: NotificationPayload = {
         type: "thread:updated",
@@ -215,7 +215,7 @@ describe("DeviceNotifier", () => {
         logger: mockLogger(),
       });
 
-      await notifier.notify("acct-1", arc, signalNoName, "normal");
+      await notifier.notifySignal("acct-1", arc, signalNoName, "normal");
 
       const call = wsDeliverer.deliver.mock.calls[0]!;
       const deliveredPayload = call[1] as NotificationPayload;
@@ -230,7 +230,7 @@ describe("DeviceNotifier", () => {
       const deliverers = mockDeliverers();
       const notifier = new DeviceNotifier({ deviceStore: store, deliverers, logger: mockLogger() });
 
-      const result = await notifier.notify("acct-1", arc, signal, "normal");
+      const result = await notifier.notifySignal("acct-1", arc, signal, "normal");
 
       expect(result.isOk()).toBe(true);
     });
@@ -248,7 +248,7 @@ describe("DeviceNotifier", () => {
         logger: mockLogger(),
       });
 
-      await notifier.notify("acct-1", arc, signal, "normal");
+      await notifier.notifySignal("acct-1", arc, signal, "normal");
 
       expect(wsDeliverer.deliver).toHaveBeenCalledTimes(1);
       expect(fcmDeliverer.deliver).toHaveBeenCalledTimes(1);
@@ -266,7 +266,7 @@ describe("DeviceNotifier", () => {
         logger: mockLogger(),
       });
 
-      await notifier.notify("acct-1", arc, signal, undefined);
+      await notifier.notifySignal("acct-1", arc, signal, undefined);
 
       const call = wsDeliverer.deliver.mock.calls[0]!;
       const deliveredPayload = call[1] as NotificationPayload;
@@ -299,7 +299,7 @@ describe("DeviceNotifier", () => {
         logger: mockLogger(),
       });
 
-      await notifier.notify("acct-1", arc, signal, "normal", "followup");
+      await notifier.notifySignal("acct-1", arc, signal, "normal", "followup");
 
       const call = wsDeliverer.deliver.mock.calls[0]!;
       const deliveredPayload = call[1] as NotificationPayload;
@@ -315,7 +315,7 @@ describe("DeviceNotifier", () => {
         logger: mockLogger(),
       });
 
-      await notifier.notify("acct-1", arc, signal, "normal", "new_signal");
+      await notifier.notifySignal("acct-1", arc, signal, "normal", "new_signal");
 
       const call = wsDeliverer.deliver.mock.calls[0]!;
       const deliveredPayload = call[1] as NotificationPayload;
@@ -331,7 +331,7 @@ describe("DeviceNotifier", () => {
         logger: mockLogger(),
       });
 
-      await notifier.notify("acct-1", arc, signal, "normal");
+      await notifier.notifySignal("acct-1", arc, signal, "normal");
 
       const call = wsDeliverer.deliver.mock.calls[0]!;
       const deliveredPayload = call[1] as NotificationPayload;
@@ -347,7 +347,7 @@ describe("DeviceNotifier", () => {
         logger: mockLogger(),
       });
 
-      await notifier.notify("acct-1", arc, signal, "normal", undefined);
+      await notifier.notifySignal("acct-1", arc, signal, "normal", undefined);
 
       const call = wsDeliverer.deliver.mock.calls[0]!;
       const deliveredPayload = call[1] as NotificationPayload;
@@ -360,7 +360,7 @@ describe("DeviceNotifier", () => {
       const store = mockDeviceStore({ listDevices: vi.fn(async () => err(dbError("DynamoDB timeout"))) });
       const notifier = new DeviceNotifier({ deviceStore: store, deliverers: mockDeliverers(), logger: mockLogger() });
 
-      const result = await notifier.notify("acct-1", arc, signal, "normal");
+      const result = await notifier.notifySignal("acct-1", arc, signal, "normal");
 
       expect(result.isErr()).toBe(true);
     });

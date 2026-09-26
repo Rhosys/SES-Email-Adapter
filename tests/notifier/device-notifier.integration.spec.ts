@@ -1,10 +1,12 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
+import { mock } from "vitest-mock-extended";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ok } from "neverthrow";
 import { IncomingEmailProcessor, SYSTEM_RULES } from "../../src/processor/incoming-email-processor.js";
 import { JsonLogicRuleEvaluator } from "../../src/processor/rule-evaluator.js";
 import { makeSharedNewDeps, makeRuleEvaluator3 } from "../processor/_shared-new-deps.js";
-import type { ThreadMatcherPort, SqsDispatcher, Notifier,  ReplySender, SideEffectPayload } from "../../src/processor/incoming-email-processor.js";
+import type { ThreadMatcherPort, SqsDispatcher, ReplySender, SideEffectPayload } from "../../src/processor/incoming-email-processor.js";
+import type { Notifier } from "../../src/notifier/types.js";
 import { makeThreadDbMock, makeAccountDbMock, makeProcessingDbMock, applyCtx } from "../processor/_helpers.js";
 import type { ContentSanitizerClient } from "../../src/processor/content-sanitizer-client.js";
 import type { SignalClassifier } from "../../src/classifier/classifier.js";
@@ -145,7 +147,7 @@ function makeSqsDispatcher(): SqsDispatcher {
 }
 
 function makeNotifier(): Notifier {
-  return { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) };
+  return mock<Notifier>();
 }
 
 function makeForwarder(): IForwardingService {
@@ -257,8 +259,8 @@ describe("DeviceNotifier wiring: processor invokes notifier with urgency", () =>
 
     await processor.processSideEffect(payload);
 
-    expect(notifier.notify).toHaveBeenCalledOnce();
-    expect(notifier.notify).toHaveBeenCalledWith(
+    expect(notifier.notifySignal).toHaveBeenCalledOnce();
+    expect(notifier.notifySignal).toHaveBeenCalledWith(
       TEST_ACCOUNT_ID,
       thread,
       signal,
@@ -274,8 +276,8 @@ describe("DeviceNotifier wiring: processor invokes notifier with urgency", () =>
 
     await processor.processSideEffect(payload);
 
-    expect(notifier.notify).toHaveBeenCalledOnce();
-    expect(notifier.notify).toHaveBeenCalledWith(
+    expect(notifier.notifySignal).toHaveBeenCalledOnce();
+    expect(notifier.notifySignal).toHaveBeenCalledWith(
       TEST_ACCOUNT_ID,
       thread,
       signal,
@@ -319,7 +321,7 @@ describe("DeviceNotifier wiring: handler instantiates with correct dependencies"
     const signal = makeSignal();
     const thread = makeThread({ urgency: "high" });
 
-    const result = await notifier.notify(TEST_ACCOUNT_ID, thread, signal, "high");
+    const result = await notifier.notifySignal(TEST_ACCOUNT_ID, thread, signal, "high");
 
     // With empty device list, should return Ok
     expect(result.isOk()).toBe(true);

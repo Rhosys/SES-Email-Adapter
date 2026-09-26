@@ -108,7 +108,7 @@ describe("Invariant 3: toApiSignal exposes threadId (or null), never arcId", () 
     { desc: "signal without threadId (unassigned)", signal: makeEmailSignal(), expectedThreadId: null },
     { desc: "signal with different threadId", signal: makeEmailSignal({ threadId: "thr-xyz" }), expectedThreadId: "thr-xyz" },
   ])("$desc — has threadId=$expectedThreadId, no arcId", ({ signal, expectedThreadId }) => {
-    const result = toApiSignal(signal);
+    const result = toApiSignal(signal, "https://cdn.example.com");
     expect(result).toHaveProperty("threadId", expectedThreadId);
     expect(result).not.toHaveProperty("arcId");
   });
@@ -125,7 +125,7 @@ describe("Invariant 4: Quarantine-approval body uses thread terminology", () => 
     { desc: "newly created thread", thread: makeThread({ id: "thr-new" }), signal: makeEmailSignal({ threadId: "thr-new" }) },
     { desc: "matched existing thread", thread: makeThread({ id: "thr-exist" }), signal: makeEmailSignal({ threadId: "thr-exist" }) },
   ])("$desc — body has `thread` with threadId, no `arc` key", ({ thread, signal }) => {
-    const body = { thread: toApiThread(thread), signal: toApiSignal(signal) };
+    const body = { thread: toApiThread(thread), signal: toApiSignal(signal, "https://cdn.example.com") };
     expect(body).toHaveProperty("thread");
     expect(body).not.toHaveProperty("arc");
     expect(body.thread).toHaveProperty("threadId", thread.id);

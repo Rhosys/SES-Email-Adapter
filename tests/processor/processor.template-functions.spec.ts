@@ -1,4 +1,6 @@
 import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
+import { mock } from "vitest-mock-extended";
+import type { Notifier } from "../../src/notifier/types.js";
 import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 import { CalendarForwarder } from "../../src/processor/calendar/calendar-forwarder.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -131,7 +133,7 @@ function makeProcessor(opts: {
     threadMatcher: { findMatch: vi.fn().mockReturnValue(Promise.resolve(ok(null))), upsertEmbedding: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), deleteEmbeddingsForThread: vi.fn().mockResolvedValue(ok(undefined)) },
     ruleEvaluator: makeRuleEvaluator3(logger),
     logger,
-    notifier: { notify: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) },
+    notifier: mock<Notifier>(),
     forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) },
     retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) } as unknown as S3RetentionService,
     replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-id" })) },

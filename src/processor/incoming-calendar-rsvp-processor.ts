@@ -48,7 +48,7 @@ export interface RsvpThreadStore {
   // Load the thread's signals so the relay path can find the ORIGINAL stored invite for the
   // RSVP's event and collapse the group to its latest state. The inbound REPLY tells us the
   // event identity (via the HMAC proxy UID); the stored invite is what we actually relay.
-  listSignals(accountId: string, threadId: string, params: { limit?: number }): Promise<Result<{ items: Signal[] }, DbError>>;
+  listSignals(accountId: string, threadId: string, params: { limit?: number }): Promise<Result<{ items: AnySignal[] }, DbError>>;
 }
 
 export interface IncomingCalendarRsvpProcessorDeps {
@@ -161,7 +161,7 @@ export class IncomingCalendarRsvpProcessor {
     // original invite and the same sendRsvpToOrganizer validation.
     const groupResult = await this.threadStore.listSignals(accountId, threadId, { limit: 100 });
     if (groupResult.isErr()) return err(groupResult.error);
-    const inviteGroup = (groupResult.value.items as unknown as AnySignal[])
+    const inviteGroup = groupResult.value.items
       .filter(isCalendarEventSignal)
       .filter(s => s.data.veventUid === originalVeventUid);
     if (inviteGroup.length === 0) {

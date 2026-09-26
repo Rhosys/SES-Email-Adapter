@@ -61,7 +61,7 @@ async function handlerInner(
       return {};
     }
 
-    const processors: Record<string, () => Promise<unknown>> = {
+    const processors: Record<string, () => Promise<Result<unknown, unknown>>> = {
       "email-catcher-AccountCreation|SetupDefaults": () => onboardingHandler.handleSetupDefaults(payload.accountId, payload.email),
       "email-catcher-AccountCreation|FirstFollowup": () => onboardingHandler.handleFollowup(payload.accountId, payload.email),
       "email-catcher-AccountCreation|Cleanup": () => onboardingHandler.handleCleanup(payload.accountId, payload.email),
@@ -74,15 +74,12 @@ async function handlerInner(
       return {};
     }
     const result = await processor();
-    if (result && typeof result === "object" && "isErr" in result) {
-      if ((result as { isErr(): boolean }).isErr()) {
-        const error = (result as unknown as { error: unknown }).error;
-        logger.error(`Step Function task failed: ${errorMessage(error)}`, { code: "handler.sfn.task_failed", processorId, error });
-        throw new Error(`SFN task ${processorId} failed: ${JSON.stringify(error)}`);
-      }
-      return (result as unknown as { value: unknown }).value;
+    if (result.isErr()) {
+      const error = result.error;
+      logger.error(`Step Function task failed: ${errorMessage(error)}`, { code: "handler.sfn.task_failed", processorId, error });
+      throw new Error(`SFN task ${processorId} failed: ${JSON.stringify(error)}`);
     }
-    return result;
+    return result.value;
   }
 
   if (isEventBridgeEvent(event)) {

@@ -1,5 +1,6 @@
 import { DateTime } from "luxon";
-import type { Signal } from "../types/index.js";
+import type { AnySignal, Signal } from "../types/index.js";
+import { isEmailSignal } from "../types/index.js";
 import type { DbError, Result } from "../errors.js";
 import { ok, err } from "../errors.js";
 import type { Logger } from "../logger.js";
@@ -46,7 +47,7 @@ export interface IAttachmentContentStore {
 }
 
 export interface IDraftSendThreadDb {
-  getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>>;
+  getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<AnySignal | null, DbError>>;
   updateSignalSendStatus(accountId: string, signalLookupId: string, update: {
     status: "sent" | "draft";
     sentAt?: string;
@@ -96,6 +97,11 @@ export class DraftSendWorker {
 
     if (!signal) {
       this.logger.info("Draft send: signal not found — discarding.", { code: "draft_send.signal_not_found", signalId, accountId });
+      return ok(undefined);
+    }
+
+    if (!isEmailSignal(signal)) {
+      this.logger.info("Draft send: signal is not an email — discarding.", { code: "draft_send.not_email", signalId, accountId, signalType: signal.type });
       return ok(undefined);
     }
 
@@ -216,8 +222,8 @@ export class DraftSendWorker {
       return undefined;
     }
     const linked = linkedResult.value;
-    if (!linked) {
-      this.logger.track("Draft send: linked signal no longer exists — In-Reply-To will be omitted.", { code: "draft_send.linked_signal_not_found", signalId: signal.id, accountId, linkedSignalId });
+    if (!linked || !isEmailSignal(linked)) {
+      this.logger.track("Draft send: linked signal missing or not an email — In-Reply-To will be omitted.", { code: "draft_send.linked_signal_not_found", signalId: signal.id, accountId, linkedSignalId });
       return undefined;
     }
     const messageId = linked.data.headers["message-id"];

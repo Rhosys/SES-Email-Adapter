@@ -1,7 +1,7 @@
 import type { SQSEvent } from "aws-lambda";
 import { DateTime } from "luxon";
-import type { DeliverabilitySignalData, SesFeedback, Signal, SuppressedAddress } from "../types/index.js";
-import { SES_EVENT_TYPES, resolveSesEventType } from "../types/index.js";
+import type { AnySignal, DeliverabilitySignalData, SesFeedback, Signal, SuppressedAddress } from "../types/index.js";
+import { SES_EVENT_TYPES, resolveSesEventType, isEmailSignal } from "../types/index.js";
 import { generateId } from "../utils/id.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
@@ -12,8 +12,8 @@ import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_THREAD_ID, TAG_HEALTHCHECK
 import { buildBounceSuppressionEntry } from "./bounce-suppression.js";
 
 export interface FeedbackSignalStore {
-  getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>>;
-  saveSignal(signal: Signal): Promise<Result<void, DbError>>;
+  getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<AnySignal | null, DbError>>;
+  saveSignal(signal: AnySignal): Promise<Result<void, DbError>>;
   updateSignalSendStatus(accountId: string, signalLookupId: string, update: {
     status: "pending_send" | "sent" | "draft";
     sendInitiatedAt?: string | null;
@@ -160,14 +160,14 @@ export class SesFeedbackProcessor {
         // Requirement 5.6: if neither TAG_SIGNAL_ID nor TAG_ACCOUNT_ID is present, skip signal lookup
         // Requirement 5.3: if TAG_ACCOUNT_ID is absent, skip account-specific correlation
         const tagThreadId = feedback.mail.tags?.[TAG_THREAD_ID];
-        let sentSignalResult: Result<Signal | null, DbError> | undefined;
+        let sentSignalResult: Result<AnySignal | null, DbError> | undefined;
         if (signalId && accountId && tagThreadId) {
           sentSignalResult = await this.signalStore.getSignalById(accountId, signalId, tagThreadId);
         }
 
         if (sentSignalResult?.isOk()) {
           const sentSignal = sentSignalResult.value;
-          if (sentSignal && sentSignal.source === "user") {
+          if (sentSignal && sentSignal.source === "user" && isEmailSignal(sentSignal)) {
             const bouncedRecipients = feedback.bounce!.bouncedRecipients.map(r => ({
               address: r.emailAddress,
               bounceType: isPermanent ? "permanent" as const : "transient" as const,
@@ -196,7 +196,7 @@ export class SesFeedbackProcessor {
                 subject: `Delivery failure: ${bouncedRecipients.length} recipient(s) bounced`,
               },
             };
-            const deliverabilityResult = await this.signalStore.saveSignal(deliverabilitySignal as unknown as Signal);
+            const deliverabilityResult = await this.signalStore.saveSignal(deliverabilitySignal);
             if (deliverabilityResult.isErr()) return err(deliverabilityResult.error);
 
             // If ALL recipients permanently bounced → revert sent signal to draft

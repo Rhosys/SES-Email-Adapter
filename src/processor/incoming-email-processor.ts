@@ -10,9 +10,9 @@ import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, NoAc
 import type { AccessService } from "../api/accountsApi.js";
 import type { EmailServiceError } from "../email/email-service.js";
 import type { ProviderSendError } from "../external-exchanges/provider-adapter.js";
-import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, UnsubscribeInfo, InboundEmailSignalData } from "../types/index.js";
+import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, UnsubscribeInfo, InboundEmailSignalData, NoticeData, HealthcheckData } from "../types/index.js";
 import { deriveGroupingKey } from "../grouping-key.js";
-import { DEFAULT_UNKNOWN_SENDER_POLICY, isInboundEmailSignalData } from "../types/index.js";
+import { DEFAULT_UNKNOWN_SENDER_POLICY, isEmailSignal, isInboundEmailSignalData } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient, BounceInfo } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
@@ -39,6 +39,7 @@ import { isSystemAccount } from "../database/system-account-db.js";
 import { parseHopCount, type EmailSendType } from "../email/ses-tags.js";
 import { toRuleSignalContext, toRuleThreadContext } from "./rule-context.js";
 import { buildBounceSuppressionEntry } from "../notifier/bounce-suppression.js";
+import type { Notifier } from "../notifier/types.js";
 import { statusToMetric } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
 import { isReplyTargetSafe } from "./reply-target-validator.js";
@@ -90,11 +91,6 @@ export interface ThreadMatcherPort {
 export interface RuleEvaluator {
   evaluate(rule: Rule, context: { signal: Signal; thread: Thread; isMatchedThread: boolean }): Promise<RuleEvalResult>;
 }
-
-export interface Notifier {
-  notify(accountId: string, thread: Thread, signal: Signal, urgency: ThreadUrgency): Promise<Result<void, DbError>>;
-}
-
 
 /**
  * Failure modes of an outbound send, across both routes: SES rejections, provider-side
@@ -712,7 +708,7 @@ export class IncomingEmailProcessor {
     if (!outcome.suppressNotification && !payload.skipNotify) {
       try {
         this.logger.trackPoint("side_effect_notify_start");
-        const notifyResult = await this.notifier.notify(accountId, thread, signal, thread.urgency ?? "normal");
+        const notifyResult = await this.notifier.notifySignal(accountId, thread, signal, thread.urgency ?? "normal");
         if (notifyResult.isErr()) {
           this.logger.track(`Side-effect notification failed: ${notifyResult.error.message}`, { code: "processor.side_effect.notify_failed", signal, thread, payload, error: notifyResult.error, receiveCount });
         }
@@ -1368,7 +1364,7 @@ export class IncomingEmailProcessor {
         provider: senderETLD1,
         ...(failedAddress ? { failedAddress } : {}),
         ...(bounceInfo.diagnosticCode || bounceInfo.status ? { bounceReason: bounceInfo.diagnosticCode ?? bounceInfo.status } : {}),
-      } as unknown as WorkflowData;
+      } satisfies NoticeData;
       classificationOutput.summary = describeBounceFailure(bounceInfo, failedAddress);
     }
 
@@ -1404,7 +1400,7 @@ export class IncomingEmailProcessor {
     // regardless of classifier output.
     if (isSystemAccount(accountId)) {
       classificationOutput.workflow = "healthcheck" as Workflow;
-      classificationOutput.workflowData = { workflow: "healthcheck" } as unknown as WorkflowData;
+      classificationOutput.workflowData = { workflow: "healthcheck" } satisfies HealthcheckData;
     }
 
     // 6. Thread matching (parallel tiers)
@@ -2216,7 +2212,7 @@ export class IncomingEmailProcessor {
       return;
     }
     const newLastSignalAt = signalsResult.value.items.reduce<string>((max, s) => {
-      const t = s.data.receivedAt ?? s.createdAt;
+      const t = (isEmailSignal(s) ? s.data.receivedAt : undefined) ?? s.createdAt;
       return t > max ? t : max;
     }, "") || EPOCH;
 
@@ -2405,9 +2401,9 @@ function buildSignal(opts: {
   }
 
   const workflowDataUrlFields = ["trackingUrl", "downloadUrl", "managementUrl", "paymentUrl", "documentUrl", "portalUrl", "responseUrl", "ticketUrl", "actionUrl", "muteUrl"] as const;
-  const workflowDataRecord = classification.workflowData as unknown as Record<string, unknown>;
+  const workflowDataByField = new Map(Object.entries(classification.workflowData));
   for (const field of workflowDataUrlFields) {
-    const value = workflowDataRecord[field];
+    const value = workflowDataByField.get(field);
     if (typeof value !== "string") continue;
     const existing = classifiedUrls.get(value);
     if (existing) {
