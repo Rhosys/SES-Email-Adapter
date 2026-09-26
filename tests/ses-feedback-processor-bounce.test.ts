@@ -135,7 +135,7 @@ describe("SesFeedbackProcessor — bounce handling for user-sent signals", () =>
     expect(deliverabilityData.bouncedRecipients).toEqual([
       { address: "recipient@example.com", bounceType: "permanent", reason: "5.1.1" },
     ]);
-    expect(savedSignal.data.subject).toBe("Delivery failure: 1 recipient(s) bounced");
+    expect(deliverabilityData.subject).toBe("Delivery failure: 1 recipient(s) bounced");
   });
 
   it("reverts original signal to draft when ALL recipients permanently bounced", async () => {

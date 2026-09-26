@@ -1,6 +1,6 @@
 import type { SQSEvent } from "aws-lambda";
 import { DateTime } from "luxon";
-import type { DeliverabilitySignalData, SesFeedback, Signal, SuppressedAddress } from "../types/index.js";
+import type { AnySignal, DeliverabilitySignalData, SesFeedback, Signal, SuppressedAddress } from "../types/index.js";
 import { SES_EVENT_TYPES, resolveSesEventType } from "../types/index.js";
 import { generateId } from "../utils/id.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
@@ -13,7 +13,7 @@ import { buildBounceSuppressionEntry } from "./bounce-suppression.js";
 
 export interface FeedbackSignalStore {
   getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>>;
-  saveSignal(signal: Signal): Promise<Result<void, DbError>>;
+  saveSignal(signal: AnySignal): Promise<Result<void, DbError>>;
   updateSignalSendStatus(accountId: string, signalLookupId: string, update: {
     status: "pending_send" | "sent" | "draft";
     sendInitiatedAt?: string | null;
@@ -196,7 +196,7 @@ export class SesFeedbackProcessor {
                 subject: `Delivery failure: ${bouncedRecipients.length} recipient(s) bounced`,
               },
             };
-            const deliverabilityResult = await this.signalStore.saveSignal(deliverabilitySignal as unknown as Signal);
+            const deliverabilityResult = await this.signalStore.saveSignal(deliverabilitySignal);
             if (deliverabilityResult.isErr()) return err(deliverabilityResult.error);
 
             // If ALL recipients permanently bounced → revert sent signal to draft
