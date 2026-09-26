@@ -515,6 +515,7 @@ export class ThreadsApi {
       }
       const signal = signalResult.value;
       if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
+      if (!isEmailSignal(signal)) return err(c, 400, "Only email signals can be sent", "SIGNAL_NOT_DRAFT");
       if (signal.threadId !== thread.id) return err(c, 400, "Signal does not belong to this thread", "SIGNAL_THREAD_MISMATCH");
       if (signal.status !== "draft") return err(c, 400, "Only draft signals can be sent", "SIGNAL_NOT_DRAFT");
 

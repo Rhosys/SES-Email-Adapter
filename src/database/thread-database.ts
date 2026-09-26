@@ -47,7 +47,7 @@ export type ThreadedSignalRef = Pick<Signal, "id" | "signalLookupId" | "threadId
 
 export const PENDING_SEND_STALE_HOURS = 4;
 
-export function coerceStaleStatus(signal: Signal): Signal {
+export function coerceStaleStatus<T extends Signal | AnySignal>(signal: T): T {
   if (signal.status !== "pending_send") return signal;
   const sendInitiatedAt = (signal.data as { sendInitiatedAt?: string }).sendInitiatedAt;
   if (!sendInitiatedAt) return { ...signal, status: "draft" };
@@ -105,7 +105,7 @@ export class ThreadDatabase {
   // Signals
   // ---------------------------------------------------------------------------
 
-  async getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<Signal | null, DbError>> {
+  async getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<AnySignal | null, DbError>> {
     try {
       const gsi1pk = threadId === "QUARANTINED" ? `ACCT#${accountId}#QUARANTINED`
         : threadId === "BLOCKED" ? `ACCT#${accountId}#BLOCKED`
@@ -121,7 +121,7 @@ export class ThreadDatabase {
       if (items.length > 1) {
         this.logger.error("Signal id is supposed to be unique within a thread but more than one record was found. Returning the first, but this indicates a data integrity bug.", { code: "thread_database.signal_not_unique", accountId, signalId, threadId, count: items.length });
       }
-      return ok(items[0] ? coerceStaleStatus(hydrateSignal(items[0] as Signal)) : null);
+      return ok(items[0] ? coerceStaleStatus(hydrateSignal(items[0] as AnySignal)) : null);
     } catch (e) {
       return err(dbError(e));
     }

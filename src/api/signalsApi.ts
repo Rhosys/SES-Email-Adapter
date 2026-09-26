@@ -123,7 +123,7 @@ export class SignalsApi {
       }
       // Quarantined signals are always inbound received email — narrow so workflow/workflowData
       // (inbound-only classification) are accessible for grouping-key derivation below.
-      if (!isInboundEmailSignalData(signal.data)) {
+      if (!isEmailSignal(signal) || !isInboundEmailSignalData(signal.data)) {
         return err(c, 400, "Only inbound email signals can be reviewed from quarantine", "SIGNAL_NOT_REVIEWABLE");
       }
 
