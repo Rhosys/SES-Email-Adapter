@@ -10,9 +10,9 @@ import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, NoAc
 import type { AccessService } from "../api/accountsApi.js";
 import type { EmailServiceError } from "../email/email-service.js";
 import type { ProviderSendError } from "../external-exchanges/provider-adapter.js";
-import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency, UnknownSenderPolicy, MatchedRuleResult, InvalidRuleFunctionData, UnsubscribeInfo, InboundEmailSignalData, NoticeData, HealthcheckData } from "../types/index.js";
+import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency, MatchedRuleResult, InvalidRuleFunctionData, UnsubscribeInfo, InboundEmailSignalData, NoticeData, HealthcheckData } from "../types/index.js";
 import { deriveGroupingKey } from "../grouping-key.js";
-import { DEFAULT_UNKNOWN_SENDER_POLICY, isEmailSignal, isInboundEmailSignalData } from "../types/index.js";
+import { DEFAULT_UNKNOWN_SENDER_POLICY, resolveUnknownSenderPolicy, isEmailSignal, isInboundEmailSignalData } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient, BounceInfo } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
@@ -196,13 +196,14 @@ export interface ProcessInboundOptions {
    */
   skipNotify?: boolean;
   /**
-   * The user explicitly approved this signal from quarantine. Their decision is final: any
-   * quarantine/block outcome from rules (e.g. SR-02/SR-03 onboarding, SR-05 security alert, a
-   * user quarantine rule) or from the unknown-sender fallback is overridden so the replay lands
-   * the signal on a thread. Without this, the replay re-derives the same quarantine and the
-   * approval silently leaves the signal where it was (or moves it to blocked).
+   * Force the signal onto the active path regardless of any status-changing rule action or the
+   * untrusted-sender filter fallback. Set when a user explicitly approves a quarantined signal: the
+   * approval is a direct instruction to surface THIS message, so a content rule (e.g. SR-02 onboarding)
+   * that would otherwise re-quarantine it must not win. Neutralizes only status dispositions — labels,
+   * workflow, urgency, forwarding still apply. An explicit per-sender block never reaches here (that
+   * path short-circuits before rule evaluation), so this deliberately does not touch it.
    */
-  userApproved?: boolean;
+  skipAllMatchedRuleStatusActions?: boolean;
 }
 
 /**
@@ -1512,9 +1513,7 @@ export class IncomingEmailProcessor {
     }
 
     // 8. Assign system labels and merge classifier labels
-    const effectiveFilterMode: UnknownSenderPolicy = aliasConfig
-      ? aliasConfig.unknownSenderPolicy
-      : filtering?.defaultUnknownSenderPolicy ?? DEFAULT_UNKNOWN_SENDER_POLICY;
+    const effectiveFilterMode = resolveUnknownSenderPolicy(aliasConfig, filtering ?? null);
 
     // Explicit sender block — if the sender has been explicitly blocked for this alias, short-circuit
     // (post-classify path: preserves classification data on blocked signal for audit/review)
@@ -1586,6 +1585,12 @@ export class IncomingEmailProcessor {
     const rules = rulesResult.value;
     const matchedRules = await applyRules(rules, { signal: signalShell, thread, isMatchedThread }, this.ruleEvaluator, this.logger, (s) => this.threadDb.saveSignal(s));
     const outcome = deriveOutcome(matchedRules);
+    if (opts?.skipAllMatchedRuleStatusActions) {
+      outcome.blockDisposition = null;
+      outcome.quarantine = false;
+      outcome.quarantineHidden = false;
+      outcome.archive = false;
+    }
     this.logger.trackPoint("rules_evaluated", { matchedRuleCount: matchedRules.length });
 
     // Propagate assign_workflow to signal data — the signal should reflect the final workflow after all rules
@@ -1599,7 +1604,7 @@ export class IncomingEmailProcessor {
 
     // Fallback: if no rule set a status, apply filter mode for untrusted senders
     const hasStatusOutcome = outcome.blockDisposition !== null || outcome.quarantine || outcome.archive;
-    if (!hasStatusOutcome && thread.labels.includes("system:sender:untrusted")) {
+    if (!hasStatusOutcome && !opts?.skipAllMatchedRuleStatusActions && thread.labels.includes("system:sender:untrusted")) {
       switch (effectiveFilterMode) {
         case "block_hidden":       outcome.blockDisposition = "block_hidden"; break;
         case "block_reject":       outcome.blockDisposition = "block_reject"; break;
@@ -1621,16 +1626,6 @@ export class IncomingEmailProcessor {
           text: `Sender ${senderETLD1} is not in approved senders (${policySource} policy: ${effectiveFilterMode})`,
         });
       }
-    }
-
-    // Explicit user approval from quarantine overrides every derived quarantine/block outcome.
-    // The explicit per-sender block short-circuit above is NOT overridden — the approval path
-    // writes the sender allow before replaying, so reaching it means a genuine later block.
-    if (opts?.userApproved && (outcome.blockDisposition !== null || outcome.quarantine)) {
-      this.logger.info("User approval overrides derived quarantine/block outcome.", { code: "processor.user_approved_override", accountId, compositeMailMessageId: msg.compositeMailMessageId, overridden: outcome.blockDisposition ?? (outcome.quarantineHidden ? "quarantine_hidden" : "quarantine_visible"), matchedRules: matchedRules.map(r => r.ruleId) });
-      outcome.blockDisposition = null;
-      outcome.quarantine = false;
-      outcome.quarantineHidden = false;
     }
 
     const buildArgs = { accountId, compositeMailMessageId: msg.compositeMailMessageId, recipientAddress, parsed, classification: classificationOutput, s3Key, receivedAt: timestamp, now, retentionDuration: effectiveRetentionForTtl, ...(gsi3pk !== undefined ? { gsi3pk } : {}), ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}) };
@@ -2114,7 +2109,7 @@ export class IncomingEmailProcessor {
   // Reprocess — thin wrapper that calls processMessage with force flags
   // ---------------------------------------------------------------------------
 
-  async reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; userApproved?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>> {
+  async reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; skipAllMatchedRuleStatusActions?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>> {
     const existingResult = await this.threadDb.getSignalByMessageId(accountId, signalLookupId);
     if (existingResult.isErr()) return err(processorError(existingResult.error));
     const existing = existingResult.value;
@@ -2174,7 +2169,7 @@ export class IncomingEmailProcessor {
       dmarcVerdict: "PASS",
     };
 
-    const result = await this.processInbound(msg, 1, { force: true, unsafeSkipDmarc: true, forceSignalId: existing.id, ...(opts?.skipNotify ? { skipNotify: true } : {}), ...(opts?.userApproved ? { userApproved: true } : {}) });
+    const result = await this.processInbound(msg, 1, { force: true, unsafeSkipDmarc: true, forceSignalId: existing.id, ...(opts?.skipNotify ? { skipNotify: true } : {}), ...(opts?.skipAllMatchedRuleStatusActions ? { skipAllMatchedRuleStatusActions: true } : {}) });
     if (result.isErr()) {
       // Best-effort recency repair even on failure — a previous 504 may have saved the thread
       // with updated lastSignalAt while the signal save never completed.

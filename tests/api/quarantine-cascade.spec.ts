@@ -58,6 +58,7 @@ function makeAccountDb() {
     getAlias: vi.fn().mockResolvedValue(ok(ALIAS_CONFIG)),
     getDomainOwner: vi.fn().mockResolvedValue(ok({ accountId: TEST_ACCOUNT_ID, domain: "example.com", status: "active", receivingSetupComplete: true, senderSetupComplete: true, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" })),
     getSender: vi.fn().mockResolvedValue(ok(null)),
+    getAccountFilteringConfig: vi.fn().mockResolvedValue(ok(null)),
     saveSender: vi.fn().mockResolvedValue(ok(undefined)),
     saveAlias: vi.fn().mockResolvedValue(ok(ALIAS_CONFIG)),
     ensureAlias: vi.fn().mockResolvedValue(ok({ alias: ALIAS_CONFIG, created: false })),
@@ -295,10 +296,10 @@ describe("Quarantine response — handler + real processor", () => {
     expect(res.status).toBe(404);
   });
 
-  it("approve → returns 400 when the signal is already active", async () => {
+  it("approve → returns 422 when the signal is already active", async () => {
     vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeQuarantinedSignal({ status: "active" })));
     const res = await req(app, "POST", `${A}/signals/SES%23msg-primary/quarantineResponse`, { status: "active" });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
   // ── CASCADE — the new behavior layered on top of the validated baseline ──
@@ -315,11 +316,17 @@ describe("Quarantine response — handler + real processor", () => {
         return Promise.resolve(ok(s ? { ...s, status: "active", threadId: "arc-001" } as Signal : null));
       });
       vi.mocked(threadDb.getThread).mockResolvedValue(ok(makeThread({ id: "arc-001" })));
-      // The cascade writes saveSender(allow) before reprocessing; the processor then re-reads
-      // getSender during replay and must see the sender as trusted so the signal comes out active
-      // (not re-quarantined). Reflect that written disposition for the approved sender's domain.
+      // The handler resolves the sender BEFORE approving: it must first see no explicit record (so the
+      // unknown-sender alias policy governs and the approval fires), then — after saveSender(allow) —
+      // see the sender trusted so the processor's replay produces active siblings. Model that transition:
+      // getSender returns null until saveSender is called for the approved domain, allow thereafter.
+      let senderAllowed = false;
+      vi.mocked(accountDb.saveSender).mockImplementation((_a, _alias, senderDomain, policy) => {
+        if (senderDomain === SENDER_ETLD1 && policy === "allow") senderAllowed = true;
+        return Promise.resolve(ok(undefined));
+      });
       vi.mocked(accountDb.getSender).mockImplementation((_a, _alias, senderDomain) =>
-        Promise.resolve(ok(senderDomain === SENDER_ETLD1
+        Promise.resolve(ok(senderDomain === SENDER_ETLD1 && senderAllowed
           ? { accountId: TEST_ACCOUNT_ID, aliasAddress: ALIAS, domain: "example.com", aliasName: "user", senderDomain: SENDER_ETLD1, policy: "allow" as const, addedAt: "2024-01-01T00:00:00Z" }
           : null)));
     }
@@ -437,6 +444,13 @@ describe("Quarantine response — handler + real processor", () => {
       vi.mocked(threadDb.listPreThreadSignals).mockImplementation(() => Promise.resolve(ok({ items: [...store.values()].filter(sg => !sg.threadId && isQuarantine(sg)) })));
       vi.mocked(threadDb.saveThread).mockImplementation((t: Thread) => { threads.set(t.id, t); return Promise.resolve(ok(undefined)); });
       vi.mocked(threadDb.getThread).mockImplementation((_a, id) => Promise.resolve(ok(threads.get(id) ?? null)));
+      // Sender records persist across the handler's write and each replay's read, as in DynamoDB.
+      const senders = new Map<string, "allow" | "block_hidden" | "block_reject" | "report_violation">();
+      vi.mocked(accountDb.saveSender).mockImplementation((_a, alias, domain, policy) => { senders.set(`${alias}|${domain}`, policy ?? "allow"); return Promise.resolve(ok(undefined)); });
+      vi.mocked(accountDb.getSender).mockImplementation((_a, alias, domain) => {
+        const policy = senders.get(`${alias}|${domain}`);
+        return Promise.resolve(ok(policy ? { accountId: TEST_ACCOUNT_ID, aliasAddress: alias, domain: "example.com", aliasName: "user", senderDomain: domain, policy, addedAt: "2024-01-01T00:00:00Z" } : null));
+      });
       return { store, threads };
     }
 
@@ -482,12 +496,12 @@ describe("Quarantine response — handler + real processor", () => {
       const body = await res.json() as { thread: { threadId: string }; signal: { signalId: string; status: string } };
       expect(body.thread.threadId).toBe(saved.threadId);
       expect(body.signal.signalId).toBe("SES#msg-primary");
-      expect(codes(processorLogger)).toContain("processor.user_approved_override");
     });
 
     it("approve → lands on a thread even when the sender allow is not yet readable (stale getSender)", async () => {
       const { store } = wireStore([makeQuarantinedSignal()]);
-      // Default getSender mock returns null: the replay sees an unknown sender under a quarantine policy.
+      // The replay never sees the allow the handler just wrote: an unknown sender under a quarantine policy.
+      vi.mocked(accountDb.getSender).mockResolvedValue(ok(null));
       const res = await post("active");
       expect(res.status).toBe(200);
       expect(store.get("SES#msg-primary")!.threadId).toBeTruthy();
@@ -629,7 +643,7 @@ describe("Quarantine response — handler + real processor", () => {
       expect(contentSanitizer.invoke).toHaveBeenCalledTimes(1);
     });
 
-    it("approve → a sibling replay that lands nowhere is logged, not swallowed", async () => {
+    it("approve → forces only the primary; siblings replay unforced so a content rule can still hold them", async () => {
       const reprocessSignal = vi.fn()
         .mockResolvedValueOnce(ok({ ...makeQuarantinedSignal(), status: "active", threadId: "arc-001" }))
         .mockResolvedValueOnce(ok(makeQuarantinedSignal({ id: "SES#msg-sib-a" })));
@@ -645,9 +659,38 @@ describe("Quarantine response — handler + real processor", () => {
       const res = await req(stubApp, "POST", `${A}/signals/SES%23msg-primary/quarantineResponse`, { status: "active" });
 
       expect(res.status).toBe(200);
-      expect(reprocessSignal).toHaveBeenNthCalledWith(1, TEST_ACCOUNT_ID, "SES#msg-primary", { skipNotify: true, userApproved: true });
-      expect(reprocessSignal).toHaveBeenNthCalledWith(2, TEST_ACCOUNT_ID, "SES#msg-sib-a", { skipNotify: true, userApproved: true });
-      expect(codes(apiLogger, "warn")).toContain("api.quarantine_response.reprocess_sibling_no_thread");
+      expect(reprocessSignal).toHaveBeenNthCalledWith(1, TEST_ACCOUNT_ID, "SES#msg-primary", { skipNotify: true, skipAllMatchedRuleStatusActions: true });
+      expect(reprocessSignal).toHaveBeenNthCalledWith(2, TEST_ACCOUNT_ID, "SES#msg-sib-a", { skipNotify: true });
+    });
+
+    it("approve → a sibling held by a content rule (SR-03 onboarding) stays quarantined while the primary lands", async () => {
+      const primary = makeQuarantinedSignal({ id: "SES#msg-primary" });
+      const onboarding = makeQuarantinedSignal({ id: "SES#msg-onboarding" });
+      const { store } = wireStore([primary, onboarding]);
+      classifier.classify.mockImplementation((input: { signalId: string }) => Promise.resolve(ok(input.signalId === "SES#msg-onboarding"
+        ? { workflow: "onboarding", workflowData: { workflow: "onboarding", onboardingType: "welcome", service: "acme" }, tags: [], summary: "", labels: [], actions: [] }
+        : { ...CLASSIFICATION })));
+
+      const res = await post("active");
+
+      expect(res.status).toBe(200);
+      expect(store.get("SES#msg-primary")!.threadId).toBeTruthy();
+      expect(store.get("SES#msg-onboarding")!.threadId).toBeFalsy();
+      expect(store.get("SES#msg-onboarding")!.status).toBe("quarantine_hidden");
+    });
+
+    it("approve → an explicit sender record is left untouched and nothing cascades; the primary is still forced active", async () => {
+      const { store } = wireStore([makeQuarantinedSignal({ id: "SES#msg-primary" }), makeQuarantinedSignal({ id: "SES#msg-sib-a" })]);
+      await accountDb.saveSender(TEST_ACCOUNT_ID, ALIAS, SENDER_ETLD1, "allow");
+      vi.mocked(accountDb.saveSender).mockClear();
+
+      const res = await post("active");
+
+      expect(res.status).toBe(200);
+      expect(accountDb.saveSender).not.toHaveBeenCalled();
+      expect(threadDb.listPreThreadSignals).not.toHaveBeenCalled();
+      expect(store.get("SES#msg-primary")!.threadId).toBeTruthy();
+      expect(store.get("SES#msg-sib-a")!.threadId).toBeFalsy();
     });
 
     // ── reject / block ──
@@ -734,10 +777,10 @@ describe("Quarantine response — handler + real processor", () => {
       expect(codes(apiLogger, "error").filter(c => c === "api.quarantine_response.get_signal_failed").length).toBe(2);
     });
 
-    it.each(["active", "block_hidden", "block_reject", "dismiss"] as const)("400 when a %s decision targets a non-quarantined signal", async (status) => {
+    it.each(["active", "block_hidden", "block_reject", "dismiss"] as const)("422 when a %s decision targets a non-quarantined signal", async (status) => {
       vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(null)).mockResolvedValueOnce(ok(makeQuarantinedSignal({ status: "block_hidden" })));
       const res = await post(status);
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
       expect(accountDb.saveSender).not.toHaveBeenCalled();
     });
 
@@ -765,9 +808,9 @@ describe("Quarantine response — handler + real processor", () => {
     });
   });
 
-  // ── Processor reprocess — userApproved is scoped to the approval path ──
+  // ── Processor reprocess — the force flag is scoped to the approval path ──
 
-  describe("reprocessSignal without userApproved", () => {
+  describe("reprocessSignal without the force flag", () => {
     it("still honors a quarantine rule (the override is opt-in)", async () => {
       const q = makeQuarantinedSignal();
       const store = new Map<string, Signal>([[q.signalLookupId, q]]);
