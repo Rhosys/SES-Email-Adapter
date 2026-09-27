@@ -604,30 +604,24 @@ describe("Quarantine response — handler + real processor", () => {
       expect(codes(apiLogger, "warn")).toContain("api.quarantine_response.sibling_list_failed");
     });
 
-    it("approve → walks every page of the quarantine partition, not just the first", async () => {
+    it("approve → reads a single page; more than one page is tracked, not walked", async () => {
       const primary = makeQuarantinedSignal({ id: "SES#msg-primary" });
-      const other = makeQuarantinedSignal({ id: "SES#msg-other", data: { from: { address: "x@other.net" } } });
-      const oldSibling = makeQuarantinedSignal({ id: "SES#msg-old-sib" });
-      const { store } = wireStore([primary, other, oldSibling]);
-      vi.mocked(threadDb.listPreThreadSignals)
-        .mockResolvedValueOnce(ok({ items: [other], nextCursor: "page-2" }))
-        .mockResolvedValueOnce(ok({ items: [oldSibling] }));
+      const sibling = makeQuarantinedSignal({ id: "SES#msg-sib-a" });
+      const { store } = wireStore([primary, sibling]);
+      vi.mocked(threadDb.listPreThreadSignals).mockResolvedValue(ok({ items: [sibling], nextCursor: "page-2" }));
 
       const res = await post("active");
 
       expect(res.status).toBe(200);
-      expect(threadDb.listPreThreadSignals.mock.calls[1]![2]).toMatchObject({ cursor: "page-2" });
-      expect(store.get("SES#msg-old-sib")!.threadId).toBeTruthy();
-      expect(store.get("SES#msg-other")!.threadId).toBeFalsy();
+      expect(threadDb.listPreThreadSignals).toHaveBeenCalledTimes(1);
+      expect(store.get("SES#msg-sib-a")!.threadId).toBeTruthy();
+      expect(codes(apiLogger, "track")).toContain("api.quarantine_response.sibling_list_multiple_pages");
     });
 
-    it("approve → stops at the page cap and logs the truncation", async () => {
+    it("approve → a single page is not tracked", async () => {
       wireStore([makeQuarantinedSignal()]);
-      vi.mocked(threadDb.listPreThreadSignals).mockResolvedValue(ok({ items: [], nextCursor: "more" }));
-      const res = await post("active");
-      expect(res.status).toBe(200);
-      expect(threadDb.listPreThreadSignals).toHaveBeenCalledTimes(20);
-      expect(codes(apiLogger, "warn")).toContain("api.quarantine_response.sibling_list_truncated");
+      await post("active");
+      expect(codes(apiLogger, "track")).not.toContain("api.quarantine_response.sibling_list_multiple_pages");
     });
 
     it("approve → a sender subdomain shares the eTLD+1 and is cascaded", async () => {

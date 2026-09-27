@@ -20,9 +20,6 @@ export interface SignalReprocessor {
   reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; skipAllMatchedRuleStatusActions?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
 }
 
-// Upper bound on quarantine-partition pages walked when collecting cascade siblings (100 per page).
-const SIBLING_MAX_PAGES = 20;
-
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
   return { [key]: items, pagination: { cursor: nextCursor ?? null } } as Record<K, T[]> & { pagination: Pagination };
 }
@@ -140,28 +137,19 @@ export class SignalsApi {
       // Enumerate the OTHER quarantine_visible signals this same decision must cascade to: same
       // alias + same sender eTLD+1, inbound email, excluding the primary. The user made one decision
       // about a sender; every visible quarantined message from that sender to that alias inherits it.
-      // The quarantine partition is account-wide (every sender, every alias), so walk every page —
-      // a single page would silently miss older siblings once the account holds >100 quarantined
-      // signals. Capped at SIBLING_MAX_PAGES; hitting the cap is logged, the tail resolves on a
-      // later action. Best-effort: a failure to enumerate must not fail the primary decision, so on
-      // error we log and cascade to whatever was collected so far.
+      // One page (limit 100) of the account-wide quarantine partition only. More than one page is
+      // tracked so we can see how often older siblings are left for a later action. Best-effort: a
+      // failure to enumerate must not fail the primary decision, so on error we log and cascade to nothing.
       const collectSiblings = async (): Promise<Signal[]> => {
-        const candidates: Signal[] = [];
-        let cursor: string | undefined;
-        for (let pageNo = 0; ; pageNo++) {
-          if (pageNo >= SIBLING_MAX_PAGES) {
-            logger.warn("Sibling quarantined signal enumeration hit the page cap — cascading to the signals collected so far.", { code: "api.quarantine_response.sibling_list_truncated", accountId, signalId, pages: pageNo });
-            break;
-          }
-          const listResult = await threadDb.listPreThreadSignals(accountId, "quarantined", { limit: 100, ...(cursor ? { cursor } : {}) });
-          if (listResult.isErr()) {
-            logger.warn("Failed to enumerate sibling quarantined signals — cascading to the signals collected so far.", { code: "api.quarantine_response.sibling_list_failed", accountId, signalId, error: listResult.error });
-            break;
-          }
-          candidates.push(...listResult.value.items);
-          cursor = listResult.value.nextCursor;
-          if (!cursor) break;
+        const listResult = await threadDb.listPreThreadSignals(accountId, "quarantined", { limit: 100 });
+        if (listResult.isErr()) {
+          logger.warn("Failed to enumerate sibling quarantined signals — cascading to primary only.", { code: "api.quarantine_response.sibling_list_failed", accountId, signalId, error: listResult.error });
+          return [];
         }
+        if (listResult.value.nextCursor) {
+          logger.track("Quarantine partition has more than one page — siblings beyond the first page were not cascaded.", { code: "api.quarantine_response.sibling_list_multiple_pages", accountId, signalId });
+        }
+        const candidates = listResult.value.items;
         return candidates.filter((s) => {
           if (s.signalLookupId === signal.signalLookupId) return false;
           if (s.status !== "quarantine_visible") return false;
