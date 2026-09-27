@@ -137,14 +137,17 @@ export class SignalsApi {
       // Enumerate the OTHER quarantine_visible signals this same decision must cascade to: same
       // alias + same sender eTLD+1, inbound email, excluding the primary. The user made one decision
       // about a sender; every visible quarantined message from that sender to that alias inherits it.
-      // One page (limit 100) only — a sender with >100 quarantined messages to one alias is
-      // pathological; the tail resolves on a later action. Best-effort: a failure to enumerate must
-      // not fail the primary decision, so on error we log and cascade to nothing.
+      // One page (limit 100) of the account-wide quarantine partition only. More than one page is
+      // tracked so we can see how often older siblings are left for a later action. Best-effort: a
+      // failure to enumerate must not fail the primary decision, so on error we log and cascade to nothing.
       const collectSiblings = async (): Promise<Signal[]> => {
         const listResult = await threadDb.listPreThreadSignals(accountId, "quarantined", { limit: 100 });
         if (listResult.isErr()) {
           logger.warn("Failed to enumerate sibling quarantined signals — cascading to primary only.", { code: "api.quarantine_response.sibling_list_failed", accountId, signalId, error: listResult.error });
           return [];
+        }
+        if (listResult.value.nextCursor) {
+          logger.track("Quarantine partition has more than one page — siblings beyond the first page were not cascaded.", { code: "api.quarantine_response.sibling_list_multiple_pages", accountId, signalId });
         }
         return listResult.value.items.filter((s) => {
           if (s.signalLookupId === signal.signalLookupId) return false;

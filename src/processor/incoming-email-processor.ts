@@ -2133,6 +2133,9 @@ export class IncomingEmailProcessor {
     // future vector matches to an empty thread) and set a 5-year TTL if absent.
     if (sourceThreadId != null) {
       const otherSignalsResult = await this.threadDb.listSignals(accountId, sourceThreadId, { limit: 2 });
+      if (otherSignalsResult.isErr()) {
+        this.logger.warn("Failed to list source-thread signals before reprocess — skipping emptied-thread cleanup.", { code: "processor.reprocess.pre_list_failed", accountId, threadId: sourceThreadId, signalId: existing.id, error: otherSignalsResult.error });
+      }
       if (otherSignalsResult.isOk()) {
         const otherSignals = otherSignalsResult.value.items.filter(s => s.id !== existing.id);
         if (otherSignals.length === 0) {
