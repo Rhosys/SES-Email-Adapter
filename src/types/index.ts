@@ -387,6 +387,36 @@ export interface AccountFilteringConfig {
   defaultUnknownSenderPolicy: UnknownSenderPolicy;
 }
 
+/**
+ * The fallback disposition for a sender with no explicit per-sender record: the alias's unknown-sender
+ * policy, else the account default, else the system default. This is the precedence the ingest processor
+ * applies to untrusted senders and that the API must match — the single source of truth for both.
+ */
+export function resolveUnknownSenderPolicy(
+  alias: Alias | null,
+  accountFiltering: AccountFilteringConfig | null,
+): UnknownSenderPolicy {
+  if (alias) return alias.unknownSenderPolicy;
+  return accountFiltering?.defaultUnknownSenderPolicy ?? DEFAULT_UNKNOWN_SENDER_POLICY;
+}
+
+/**
+ * The disposition that governs mail from a given sender to a given alias, resolved from values the
+ * caller already holds (no I/O). An explicit per-sender record wins; otherwise the unknown-sender
+ * fallback. The explicit record counts only when the alias exists — a sender record for a non-existent
+ * alias is inert. `hasExplicitSenderRecord` lets the quarantine-approval flow distinguish "the user
+ * deliberately set this sender" (leave it) from "this is a fallback default" (approving writes an allow record).
+ */
+export function resolveEffectiveSenderPolicy(
+  alias: Alias | null,
+  explicitSender: AliasSender | null,
+  accountFiltering: AccountFilteringConfig | null,
+): { policy: SenderPolicy | UnknownSenderPolicy; hasExplicitSenderRecord: boolean } {
+  const effectiveSender = alias ? explicitSender : null;
+  if (effectiveSender) return { policy: effectiveSender.policy, hasExplicitSenderRecord: true };
+  return { policy: resolveUnknownSenderPolicy(alias, accountFiltering), hasExplicitSenderRecord: false };
+}
+
 // Global sender reputation — aggregated across all accounts, keyed by eTLD+1
 export interface GlobalSenderReputation {
   domain: string;             // eTLD+1

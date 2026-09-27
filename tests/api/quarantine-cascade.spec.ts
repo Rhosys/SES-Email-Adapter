@@ -57,6 +57,7 @@ function makeAccountDb() {
     getAlias: vi.fn().mockResolvedValue(ok(ALIAS_CONFIG)),
     getDomainOwner: vi.fn().mockResolvedValue(ok({ accountId: TEST_ACCOUNT_ID, domain: "example.com", status: "active", receivingSetupComplete: true, senderSetupComplete: true, createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:00:00Z" })),
     getSender: vi.fn().mockResolvedValue(ok(null)),
+    getAccountFilteringConfig: vi.fn().mockResolvedValue(ok(null)),
     saveSender: vi.fn().mockResolvedValue(ok(undefined)),
     saveAlias: vi.fn().mockResolvedValue(ok(ALIAS_CONFIG)),
     ensureAlias: vi.fn().mockResolvedValue(ok({ alias: ALIAS_CONFIG, created: false })),
@@ -286,10 +287,10 @@ describe("Quarantine response — handler + real processor", () => {
     expect(res.status).toBe(404);
   });
 
-  it("approve → returns 400 when the signal is already active", async () => {
+  it("approve → returns 422 when the signal is already active", async () => {
     vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeQuarantinedSignal({ status: "active" })));
     const res = await req(app, "POST", `${A}/signals/SES%23msg-primary/quarantineResponse`, { status: "active" });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
   });
 
   // ── CASCADE — the new behavior layered on top of the validated baseline ──
@@ -306,11 +307,17 @@ describe("Quarantine response — handler + real processor", () => {
         return Promise.resolve(ok(s ? { ...s, status: "active", threadId: "arc-001" } as Signal : null));
       });
       vi.mocked(threadDb.getThread).mockResolvedValue(ok(makeThread({ id: "arc-001" })));
-      // The cascade writes saveSender(allow) before reprocessing; the processor then re-reads
-      // getSender during replay and must see the sender as trusted so the signal comes out active
-      // (not re-quarantined). Reflect that written disposition for the approved sender's domain.
+      // The handler resolves the sender BEFORE approving: it must first see no explicit record (so the
+      // unknown-sender alias policy governs and the approval fires), then — after saveSender(allow) —
+      // see the sender trusted so the processor's replay produces active siblings. Model that transition:
+      // getSender returns null until saveSender is called for the approved domain, allow thereafter.
+      let senderAllowed = false;
+      vi.mocked(accountDb.saveSender).mockImplementation((_a, _alias, senderDomain, policy) => {
+        if (senderDomain === SENDER_ETLD1 && policy === "allow") senderAllowed = true;
+        return Promise.resolve(ok(undefined));
+      });
       vi.mocked(accountDb.getSender).mockImplementation((_a, _alias, senderDomain) =>
-        Promise.resolve(ok(senderDomain === SENDER_ETLD1
+        Promise.resolve(ok(senderDomain === SENDER_ETLD1 && senderAllowed
           ? { accountId: TEST_ACCOUNT_ID, aliasAddress: ALIAS, domain: "example.com", aliasName: "user", senderDomain: SENDER_ETLD1, policy: "allow" as const, addedAt: "2024-01-01T00:00:00Z" }
           : null)));
     }

@@ -4,7 +4,7 @@ import { DateTime } from "luxon";
 import { getDomain } from "tldts";
 import { zParse } from "./validate.js";
 import { toApiThread, toApiSignal } from "./signal-transforms.js";
-import { isEmailSignal, isInboundEmailSignalData } from "../types/index.js";
+import { isEmailSignal, isInboundEmailSignalData, resolveEffectiveSenderPolicy } from "../types/index.js";
 import type { Result } from "neverthrow";
 import type { Signal, MatchedRuleResult, PageParams } from "../types/index.js";
 import type { Pagination } from "../types/index.js";
@@ -17,7 +17,7 @@ import { ListSignalsResponse } from "./schemas.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
 export interface SignalReprocessor {
-  reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
+  reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; skipAllMatchedRuleStatusActions?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
 }
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
@@ -118,7 +118,7 @@ export class SignalsApi {
       const signal = signalResult.value;
       if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
       if (signal.status !== "quarantine_visible" && signal.status !== "quarantine_hidden") {
-        return err(c, 400, "Only quarantined signals can have their status updated", "SIGNAL_NOT_REVIEWABLE");
+        return err(c, 422, "Only quarantined signals can have their status updated", "SIGNAL_NOT_REVIEWABLE");
       }
       // Quarantined signals are always inbound received email — narrow so workflow/workflowData
       // (inbound-only classification) are accessible for grouping-key derivation below.
@@ -206,34 +206,50 @@ export class SignalsApi {
         return c.json(blockResult.value, 200);
       }
 
-      // status === "active": approve the sender, then replay each affected signal through the
-      // full ingest pipeline (reprocessSignal). Replay — rather than a bespoke thread build here —
-      // is required because ingest is where embeddings are generated, the Aurora thread match runs,
-      // and the embedding is persisted to Aurora. A quarantined signal has none of that (no vector,
-      // no thread), so approving one has to run ingest for it to land on the right thread AND to
-      // seed Aurora for the NEXT approved sibling to match against.
+      // status === "active": the user is explicitly approving THIS signal, so it must end up active on a
+      // thread no matter what. Two independent things can hold a signal in quarantine: (a) the sender being
+      // untrusted, and (b) a content rule (e.g. SR-02 onboarding) that quarantines regardless of sender
+      // trust. Approving fixes (a) but never (b), so the two are handled separately below. Replay through
+      // the full ingest pipeline (reprocessSignal) — not a bespoke thread build — because ingest is where
+      // the embedding is generated, the Aurora thread match runs, and the embedding is persisted to Aurora.
 
-      // 1. Record the sender approval ONCE, up front. Keyed by (alias, sender) — repeating it per
-      //    sibling is a meaningless rewrite. Writing it before any replay is what makes each replay
-      //    resolve the now-trusted sender to `active` instead of re-quarantining.
-      const saveSenderResult = await accountDb.saveSender(accountId, recipientAddress, senderETLD1, "allow");
-      if (saveSenderResult.isErr()) { logger.error("Failed to save sender approval.", { code: "api.quarantine_response.save_sender_failed", error: saveSenderResult.error }); return err(c, 500, "Internal Server Error"); }
+      // 1. Resolve the disposition that governs this sender. If it's a fallback default (no explicit
+      //    per-sender record) that isn't already allow, the sender is the cause of the quarantine, so
+      //    approve it — writing `allow` before any replay is what lets siblings resolve to active. If the
+      //    user already set an explicit record, leave it untouched: their decision stands, and the primary
+      //    is forced active below regardless. allow_all needs no record (it already trusts everyone).
+      const aliasResult = await accountDb.getAlias(accountId, recipientAddress);
+      if (aliasResult.isErr()) { logger.error("Failed to load alias for sender-policy resolution.", { code: "api.quarantine_response.get_alias_failed", accountId, signalId, error: aliasResult.error }); return err(c, 500, "Internal Server Error"); }
+      const explicitSenderResult = await accountDb.getSender(accountId, recipientAddress, senderETLD1);
+      if (explicitSenderResult.isErr()) { logger.error("Failed to load sender for sender-policy resolution.", { code: "api.quarantine_response.get_sender_failed", accountId, signalId, error: explicitSenderResult.error }); return err(c, 500, "Internal Server Error"); }
+      const filteringResult = await accountDb.getAccountFilteringConfig(accountId);
+      if (filteringResult.isErr()) { logger.error("Failed to load account filtering config for sender-policy resolution.", { code: "api.quarantine_response.get_filtering_failed", accountId, signalId, error: filteringResult.error }); return err(c, 500, "Internal Server Error"); }
 
-      // 2. Replay the PRIMARY first. Its Aurora embedding must exist before any sibling runs its
-      //    thread match, so siblings collapse onto the thread the primary anchors. skipNotify: the
-      //    user is live in-app performing this action and does not want a notification per signal.
-      //    The primary drives the HTTP response — its failure is the only one that fails the request.
-      const primaryResult = await signalReprocessor.reprocessSignal(accountId, signal.signalLookupId, { skipNotify: true });
+      const { policy: effectiveSenderPolicy, hasExplicitSenderRecord } = resolveEffectiveSenderPolicy(aliasResult.value, explicitSenderResult.value, filteringResult.value);
+      const senderApproved = !hasExplicitSenderRecord && effectiveSenderPolicy !== "allow" && effectiveSenderPolicy !== "allow_all";
+      if (senderApproved) {
+        const saveSenderResult = await accountDb.saveSender(accountId, recipientAddress, senderETLD1, "allow");
+        if (saveSenderResult.isErr()) { logger.error("Failed to save sender approval.", { code: "api.quarantine_response.save_sender_failed", error: saveSenderResult.error }); return err(c, 500, "Internal Server Error"); }
+      }
+
+      // 2. Force the PRIMARY active. skipAllMatchedRuleStatusActions overrides any content rule that would
+      //    re-quarantine it — the explicit approval is the instruction to surface this one. This guarantees
+      //    a threaded, embedded active signal, so the threadId check below is a true invariant, not a symptom.
+      //    skipNotify: the user is live in-app and does not want a notification for their own action.
+      const primaryResult = await signalReprocessor.reprocessSignal(accountId, signal.signalLookupId, { skipNotify: true, skipAllMatchedRuleStatusActions: true });
       if (primaryResult.isErr()) { logger.error("Failed to reprocess primary signal on quarantine approval.", { code: "api.quarantine_response.reprocess_primary_failed", accountId, signalId, error: primaryResult.error }); return err(c, 500, "Internal Server Error"); }
       const activatedSignal = primaryResult.value;
-      if (!activatedSignal.threadId) { logger.error("Primary reprocess produced a signal with no threadId.", { code: "api.quarantine_response.reprocess_no_thread", accountId, signalId, signal: activatedSignal }); return err(c, 500, "Internal Server Error"); }
+      if (!activatedSignal.threadId) { logger.error(`Primary reprocess of signal ${signalId} was forced active but assigned no threadId, so the quarantine-approval response has no thread to return.`, { code: "api.quarantine_response.reprocess_no_thread", accountId, signalId, signal: activatedSignal }); return err(c, 500, "Internal Server Error"); }
 
-      // 3. Replay each sibling IN SERIES (never Promise.all): each iteration's Aurora upsert must be
-      //    visible to the next iteration's similarity search. Best-effort — a sibling failure is
-      //    logged and skipped, never rolls back, never affects the response.
-      for (const sibling of await collectSiblings()) {
-        const siblingResult = await signalReprocessor.reprocessSignal(accountId, sibling.signalLookupId, { skipNotify: true });
-        if (siblingResult.isErr()) logger.warn("Failed to reprocess sibling quarantined signal on approval — skipping.", { code: "api.quarantine_response.reprocess_sibling_failed", accountId, siblingSignalId: sibling.id, error: siblingResult.error });
+      // 3. Cascade to siblings ONLY when we just approved the sender — the approval is the shared decision
+      //    that can activate them. They are reprocessed WITHOUT the force flag: a sibling a content rule
+      //    still quarantines correctly stays quarantined. In series (never Promise.all): each iteration's
+      //    Aurora upsert must be visible to the next iteration's similarity search. Best-effort per sibling.
+      if (senderApproved) {
+        for (const sibling of await collectSiblings()) {
+          const siblingResult = await signalReprocessor.reprocessSignal(accountId, sibling.signalLookupId, { skipNotify: true });
+          if (siblingResult.isErr()) logger.warn("Failed to reprocess sibling quarantined signal on approval — skipping.", { code: "api.quarantine_response.reprocess_sibling_failed", accountId, siblingSignalId: sibling.id, error: siblingResult.error });
+        }
       }
 
       // 4. Response derives from the primary only. Fetch the thread it landed on for the client's

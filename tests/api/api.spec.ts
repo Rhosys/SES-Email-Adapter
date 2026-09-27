@@ -532,10 +532,10 @@ describe("API", () => {
     // covered end-to-end (handler + real processor) in quarantine-cascade.spec.ts. This suite mocks
     // the processor, so it no longer asserts the quarantine-approve path; only the pure request
     // validation (400/404) that lives entirely in the handler remains here.
-    it("returns 400 when signal is already active", async () => {
+    it("returns 422 when signal is already active", async () => {
       vi.mocked(threadDb.getSignalById).mockResolvedValueOnce(ok(makeSignal({ status: "active" })));
       const res = await req(app, "POST", `${A}/signals/SES%23msg-001/quarantineResponse`, { body: { status: "active" } });
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(422);
     });
 
     it("returns 400 when body is missing status", async () => {
