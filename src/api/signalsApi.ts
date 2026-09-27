@@ -149,8 +149,7 @@ export class SignalsApi {
         if (listResult.value.nextCursor) {
           logger.track("Quarantine partition has more than one page — siblings beyond the first page were not cascaded.", { code: "api.quarantine_response.sibling_list_multiple_pages", accountId, signalId });
         }
-        const candidates = listResult.value.items;
-        return candidates.filter((s) => {
+        return listResult.value.items.filter((s) => {
           if (s.signalLookupId === signal.signalLookupId) return false;
           if (s.status !== "quarantine_visible") return false;
           if (!isInboundEmailSignalData(s.data)) return false;
