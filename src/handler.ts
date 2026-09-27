@@ -496,8 +496,6 @@ async function handleWebSocket(event: APIGatewayProxyWebsocketEventV2): Promise<
       });
       if (saveResult.isErr()) { logger.warn("Failed to save WebSocket device", { code: "handler.ws.save_device_failed", accountId, connectionId, error: saveResult.error }); }
 
-      // No confirmation here: API Gateway rejects PostToConnection until $connect returns,
-      // so the client sends a `hello` frame after open and $default answers it.
       return { statusCode: 200 };
     }
 
@@ -505,12 +503,10 @@ async function handleWebSocket(event: APIGatewayProxyWebsocketEventV2): Promise<
       return { statusCode: 200 };
 
     default: {
-      if (parseFrameType(event.body) === "hello") {
+      if (parseFrameType(event) === "hello") {
         const confirmResult = await wsDeliverer.sendRaw(connectionId, JSON.stringify({ type: "connected", accountId, connectionId, timestamp: DateTime.utc().toISO() }));
         if (confirmResult.isErr()) {
-          const wsError = confirmResult.error;
-          const detail = wsError.kind === "gone" ? "connection gone before confirmation" : wsError.reason;
-          logger.warn(`Failed to send WS connect confirmation: ${detail}`, { code: "handler.ws.confirm_failed", connectionId, error: wsError });
+          logger.error("Failed to send WS connect confirmation to a connection that just sent us a frame.", { code: "handler.ws.confirm_failed", accountId, connectionId }, confirmResult.error);
         }
       }
       return { statusCode: 200 };
@@ -518,12 +514,13 @@ async function handleWebSocket(event: APIGatewayProxyWebsocketEventV2): Promise<
   }
 }
 
-function parseFrameType(body: string | undefined): string | undefined {
-  if (!body) { return undefined; }
+function parseFrameType(event: APIGatewayProxyWebsocketEventV2): string | undefined {
+  if (!event.body) { return undefined; }
   try {
-    const parsed = JSON.parse(body) as { type?: unknown };
+    const parsed = JSON.parse(event.body) as { type?: unknown };
     return typeof parsed.type === "string" ? parsed.type : undefined;
-  } catch {
+  } catch (error) {
+    logger.track("Received a WebSocket frame that is not valid JSON.", { code: "handler.ws.invalid_frame", body: event.body, requestContext: event.requestContext }, error);
     return undefined;
   }
 }
