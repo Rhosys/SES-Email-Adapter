@@ -55,6 +55,21 @@ export interface OtpPayload {
 
 export type DeliverablePayload = NotificationPayload | OtpPayload;
 
+// ─── WebSocket Frames ────────────────────────────────────────────────────────
+
+export interface WsPingFrame {
+  type: "ping";
+}
+
+export type WsClientFrame = WsPingFrame;
+
+export interface WsConnectedFrame {
+  type: "connected";
+  accountId: string;
+  connectionId: string;
+  timestamp: string;
+}
+
 // ─── Notifier Interface ──────────────────────────────────────────────────────
 
 export interface Notifier {
