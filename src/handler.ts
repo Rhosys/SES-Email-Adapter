@@ -496,22 +496,35 @@ async function handleWebSocket(event: APIGatewayProxyWebsocketEventV2): Promise<
       });
       if (saveResult.isErr()) { logger.warn("Failed to save WebSocket device", { code: "handler.ws.save_device_failed", accountId, connectionId, error: saveResult.error }); }
 
-      // Send confirmation so the client knows the connection is fully established
-      const confirmResult = await wsDeliverer.sendRaw(connectionId, JSON.stringify({ type: "connected", accountId, connectionId, timestamp: DateTime.utc().toISO() }));
-      if (confirmResult.isErr()) {
-        const wsError = confirmResult.error;
-        const detail = wsError.kind === "gone" ? "connection gone before confirmation" : wsError.reason;
-        logger.warn(`Failed to send WS connect confirmation: ${detail}`, { code: "handler.ws.confirm_failed", connectionId, error: wsError });
-      }
-
+      // No confirmation here: API Gateway rejects PostToConnection until $connect returns,
+      // so the client sends a `hello` frame after open and $default answers it.
       return { statusCode: 200 };
     }
 
     case "$disconnect":
       return { statusCode: 200 };
 
-    default:
+    default: {
+      if (parseFrameType(event.body) === "hello") {
+        const confirmResult = await wsDeliverer.sendRaw(connectionId, JSON.stringify({ type: "connected", accountId, connectionId, timestamp: DateTime.utc().toISO() }));
+        if (confirmResult.isErr()) {
+          const wsError = confirmResult.error;
+          const detail = wsError.kind === "gone" ? "connection gone before confirmation" : wsError.reason;
+          logger.warn(`Failed to send WS connect confirmation: ${detail}`, { code: "handler.ws.confirm_failed", connectionId, error: wsError });
+        }
+      }
       return { statusCode: 200 };
+    }
+  }
+}
+
+function parseFrameType(body: string | undefined): string | undefined {
+  if (!body) { return undefined; }
+  try {
+    const parsed = JSON.parse(body) as { type?: unknown };
+    return typeof parsed.type === "string" ? parsed.type : undefined;
+  } catch {
+    return undefined;
   }
 }
 
