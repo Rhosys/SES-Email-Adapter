@@ -13,6 +13,7 @@ import type { DraftSendPayload } from "./processor/draft-send-dispatcher.js";
 import { DateTime } from "luxon";
 import { CompositeRoot } from "./composite-root.js";
 import { isRsvpReplyAddress } from "./processor/inbound-router.js";
+import type { WsClientFrame, WsConnectedFrame } from "./notifier/types.js";
 
 const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND, MSG_TYPE_SIGNAL_FOLLOWUP, MSG_TYPE_RSVP_REMINDER, MSG_TYPE_DIGEST_DISPATCH, MSG_TYPE_DIGEST_SEND, MSG_TYPE_EMX_INBOUND, MSG_TYPE_EMX_DISPATCH, MSG_TYPE_EMX_IDLE] = SQS_MESSAGE_TYPES;
 const RETRY_TRACK_THRESHOLD = 30;
@@ -496,22 +497,33 @@ async function handleWebSocket(event: APIGatewayProxyWebsocketEventV2): Promise<
       });
       if (saveResult.isErr()) { logger.warn("Failed to save WebSocket device", { code: "handler.ws.save_device_failed", accountId, connectionId, error: saveResult.error }); }
 
-      // Send confirmation so the client knows the connection is fully established
-      const confirmResult = await wsDeliverer.sendRaw(connectionId, JSON.stringify({ type: "connected", accountId, connectionId, timestamp: DateTime.utc().toISO() }));
-      if (confirmResult.isErr()) {
-        const wsError = confirmResult.error;
-        const detail = wsError.kind === "gone" ? "connection gone before confirmation" : wsError.reason;
-        logger.warn(`Failed to send WS connect confirmation: ${detail}`, { code: "handler.ws.confirm_failed", connectionId, error: wsError });
-      }
-
       return { statusCode: 200 };
     }
 
     case "$disconnect":
       return { statusCode: 200 };
 
-    default:
+    default: {
+      if (parseClientFrame(event)?.type === "ping") {
+        const confirmation: WsConnectedFrame = { type: "connected", accountId, connectionId, timestamp: DateTime.utc().toISO()! };
+        const confirmResult = await wsDeliverer.sendRaw(connectionId, JSON.stringify(confirmation));
+        if (confirmResult.isErr()) {
+          logger.error("Failed to send WS connect confirmation to a connection that just sent us a frame.", { code: "handler.ws.confirm_failed", accountId, connectionId }, confirmResult.error);
+        }
+      }
       return { statusCode: 200 };
+    }
+  }
+}
+
+function parseClientFrame(event: APIGatewayProxyWebsocketEventV2): WsClientFrame | undefined {
+  if (!event.body) { return undefined; }
+  try {
+    const parsed = JSON.parse(event.body) as { type?: unknown };
+    return parsed.type === "ping" ? { type: "ping" } : undefined;
+  } catch (error) {
+    logger.track("Received a WebSocket frame that is not valid JSON.", { code: "handler.ws.invalid_frame", body: event.body, requestContext: event.requestContext }, error);
+    return undefined;
   }
 }
 
