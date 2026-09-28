@@ -2,7 +2,7 @@ import type { IForwardingService } from "../../../src/forwarding/forwarding-serv
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { handlePostApprovalCalendar } from "../../../src/processor/calendar/post-approval-handler.js";
 import type { PostApprovalCalendarHandlerDeps } from "../../../src/processor/calendar/post-approval-handler.js";
-import { extractCalendarEvents } from "../../../src/processor/calendar/calendar-event-extraction.js";
+import { CalendarExtractor } from "../../../src/processor/calendar/calendar-event-extraction.js";
 import type { Signal, Thread, Attachment } from "../../../src/types/index.js";
 import type { ThreadDatabase } from "../../../src/database/thread-database.js";
 import type { AccountDatabase } from "../../../src/database/account-database.js";
@@ -144,7 +144,7 @@ function makeDeps(overrides: Partial<PostApprovalCalendarHandlerDeps> = {}): Pos
 // The extraction is now run by the caller (signalsApi.ts, before the thread's single
 // create/update write) rather than inside handlePostApprovalCalendar itself — mirror that here.
 async function runPostApprovalCalendar(signal: Signal, thread: Thread, deps: PostApprovalCalendarHandlerDeps): Promise<void> {
-  const extraction = await extractCalendarEvents(signal.data.attachments ?? [], deps.contentStore, deps.logger);
+  const extraction = await new CalendarExtractor(deps.contentStore, deps.logger).extract(signal.data.attachments ?? []);
   await handlePostApprovalCalendar(signal, thread, deps, extraction);
 }
 

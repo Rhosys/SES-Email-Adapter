@@ -8,7 +8,7 @@
 
 import type { Attachment } from "../../types/index.js";
 import type { Logger } from "../../logger.js";
-import { findCalendarAttachments, parseIcsEvents, collapseCalendarEvents } from "./ics-parser.js";
+import { IcsParser, parseIcsEvents } from "./ics-parser.js";
 import type { CalendarEventRecord, CollapsedCalendarEvent } from "./ics-parser.js";
 
 export interface ContentFetcher {
@@ -26,38 +26,50 @@ export interface CalendarAttachmentExtractionResult {
 }
 
 /**
- * Finds, fetches, and parses every calendar attachment on a signal, then
- * collapses the resulting VEVENTs into one snapshot per distinct event. Returns
- * null when the signal has no calendar attachments at all — callers use that
- * to skip calendar processing entirely, same as the old single-attachment path.
+ * Fetches and parses every calendar attachment on a signal, then collapses the
+ * resulting VEVENTs into one snapshot per distinct event. Used by both initial
+ * ingest and the post-approval path so the two don't drift. The content store
+ * and logger are constructor collaborators — callers say "extract these
+ * attachments", never how to fetch or where to log.
  */
-export async function extractCalendarEvents(
-  attachments: Attachment[],
-  contentStore: ContentFetcher,
-  logger: Logger,
-): Promise<CalendarAttachmentExtractionResult | null> {
-  const calendarAttachments = findCalendarAttachments(attachments, logger);
-  if (calendarAttachments.length === 0) return null;
+export class CalendarExtractor {
+  private readonly icsParser: IcsParser;
 
-  const records: CalendarEventRecord[] = [];
-  const invalidAttachments: InvalidCalendarAttachment[] = [];
-
-  for (const attachment of calendarAttachments) {
-    logger.trackPoint("calendar_attachment_found", { filename: attachment.filename, mimeType: attachment.mimeType });
-
-    const icsBytes = await contentStore.getContent(attachment.s3Key);
-    const parseResult = parseIcsEvents(new Uint8Array(icsBytes));
-
-    if (parseResult.isErr()) {
-      invalidAttachments.push({ attachment, reason: parseResult.error.reason });
-      continue;
-    }
-
-    for (const event of parseResult.value.events) {
-      records.push({ event, rawIcsContent: parseResult.value.rawIcsContent });
-    }
+  constructor(
+    private readonly contentStore: ContentFetcher,
+    private readonly logger: Logger,
+  ) {
+    this.icsParser = new IcsParser(logger);
   }
 
-  const { collapsed } = collapseCalendarEvents(records, logger);
-  return { validEvents: collapsed, invalidAttachments };
+  /**
+   * Returns null when the signal has no calendar attachments at all — callers
+   * use that to skip calendar processing entirely.
+   */
+  async extract(attachments: Attachment[]): Promise<CalendarAttachmentExtractionResult | null> {
+    const calendarAttachments = this.icsParser.findCalendarAttachments(attachments);
+    if (calendarAttachments.length === 0) return null;
+
+    const records: CalendarEventRecord[] = [];
+    const invalidAttachments: InvalidCalendarAttachment[] = [];
+
+    for (const attachment of calendarAttachments) {
+      this.logger.trackPoint("calendar_attachment_found", { filename: attachment.filename, mimeType: attachment.mimeType });
+
+      const icsBytes = await this.contentStore.getContent(attachment.s3Key);
+      const parseResult = parseIcsEvents(new Uint8Array(icsBytes));
+
+      if (parseResult.isErr()) {
+        invalidAttachments.push({ attachment, reason: parseResult.error.reason });
+        continue;
+      }
+
+      for (const event of parseResult.value.events) {
+        records.push({ event, rawIcsContent: parseResult.value.rawIcsContent });
+      }
+    }
+
+    const { collapsed } = this.icsParser.collapseCalendarEvents(records);
+    return { validEvents: collapsed, invalidAttachments };
+  }
 }

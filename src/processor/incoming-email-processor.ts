@@ -45,7 +45,7 @@ import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
 import { isReplyTargetSafe } from "./reply-target-validator.js";
 import { BillingHandler } from "../billing/billing-handler.js";
 import type { HandlerRegistry } from "../workflow/registry.js";
-import { extractCalendarEvents } from "./calendar/calendar-event-extraction.js";
+import { CalendarExtractor } from "./calendar/calendar-event-extraction.js";
 import type { CalendarAttachmentExtractionResult } from "./calendar/calendar-event-extraction.js";
 import { buildCalendarSignalLookupId } from "./calendar/signal-lookup.js";
 import { CalendarForwarder } from "./calendar/calendar-forwarder.js";
@@ -987,7 +987,7 @@ export class IncomingEmailProcessor {
         // Find the calendar signal linked to this email signal
         const calendarSignalResult = await this.threadDb.getLinkedCalendarSignal(accountId, thread.id, signal.id);
         if (calendarSignalResult.isErr()) {
-          this.logger.track(`Calendar forward failed — could not find linked calendar signal: ${calendarSignalResult.error.message}`, { code: "processor.side_effect.calendar_forward_no_signal", signal, thread, payload, error: calendarSignalResult.error, receiveCount });
+          this.logger.track(`Calendar forward failed — linked calendar signal lookup errored: ${calendarSignalResult.error.message}`, { code: "processor.side_effect.calendar_forward_lookup_failed", signal, thread, payload, error: calendarSignalResult.error, receiveCount });
         } else if (!calendarSignalResult.value) {
           this.logger.track("Calendar forward skipped — no linked calendar signal found.", { code: "processor.side_effect.calendar_forward_no_signal", signal, thread, payload, receiveCount });
         } else {
@@ -1701,7 +1701,7 @@ export class IncomingEmailProcessor {
     // write as every other label/field change, instead of a second updateThread call to
     // the same item right after. Deferred until past the block/quarantine short-circuits
     // above so a message that never reaches the thread never pays for the S3 fetch + parse.
-    const calendarExtraction = await extractCalendarEvents(signalShell.data.attachments ?? [], this.contentStore, this.logger);
+    const calendarExtraction = await new CalendarExtractor(this.contentStore, this.logger).extract(signalShell.data.attachments ?? []);
     if (calendarExtraction && calendarExtraction.validEvents.length > 0 && !thread.labels.includes("system:calendar")) {
       thread.labels = [...thread.labels, "system:calendar"];
     }

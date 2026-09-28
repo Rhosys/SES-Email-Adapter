@@ -384,28 +384,13 @@ function isCalendarAttachment(attachment: Attachment): boolean {
 }
 
 /**
- * Finds every calendar attachment on a signal's attachment list.
- *
- * An attachment is a calendar attachment if it has MIME type `text/calendar` OR
- * filename ending in `.ics`. Every match is returned — none are discarded — so
- * the caller can extract and merge events across all of them (see
- * `collapseCalendarEvents`). Logs TRACK when more than one is found.
+ * Cheap, I/O-free check for whether a signal carries at least one calendar
+ * attachment. Used to gate calendar-forwarding rules before the expensive
+ * fetch+parse runs, so a rule can key on "this message has an invite" without
+ * paying for extraction.
  */
-export function findCalendarAttachments(attachments: Attachment[], logger: Logger): Attachment[] {
-  const calendarAttachments = attachments.filter(isCalendarAttachment);
-
-  if (calendarAttachments.length > 1) {
-    logger.track(
-      `Multiple calendar attachments found on signal (${calendarAttachments.length}). Extracting events from all of them.`,
-      {
-        code: "ics_parser.multiple_calendar_attachments",
-        count: calendarAttachments.length,
-        candidates: calendarAttachments.map((a) => ({ filename: a.filename, mimeType: a.mimeType })),
-      },
-    );
-  }
-
-  return calendarAttachments;
+export function hasCalendarAttachment(attachments: Attachment[]): boolean {
+  return attachments.some(isCalendarAttachment);
 }
 
 // ---------------------------------------------------------------------------
@@ -453,7 +438,7 @@ function eventGroupKey(event: CalendarEventData): string {
  *   valid calendar_event and is skipped — reported via `skippedReplyOnly` and a
  *   TRACK log so it's visible rather than silently dropped.
  */
-export function collapseCalendarEvents(records: CalendarEventRecord[], logger: Logger): CollapseCalendarEventsResult {
+function collapseCalendarEventsWith(records: CalendarEventRecord[], logger: Logger): CollapseCalendarEventsResult {
   const groups = new Map<string, CalendarEventRecord[]>();
   for (const record of records) {
     const key = eventGroupKey(record.event);
@@ -517,4 +502,49 @@ export function collapseCalendarEvents(records: CalendarEventRecord[], logger: L
   }
 
   return { collapsed, skippedReplyOnly };
+}
+
+// ---------------------------------------------------------------------------
+// IcsParser — the logging-bearing operations over calendar attachments.
+// Pure parsing (parseIcs, parseIcsEvents), attachment classification
+// (hasCalendarAttachment), and URL sanitization stay free functions above;
+// only the two operations that emit TRACK logs live here so the logger is a
+// constructor collaborator rather than a per-call parameter.
+// ---------------------------------------------------------------------------
+
+export class IcsParser {
+  constructor(private readonly logger: Logger) {}
+
+  /**
+   * Finds every calendar attachment on a signal's attachment list. An attachment
+   * qualifies on MIME type `text/calendar` OR a `.ics` filename. Every match is
+   * returned so the caller can extract and merge events across all of them (see
+   * collapseCalendarEvents).
+   */
+  findCalendarAttachments(attachments: Attachment[]): Attachment[] {
+    const calendarAttachments = attachments.filter(isCalendarAttachment);
+
+    if (calendarAttachments.length > 1) {
+      this.logger.track(
+        `Multiple calendar attachments found on signal (${calendarAttachments.length}). Extracting events from all of them.`,
+        {
+          code: "ics_parser.multiple_calendar_attachments",
+          count: calendarAttachments.length,
+          candidates: calendarAttachments.map((a) => ({ filename: a.filename, mimeType: a.mimeType })),
+        },
+      );
+    }
+
+    return calendarAttachments;
+  }
+
+  /**
+   * Groups extracted VEVENTs (potentially from multiple .ics attachments on one
+   * signal) by event identity, then collapses each group to the one snapshot
+   * that becomes that event's calendar_event signal. See collapse rules on the
+   * underlying implementation.
+   */
+  collapseCalendarEvents(records: CalendarEventRecord[]): CollapseCalendarEventsResult {
+    return collapseCalendarEventsWith(records, this.logger);
+  }
 }

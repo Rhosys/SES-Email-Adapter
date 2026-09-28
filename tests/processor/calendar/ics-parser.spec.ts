@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { findCalendarAttachments, parseIcs, parseIcsEvents, collapseCalendarEvents, sanitizeUrl } from "../../../src/processor/calendar/ics-parser.js";
+import { IcsParser, parseIcs, parseIcsEvents, sanitizeUrl } from "../../../src/processor/calendar/ics-parser.js";
 import { createMockLogger } from "../../helpers/mock-logger.js";
 import type { Attachment } from "../../../src/types/index.js";
 import type { CalendarEventData } from "../../../src/types/calendar.js";
@@ -29,7 +29,7 @@ describe("findCalendarAttachments — MIME/extension detection", () => {
   ])("$reason → detected=$detected", ({ mime, filename, detected }) => {
     const logger = createMockLogger();
     const attachment = makeAttachment({ mimeType: mime, filename });
-    const result = findCalendarAttachments([attachment], logger);
+    const result = new IcsParser(logger).findCalendarAttachments([attachment]);
 
     if (detected) {
       expect(result).toHaveLength(1);
@@ -72,17 +72,17 @@ describe("findCalendarAttachments — returns every calendar attachment", () => 
     },
   ])("$label", ({ attachments, expectedFilenames }) => {
     const logger = createMockLogger();
-    const result = findCalendarAttachments(attachments, logger);
+    const result = new IcsParser(logger).findCalendarAttachments(attachments);
 
     expect(result.map(a => a.filename)).toEqual(expectedFilenames);
   });
 
   it("logs TRACK when multiple calendar attachments found", () => {
     const logger = createMockLogger();
-    findCalendarAttachments([
+    new IcsParser(logger).findCalendarAttachments([
       makeAttachment({ filename: "a.ics", mimeType: "text/calendar", s3Key: "a/1" }),
       makeAttachment({ filename: "b.ics", mimeType: "text/calendar", s3Key: "a/2" }),
-    ], logger);
+    ]);
 
     expect(logger.calls).toContainEqual(expect.objectContaining({
       method: "track",
@@ -92,9 +92,9 @@ describe("findCalendarAttachments — returns every calendar attachment", () => 
 
   it("does not log TRACK for a single calendar attachment", () => {
     const logger = createMockLogger();
-    findCalendarAttachments([
+    new IcsParser(logger).findCalendarAttachments([
       makeAttachment({ filename: "single.ics", mimeType: "text/calendar", s3Key: "a/1" }),
-    ], logger);
+    ]);
 
     expect(logger.calls.filter(c => c.method === "track")).toHaveLength(0);
   });
@@ -127,7 +127,7 @@ describe("collapseCalendarEvents — grouping and method collapse", () => {
       { event: makeCalendarEvent({ sequence: 1, title: "Updated" }), rawIcsContent: "raw-1" },
     ];
 
-    const { collapsed } = collapseCalendarEvents(records, logger);
+    const { collapsed } = new IcsParser(logger).collapseCalendarEvents(records);
 
     expect(collapsed).toHaveLength(1);
     expect(collapsed[0]!.data.title).toBe("Updated");
@@ -141,7 +141,7 @@ describe("collapseCalendarEvents — grouping and method collapse", () => {
       { event: makeCalendarEvent({ title: "Exception", recurrenceId: "2026-02-01T10:00:00.000Z" }), rawIcsContent: "raw-exception" },
     ];
 
-    const { collapsed } = collapseCalendarEvents(records, logger);
+    const { collapsed } = new IcsParser(logger).collapseCalendarEvents(records);
 
     expect(collapsed).toHaveLength(2);
     expect(collapsed.map(c => c.data.title).sort()).toEqual(["Exception", "Master"]);
@@ -154,7 +154,7 @@ describe("collapseCalendarEvents — grouping and method collapse", () => {
       { event: makeCalendarEvent({ sequence: 1, method: "CANCEL" }), rawIcsContent: "raw-1" },
     ];
 
-    const { collapsed } = collapseCalendarEvents(records, logger);
+    const { collapsed } = new IcsParser(logger).collapseCalendarEvents(records);
 
     expect(collapsed).toHaveLength(1);
     expect(collapsed[0]!.data.status).toBe("CANCELLED");
@@ -180,7 +180,7 @@ describe("collapseCalendarEvents — grouping and method collapse", () => {
       },
     ];
 
-    const { collapsed } = collapseCalendarEvents(records, logger);
+    const { collapsed } = new IcsParser(logger).collapseCalendarEvents(records);
 
     expect(collapsed).toHaveLength(1);
     expect(collapsed[0]!.data.title).toBe("Invite");
@@ -193,7 +193,7 @@ describe("collapseCalendarEvents — grouping and method collapse", () => {
       { event: makeCalendarEvent({ method: "REPLY" }), rawIcsContent: "raw-reply" },
     ];
 
-    const { collapsed, skippedReplyOnly } = collapseCalendarEvents(records, logger);
+    const { collapsed, skippedReplyOnly } = new IcsParser(logger).collapseCalendarEvents(records);
 
     expect(collapsed).toHaveLength(0);
     expect(skippedReplyOnly).toBe(1);

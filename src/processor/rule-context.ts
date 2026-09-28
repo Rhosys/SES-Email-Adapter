@@ -2,6 +2,7 @@ import type { Signal, Thread } from "../types/index.js";
 
 import { isInboundEmailSignalData } from "../types/index.js";
 import type { EmailAddress, Workflow, WorkflowData } from "../types/index.js";
+import { hasCalendarAttachment } from "./calendar/ics-parser.js";
 
 // Curated signal/thread shape exposed to rule conditions and template functions.
 // Keep this an explicit allowlist — never widen by passing the raw Signal/Thread objects.
@@ -17,6 +18,10 @@ export interface RuleSignalContext {
   workflow?: Workflow;
   recipientAddress: string;
   workflowData?: WorkflowData;
+  // Whether THIS message carries a calendar attachment (.ics / text/calendar), so a
+  // forwarding rule can fire only on messages that actually bear an invite — not on
+  // every message that lands on a thread already labelled system:calendar.
+  hasCalendarInvite: boolean;
 }
 export type RuleThreadContext = Pick<Thread, "id" | "labels" | "urgency" | "summary" | "workflow" | "status">;
 
@@ -30,6 +35,7 @@ export function toRuleSignalContext(signal: Signal): RuleSignalContext {
     summary: data.summary,
     ...(body !== undefined ? { body } : {}),
     recipientAddress: data.recipientAddress,
+    hasCalendarInvite: hasCalendarAttachment(data.attachments ?? []),
     ...(isInboundEmailSignalData(data) ? { workflow: data.workflow, workflowData: data.workflowData } : {}),
   };
 }

@@ -253,7 +253,7 @@ describe("JsonLogicRuleEvaluator — JS condition path", () => {
  * Validates: Requirements 4.1, 4.2, 4.4
  */
 describe("JS rule context — Property 2: context preparation produces exactly the specified fields", () => {
-  const EXPECTED_SIGNAL_KEYS = ["id", "from", "subject", "summary", "body", "workflow", "recipientAddress", "workflowData"];
+  const EXPECTED_SIGNAL_KEYS = ["id", "from", "subject", "summary", "body", "workflow", "recipientAddress", "workflowData", "hasCalendarInvite"];
   const EXPECTED_THREAD_KEYS = ["id", "labels", "urgency", "summary", "workflow", "status"];
 
   it("executionContext.signal has exactly the specified fields — sensitive fields excluded", async () => {
@@ -283,6 +283,7 @@ describe("JS rule context — Property 2: context preparation produces exactly t
       workflow: (signal.data as InboundEmailSignalData).workflow,
       recipientAddress: signal.data.recipientAddress,
       workflowData: (signal.data as InboundEmailSignalData).workflowData,
+      hasCalendarInvite: (signal.data.attachments ?? []).some((a) => a.mimeType.startsWith("text/calendar") || a.filename.toLowerCase().endsWith(".ics")),
     });
     // Sensitive fields must not leak
     expect(ctx.signal).not.toHaveProperty("s3Key");

@@ -7,6 +7,7 @@ import type { Rule } from "../types/index.js";
 const in_ = (label: string) => ({ "in": [label, { "var": "thread.labels" }] });
 const wf_ = (w: string) => ({ "==": [{ "var": "signal.workflow" }, w] });
 const wfData_ = (field: string) => ({ "var": `signal.workflowData.${field}` });
+const signalField_ = (field: string) => ({ "var": `signal.${field}` });
 
 export const SYSTEM_RULES: Rule[] = [
   // --- Sender / content gating ----------------------------------------
@@ -28,5 +29,5 @@ export const SYSTEM_RULES: Rule[] = [
   // ticket_opened/resolved/closed are passive lifecycle events — low unless urgency field says otherwise (fired after priority rules so those win)
   { id: "SR-14", accountId: "SYSTEM", name: "Support: low urgency for passive lifecycle events", condition: JSON.stringify({ "and": [wf_("support"), { "in": [wfData_("eventType"), ["ticket_opened", "ticket_resolved", "ticket_closed"]] }, { "!": [in_("system:replied")] }] }), actions: [{ type: "set_urgency", value: "low" }], status: "enabled", priorityOrder: 1400, createdAt: "", updatedAt: "" },
   // --- Calendar forwarding ----------------------------------------
-  { id: "SR-16", accountId: "SYSTEM", name: "Forward calendar invite to user's real calendar", condition: JSON.stringify(in_("system:calendar")), actions: [{ type: "forwardCalendarInvite" }], status: "enabled", priorityOrder: 1600, createdAt: "", updatedAt: "" },
+  { id: "SR-16", accountId: "SYSTEM", name: "Forward calendar invite to user's real calendar", condition: JSON.stringify({ "==": [signalField_("hasCalendarInvite"), true] }), actions: [{ type: "forwardCalendarInvite" }], status: "enabled", priorityOrder: 1600, createdAt: "", updatedAt: "" },
 ];

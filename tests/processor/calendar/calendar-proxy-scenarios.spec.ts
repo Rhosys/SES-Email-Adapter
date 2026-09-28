@@ -16,7 +16,7 @@ import { IncomingCalendarRsvpProcessor } from "../../../src/processor/incoming-c
 import type { RsvpThreadStore } from "../../../src/processor/incoming-calendar-rsvp-processor.js";
 import { handlePostApprovalCalendar } from "../../../src/processor/calendar/post-approval-handler.js";
 import type { PostApprovalCalendarHandlerDeps } from "../../../src/processor/calendar/post-approval-handler.js";
-import { extractCalendarEvents } from "../../../src/processor/calendar/calendar-event-extraction.js";
+import { CalendarExtractor } from "../../../src/processor/calendar/calendar-event-extraction.js";
 import { buildProxyUid as buildProxyUidRaw } from "../../../src/processor/calendar/proxy-uid.js";
 import { buildCalendarSignalLookupId } from "../../../src/processor/calendar/signal-lookup.js";
 import type { CalendarEventData, CalendarResponseData } from "../../../src/types/calendar.js";
@@ -592,7 +592,7 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
 
     // The caller (signalsApi.ts) runs extraction before the thread's single create/update
     // write, then passes the result in — mirror that here rather than calling with 3 args.
-    const extraction = await extractCalendarEvents(signal.data.attachments ?? [], deps.contentStore, deps.logger);
+    const extraction = await new CalendarExtractor(deps.contentStore, deps.logger).extract(signal.data.attachments ?? []);
     await handlePostApprovalCalendar(signal, arc, deps, extraction);
 
     // Calendar signal was saved
