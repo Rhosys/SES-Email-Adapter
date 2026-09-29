@@ -10,7 +10,7 @@ import { buildEmailTags } from "../email/tag-sanitizer.js";
 import { UpdateAccountRequest, InviteUserRequest, UpdateUserRequest } from "./requests.js";
 import { Account as AccountSchema, Pagination as PaginationSchema } from "./schemas.js";
 import type * as Api from "./schemas.js";
-import { TIMEZONE_ALLOWLIST } from "./timezone-allowlist.js";
+import { timezoneAllowlist } from "./timezone-allowlist.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
 import type { Account as DbAccount, Account, Pagination } from "../types/index.js";
@@ -191,7 +191,7 @@ export class AccountsApi {
       const accountId = c.req.param("accountId")!;
       logger.info("Updating account", { code: "api.accounts.update", accountId });
       const body = await zParse(UpdateAccountRequest, c.req.raw);
-      if (body.timezone !== undefined && !TIMEZONE_ALLOWLIST.has(body.timezone)) {
+      if (body.timezone !== undefined && !timezoneAllowlist().has(body.timezone)) {
         return err(c, 400, "Not a recognized IANA timezone");
       }
       if (body.digest) {
