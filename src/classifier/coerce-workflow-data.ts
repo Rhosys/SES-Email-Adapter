@@ -4,6 +4,7 @@ import type { Logger } from "../logger.js";
 import { CLASSIFIER_WORKFLOW_REGISTRY } from "../types/workflow-registry.js";
 import type { AmbiguousDateFormat } from "../types/index.js";
 import { displayToInstant } from "./display-to-instant.js";
+import { resolveZoneOffsetMinutes, DEFAULT_TIMEZONE } from "../api/timezone-allowlist.js";
 
 /**
  * Coerces raw LLM workflowData fields to their declared types.
@@ -210,7 +211,7 @@ export function coerceWorkflowData(
       }
 
       case "date": {
-        const coerced = coerceDate(raw, receivedAt, localeHints, ambiguousDateFormat);
+        const coerced = coerceDate(raw, receivedAt, localeHints, ambiguousDateFormat, accountTimezone);
         if (coerced === null && typeof raw === "string" && raw.trim() !== "") {
           if (isAmbiguousSlashSkip(raw, ambiguousDateFormat)) {
             // Expected policy skip — the date is a valid slash format but its
@@ -368,8 +369,14 @@ const DE_ORDINAL_PERIOD = /(\d)\.(?=\s)/g;
  */
 const NL_ORDINAL_SUFFIX = /(\d)e\b/gi;
 
-/** A trailing parenthesized timezone abbreviation, e.g. "(CEST)", "(GMT)". */
-const TRAILING_ZONE_ABBREVIATION = /\s*\([A-Za-z]{2,5}\)\s*$/;
+/**
+ * A trailing timezone token after the time: an alphabetic abbreviation ("CEST",
+ * "PST"), a numeric UTC/GMT offset ("GMT+2", "UTC-05:00"), or either wrapped in
+ * parentheses ("(CEST)"). Captured (group 1) and stripped before format parsing,
+ * then resolved to a numeric offset via the allowlist. Requires a leading space
+ * so it never bites into the date itself.
+ */
+const TRAILING_ZONE_TOKEN = /\s\(?((?:UTC|GMT)(?:[+-]\d{1,2}(?::?\d{2})?)?|[+-]\d{2}:?\d{2}|(?!AM$|PM$)[A-Za-z]{2,5})\)?\s*$/i;
 
 /** Pattern to detect slash-separated numeric dates (e.g. 01/02/2025, 1/2/25). */
 const SLASH_DATE_PATTERN = /\d+\/\d+/;
@@ -618,6 +625,7 @@ export function coerceDate(
   receivedAt: string,
   localeHints: string[] = [],
   ambiguousDateFormat: AmbiguousDateFormat = "skip",
+  accountTimezone: string = DEFAULT_TIMEZONE,
 ): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -647,9 +655,24 @@ export function coerceDate(
   const reordered = reorderTimeFirst(trimmed, localeHints);
   const normalized = reordered.replace(DOTTED_MERIDIEM, " $1m");
   const hintedLangs = new Set(localeHints.map(h => h.split("-")[0]!.toLowerCase()));
-  let cleaned = normalized
+
+  // Capture a trailing timezone token (e.g. "CEST", "(CEST)", "GMT+2", "UTC-5")
+  // and strip it so the residual date+time parses on the format path, which has
+  // no zone token of its own. A zone always follows a time-of-day, so an
+  // alphabetic token is only treated as a zone when a time precedes it —
+  // otherwise a bare trailing month name ("15 March") would be mistaken for one.
+  // Numeric/UTC/GMT tokens are unambiguous and accepted without that guard.
+  const zoneMatch = normalized.match(TRAILING_ZONE_TOKEN);
+  const candidateToken = zoneMatch ? zoneMatch[1]! : null;
+  const tokenIsAlphabetic = candidateToken !== null && /^[A-Za-z]+$/.test(candidateToken) && !/^(?:UTC|GMT)$/i.test(candidateToken);
+  const beforeToken = zoneMatch ? normalized.slice(0, zoneMatch.index) : normalized;
+  const timePrecedesToken = /\d[:.]\d/.test(beforeToken);
+  const acceptZone = candidateToken !== null && (!tokenIsAlphabetic || timePrecedesToken);
+  const zoneToken = acceptZone ? candidateToken : null;
+  const withoutZone = acceptZone ? beforeToken.trimEnd() : normalized;
+
+  let cleaned = withoutZone
     .replace(LOCALE_TIME_NOISE, "")
-    .replace(TRAILING_ZONE_ABBREVIATION, "")
     .replace(ORDINAL_DAY_SUFFIX, "$1")
     .replace(FR_ORDINAL_SUFFIX, "$1")
     .replace(ES_IT_ORDINAL_SUFFIX, "$1")
@@ -659,13 +682,29 @@ export function coerceDate(
   cleaned = cleaned.trim();
   const input = cleaned || trimmed;
 
+  // Applies the resolved trailing-zone offset (if any) to a parsed date+time,
+  // emitting YYYY-MM-DDTHH:mm±HH:mm. Falls back to the offset-free format when no
+  // zone token was present or the token is unrecognized.
+  const finalize = (parsed: DateTime, hasTime: boolean): string => {
+    if (zoneToken !== null && hasTime) {
+      const offsetMinutes = resolveZoneOffsetMinutes(zoneToken, accountTimezone);
+      if (offsetMinutes !== null) {
+        const sign = offsetMinutes < 0 ? "-" : "+";
+        const abs = Math.abs(offsetMinutes);
+        const off = `${sign}${String(Math.floor(abs / 60)).padStart(2, "0")}:${String(abs % 60).padStart(2, "0")}`;
+        return `${parsed.toFormat("yyyy-MM-dd")}T${parsed.toFormat("HH:mm")}${off}`;
+      }
+    }
+    return formatDisplayDate(parsed, trimmed, hasTime);
+  };
+
   // 2. Try human-readable formats with year + time variants
   for (const fmt of DATE_FORMATS_WITH_YEAR) {
     for (const timeSuffix of TIME_SUFFIXES) {
       const fullFmt = fmt + timeSuffix;
       const parsed = DateTime.fromFormat(input, fullFmt);
       if (parsed.isValid) {
-        return formatDisplayDate(parsed, trimmed, timeSuffix !== "");
+        return finalize(parsed, timeSuffix !== "");
       }
     }
   }
@@ -679,7 +718,7 @@ export function coerceDate(
         const resolved = resolveYearFree(parsed.month, parsed.day, receivedAtDt);
         if (timeSuffix !== "") {
           const withTime = resolved.set({ hour: parsed.hour, minute: parsed.minute });
-          return formatDisplayDate(withTime, trimmed, true);
+          return finalize(withTime, true);
         }
         return resolved.toFormat("yyyy-MM-dd");
       }
@@ -694,7 +733,7 @@ export function coerceDate(
         const fullFmt = fmt + timeSuffix;
         const parsed = DateTime.fromFormat(input, fullFmt, { locale });
         if (parsed.isValid) {
-          return formatDisplayDate(parsed, trimmed, timeSuffix !== "");
+          return finalize(parsed, timeSuffix !== "");
         }
       }
     }
@@ -706,7 +745,7 @@ export function coerceDate(
           const resolved = resolveYearFree(parsed.month, parsed.day, receivedAtDt);
           if (timeSuffix !== "") {
             const withTime = resolved.set({ hour: parsed.hour, minute: parsed.minute });
-            return formatDisplayDate(withTime, trimmed, true);
+            return finalize(withTime, true);
           }
           return resolved.toFormat("yyyy-MM-dd");
         }

@@ -573,14 +573,14 @@ describe("coerceWorkflowData", () => {
     it("parses 'Sept' month abbreviation with a trailing zone abbreviation: 'Wednesday, 30 Sept 2026 18:00 (CEST)'", () => {
       const data: Record<string, unknown> = { ...base, departureDate: "Wednesday, 30 Sept 2026 18:00 (CEST)" };
       const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
-      expect(result.departureDate).toBe("2026-09-30T18:00");
+      expect(result.departureDate).toBe("2026-09-30T18:00+02:00");
       expect(logger.calls.some(c => c.method === "track")).toBe(false);
     });
 
     it("parses 'Sept' month abbreviation with a trailing zone abbreviation: 'Wednesday, 30 Sept 2026 21:00 (CEST)'", () => {
       const data: Record<string, unknown> = { ...base, departureDate: "Wednesday, 30 Sept 2026 21:00 (CEST)" };
       const result = coerceWorkflowData(data, "travel", logger, travelCtx, receivedAt, [], "skip");
-      expect(result.departureDate).toBe("2026-09-30T21:00");
+      expect(result.departureDate).toBe("2026-09-30T21:00+02:00");
       expect(logger.calls.some(c => c.method === "track")).toBe(false);
     });
   });

@@ -281,3 +281,103 @@ export function timezoneAllowlist(): ReadonlySet<string> {
 }
 
 export const DEFAULT_TIMEZONE = "Europe/London";
+
+import { DateTime } from "luxon";
+
+/**
+ * Preferred IANA zone for an abbreviation whose candidate zones resolve to more
+ * than one offset (e.g. CST is US Central −06:00 but also China +08:00). Used
+ * only when the account timezone is not itself a candidate. The choice reflects
+ * the dominant real-world sender: US zones for the American abbreviations, Dublin
+ * for IST (Irish Standard Time is the summer name Irish law uses).
+ */
+const AMBIGUOUS_ABBREVIATION_PREFERENCE: Record<string, string> = {
+  CDT: "America/Chicago",
+  CST: "America/Chicago",
+  IST: "Europe/Dublin",
+  MST: "America/Denver",
+  PST: "America/Los_Angeles",
+};
+
+let abbreviationIndexCache: ReadonlyMap<string, readonly string[]> | undefined;
+function abbreviationIndex(): ReadonlyMap<string, readonly string[]> {
+  if (abbreviationIndexCache) return abbreviationIndexCache;
+  const index = new Map<string, string[]>();
+  for (const { tzCode, abbreviations } of TIMEZONE_ENTRIES) {
+    for (const abbr of abbreviations) {
+      if (!/^[A-Za-z]+$/.test(abbr)) continue;
+      (index.get(abbr) ?? index.set(abbr, []).get(abbr)!).push(tzCode);
+    }
+  }
+  return (abbreviationIndexCache = index);
+}
+
+/**
+ * A zone abbreviation names a specific DST state, so its offset is fixed by the
+ * abbreviation itself, not by the calendar date it is attached to: "PST" is
+ * −08:00 even on a July email. Daylight/summer abbreviations are those ending in
+ * "DT" (PDT, EDT, AEDT, …) plus the European summer names and British/Irish
+ * summer time. Everything else is the standard (winter) name. Returns whether the
+ * abbreviation denotes the summer state, so the resolver samples the candidate
+ * zone in the matching season rather than on the parsed date.
+ */
+const SUMMER_ABBREVIATIONS = new Set(["CEST", "EEST", "WEST", "BST", "IST", "IDT"]);
+function isSummerAbbreviation(abbr: string): boolean {
+  const upper = abbr.toUpperCase();
+  return /DT$/.test(upper) || SUMMER_ABBREVIATIONS.has(upper);
+}
+
+/** The zone's offset (minutes) in the season the abbreviation denotes, DST-correct via a sample date in that season. */
+function seasonOffsetMinutes(tz: string, summer: boolean): number {
+  const jan = DateTime.fromObject({ year: 2024, month: 1, day: 15, hour: 12 }, { zone: tz }).offset;
+  const jul = DateTime.fromObject({ year: 2024, month: 7, day: 15, hour: 12 }, { zone: tz }).offset;
+  const summerOffset = jul >= jan ? jul : jan;
+  const winterOffset = jul >= jan ? jan : jul;
+  return summer ? summerOffset : winterOffset;
+}
+
+/** Parses a numeric UTC/GMT zone token ("UTC+2", "GMT-5", "UTC+05:30", "UTC", "GMT") to offset minutes. */
+function numericOffsetMinutes(token: string): number | null {
+  const m = token.match(/^(?:UTC|GMT)?([+-])(\d{1,2})(?::?(\d{2}))?$/i);
+  if (m) {
+    const sign = m[1] === "-" ? -1 : 1;
+    const hours = Number(m[2]);
+    const minutes = m[3] ? Number(m[3]) : 0;
+    return sign * (hours * 60 + minutes);
+  }
+  if (/^(?:UTC|GMT)$/i.test(token)) return 0;
+  return null;
+}
+
+/**
+ * Resolves a trailing timezone token from an email date ("CEST", "GMT+2", "PST")
+ * to a UTC offset in minutes for the given instant. Returns null when the token
+ * is not a recognized abbreviation or numeric zone.
+ *
+ * Numeric tokens (UTC±N / GMT±N, any spelling) are computed arithmetically.
+ * Alphabetic abbreviations are resolved against the allowlist. The offset is
+ * fixed by the abbreviation's own DST state (PST is −08:00, PDT is −07:00) — not
+ * by the date it is attached to — so a candidate zone is sampled in the season
+ * the abbreviation names. When the abbreviation maps to several zones with
+ * different offsets (CST → US Central or China), the account timezone wins if it
+ * is a candidate, otherwise the preferred zone above.
+ */
+export function resolveZoneOffsetMinutes(rawToken: string, accountTimezone: string): number | null {
+  const token = rawToken.trim().replace(/^\(|\)$/g, "");
+  const numeric = numericOffsetMinutes(token.replace(/^GMT/i, "UTC"));
+  if (numeric !== null) return numeric;
+
+  const upper = token.toUpperCase();
+  const candidates = abbreviationIndex().get(upper);
+  if (!candidates || candidates.length === 0) return null;
+
+  const summer = isSummerAbbreviation(upper);
+  const offsetFor = (tz: string): number => seasonOffsetMinutes(tz, summer);
+  const distinctOffsets = new Set(candidates.map(offsetFor));
+  if (distinctOffsets.size === 1) return offsetFor(candidates[0]!);
+
+  if (candidates.includes(accountTimezone)) return offsetFor(accountTimezone);
+  const preferred = AMBIGUOUS_ABBREVIATION_PREFERENCE[upper];
+  if (preferred && candidates.includes(preferred)) return offsetFor(preferred);
+  return null;
+}
