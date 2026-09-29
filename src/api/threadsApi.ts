@@ -347,6 +347,9 @@ export class ThreadsApi {
 
       const enrichedSignals: Api.Signal[] = [];
       for (const signal of signals) {
+        // RSVP history is folded into its event card as data.rsvpResponse above; the raw
+        // calendar_response records are not timeline entries of their own.
+        if (signal.type === "calendar_response") continue;
         if (isCalendarEventSignal(signal)) {
           // Drop snapshots that lost to a later invite/cancellation in their event group.
           if (collapse.superseded.has(signal.id)) continue;

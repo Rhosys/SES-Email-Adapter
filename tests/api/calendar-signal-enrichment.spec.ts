@@ -268,6 +268,20 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
     });
   });
 
+  it("folds calendar_response into the event card instead of returning it as its own signal", async () => {
+    const calSignal = makeCalendarEventSignal();
+    const responseSignal = makeCalendarResponseSignal();
+    threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-15T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-15T09:00:00Z" }));
+    threadDb.listSignals.mockResolvedValueOnce(ok({ items: [responseSignal, calSignal] }));
+    threadDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(responseSignal));
+
+    const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { signals: Array<{ type: string; data: { rsvpResponse?: { decision: string } } }> };
+    expect(body.signals.map(s => s.type)).toEqual(["calendar_event"]);
+    expect(body.signals[0]!.data.rsvpResponse?.decision).toBe("accepted");
+  });
+
   it("does not include rsvpResponse when no calendar_response exists", async () => {
     const calSignal = makeCalendarEventSignal();
     threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-15T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-15T09:00:00Z" }));
