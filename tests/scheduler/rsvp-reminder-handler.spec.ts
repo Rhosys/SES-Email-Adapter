@@ -27,7 +27,7 @@ const PAST_START = "2020-01-01T08:00:00Z";
 
 const MESSAGE: RsvpReminderMessage = { sqsMessageAttributeMessageType: "rsvp_reminder", accountId: ACCOUNT_ID, calendarSignalId: SIGNAL_ID, threadId: ARC_ID };
 
-function makeCalendarSignal(overrides: Partial<{ startTime: string; veventUid: string }> = {}): Signal {
+function makeCalendarSignal(overrides: Partial<{ startTime: string; veventUid: string; rsvpResponse: CalendarEventData["rsvpResponse"] }> = {}): Signal {
   const data: CalendarEventData = {
     title: "Team standup",
     startTime: overrides.startTime ?? FUTURE_START,
@@ -38,6 +38,7 @@ function makeCalendarSignal(overrides: Partial<{ startTime: string; veventUid: s
     sequence: 0,
     originalVeventUid: overrides.veventUid ?? VEVENT_UID,
     linkedSignalId: "sgn-email-001",
+    ...(overrides.rsvpResponse ? { rsvpResponse: overrides.rsvpResponse } : {}),
   };
 
   return {
@@ -72,26 +73,12 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
   };
 }
 
-function makeResponseSignal(): Signal {
-  return {
-    id: "sgn-resp-001",
-    signalLookupId: "sgn-resp-001",
-    threadId: ARC_ID,
-    accountId: ACCOUNT_ID,
-    source: "user",
-    type: "calendar_response",
-    status: "active",
-    createdAt: "2024-06-02T10:00:00Z",
-    data: { decision: "accepted", respondedAt: "2024-06-02T10:00:00Z", veventUid: VEVENT_UID, linkedSignalId: SIGNAL_ID },
-  } as unknown as Signal;
-}
-
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
 
 function setup() {
-  const threadDb = { getSignalById: vi.fn(), getLatestCalendarResponse: vi.fn(), getThread: vi.fn() };
+  const threadDb = { getSignalById: vi.fn(), getThread: vi.fn() };
   const notifier = mock<Notifier>();
   const logger = createMockLogger();
 
@@ -114,7 +101,7 @@ describe("RsvpReminderHandler", () => {
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(threadDb.getLatestCalendarResponse).not.toHaveBeenCalled();
+      expect(threadDb.getThread).not.toHaveBeenCalled();
       expect(notifier.notifyThread).not.toHaveBeenCalled();
 
       // A scheduled reminder pointing at a missing calendar signal is a data-integrity fault, not a benign discard.
@@ -130,7 +117,7 @@ describe("RsvpReminderHandler", () => {
       const result = await handler.process(MESSAGE);
 
       expect(result.isOk()).toBe(true);
-      expect(threadDb.getLatestCalendarResponse).not.toHaveBeenCalled();
+      expect(threadDb.getThread).not.toHaveBeenCalled();
       expect(notifier.notifyThread).not.toHaveBeenCalled();
 
       const trackCalls = logger.calls.filter((c) => c.method === "track");
@@ -140,8 +127,7 @@ describe("RsvpReminderHandler", () => {
 
     it("Row 3: response exists → discard (TRACK already_responded)", async () => {
       const { handler, threadDb, notifier, logger } = setup();
-      threadDb.getSignalById.mockResolvedValue(ok(makeCalendarSignal()));
-      threadDb.getLatestCalendarResponse.mockResolvedValue(ok(makeResponseSignal()));
+      threadDb.getSignalById.mockResolvedValue(ok(makeCalendarSignal({ rsvpResponse: { decision: "accepted", respondedAt: "2024-06-02T10:00:00Z" } })));
 
       const result = await handler.process(MESSAGE);
 
@@ -158,7 +144,6 @@ describe("RsvpReminderHandler", () => {
       const signal = makeCalendarSignal();
       const arc = makeThread();
       threadDb.getSignalById.mockResolvedValue(ok(signal));
-      threadDb.getLatestCalendarResponse.mockResolvedValue(ok(null));
       threadDb.getThread.mockResolvedValue(ok(arc));
       vi.mocked(notifier.notifyThread).mockResolvedValue(ok(undefined));
 
@@ -191,22 +176,9 @@ describe("RsvpReminderHandler", () => {
       expect(notifier.notifyThread).not.toHaveBeenCalled();
     });
 
-    it("DB error on getLatestCalendarResponse → returns err (SQS retry)", async () => {
-      const { handler, threadDb, notifier } = setup();
-      threadDb.getSignalById.mockResolvedValue(ok(makeCalendarSignal()));
-      threadDb.getLatestCalendarResponse.mockResolvedValue(err(dbError("Connection refused")));
-
-      const result = await handler.process(MESSAGE);
-
-      expect(result.isErr()).toBe(true);
-      expect(result._unsafeUnwrapErr().kind).toBe("db_error");
-      expect(notifier.notifyThread).not.toHaveBeenCalled();
-    });
-
     it("DB error on getArc → returns err (SQS retry)", async () => {
       const { handler, threadDb, notifier } = setup();
       threadDb.getSignalById.mockResolvedValue(ok(makeCalendarSignal()));
-      threadDb.getLatestCalendarResponse.mockResolvedValue(ok(null));
       threadDb.getThread.mockResolvedValue(err(dbError("throttled")));
 
       const result = await handler.process(MESSAGE);
@@ -219,7 +191,6 @@ describe("RsvpReminderHandler", () => {
     it("arc not found → discard (TRACK arc_missing)", async () => {
       const { handler, threadDb, notifier, logger } = setup();
       threadDb.getSignalById.mockResolvedValue(ok(makeCalendarSignal()));
-      threadDb.getLatestCalendarResponse.mockResolvedValue(ok(null));
       threadDb.getThread.mockResolvedValue(ok(null));
 
       const result = await handler.process(MESSAGE);

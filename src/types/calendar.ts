@@ -34,15 +34,13 @@ export interface CalendarEventData {
   proxyUid?: string;
   originalVeventUid: string;
   linkedSignalId: string;
+  /** The account's latest RSVP to this event, from the dashboard or a native calendar reply. */
+  rsvpResponse?: CalendarRsvpResponse;
 }
 
-export interface CalendarResponseData {
+export interface CalendarRsvpResponse {
   decision: "accepted" | "declined" | "tentative";
   respondedAt: string;
-  veventUid: string;
-  linkedSignalId: string;
-  sendStatus?: "sent" | "send_failed";
-  sendFailureReason?: string;
 }
 
 export interface CalendarInviteInvalidData {
@@ -63,10 +61,6 @@ export interface DomainMisconfigurationData {
 
 export function isCalendarEventSignal(signal: AnySignal): signal is Signal<CalendarEventData> {
   return signal.type === "calendar_event";
-}
-
-export function isCalendarResponseSignal(signal: AnySignal): signal is Signal<CalendarResponseData> {
-  return signal.type === "calendar_response";
 }
 
 export function isCalendarInviteInvalidSignal(signal: AnySignal): signal is Signal<CalendarInviteInvalidData> {

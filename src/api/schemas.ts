@@ -25,7 +25,7 @@ export const SignalSource = z.enum(["system", "user"]);
 
 export const SignalType = z.enum([
   "email", "deliverability", "invalid_rule_function", "invalid_template_function",
-  "auto_send_blocked", "calendar_event", "calendar_response",
+  "auto_send_blocked", "calendar_event",
   "calendar_invite_invalid", "domain_misconfiguration",
 ]);
 
@@ -431,21 +431,13 @@ export const CalendarEventData = z.object({
   // Present only when a later invite changed one or more fields; carries the
   // pre-update values of just the changed fields. Absent for a first invite.
   previousValues: CalendarPreviousValues.optional(),
-  // The account's latest RSVP for this event, resolved across the response history by
-  // respondedAt. Absent when the user has not responded. Lets the client show "you responded"
-  // regardless of which path recorded it (dashboard or native calendar reply) without a second
-  // query. respondedAt is an ISO 8601 timestamp.
+  // The account's latest RSVP for this event, whichever path recorded it (dashboard or native
+  // calendar reply). Absent when the user has not responded. respondedAt is an ISO 8601 timestamp.
   rsvpResponse: z.object({
     decision: z.enum(["accepted", "declined", "tentative"]),
     respondedAt: z.string(),
   }).optional(),
 }).openapi("CalendarEventData");
-
-export const CalendarResponseData = z.object({
-  rsvpResponse: z.enum(["accepted", "declined", "tentative"]),
-  respondedAt: z.string(),
-  linkedSignalId: z.string(),
-}).openapi("CalendarResponseData");
 
 export const CalendarInviteInvalidData = z.object({
   reason: z.string(),
@@ -513,12 +505,6 @@ export const CalendarEventSignal = z.object({
   data: CalendarEventData,
 }).openapi("CalendarEventSignal");
 
-export const CalendarResponseSignal = z.object({
-  ...SignalBase,
-  type: z.literal("calendar_response"),
-  data: CalendarResponseData,
-}).openapi("CalendarResponseSignal");
-
 export const CalendarInviteInvalidSignal = z.object({
   ...SignalBase,
   type: z.literal("calendar_invite_invalid"),
@@ -539,7 +525,6 @@ export const Signal = z.union([
   InvalidTemplateFunctionSignal,
   AutoSendBlockedSignal,
   CalendarEventSignal,
-  CalendarResponseSignal,
   CalendarInviteInvalidSignal,
   DomainMisconfigurationSignal,
 ]).openapi("Signal");

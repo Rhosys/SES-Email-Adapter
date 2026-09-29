@@ -271,7 +271,7 @@ export type StatsCategory = (typeof STATS_CATEGORIES)[number];
 export const SIGNAL_SOURCES = ["email", "user", "ses_feedback", "signal"] as const;
 export type SignalSource = (typeof SIGNAL_SOURCES)[number];
 
-export const SIGNAL_TYPES = ["email", "deliverability", "invalid_rule_function", "invalid_template_function", "auto_send_blocked", "calendar_event", "calendar_response", "calendar_invite_invalid", "domain_misconfiguration"] as const;
+export const SIGNAL_TYPES = ["email", "deliverability", "invalid_rule_function", "invalid_template_function", "auto_send_blocked", "calendar_event", "calendar_invite_invalid", "domain_misconfiguration"] as const;
 export type SignalType = (typeof SIGNAL_TYPES)[number];
 
 // interrupt = push notification popup; ambient = badge only; silent = no push
@@ -620,7 +620,6 @@ export type AnySignal =
   | Signal<InvalidTemplateFunctionData>
   | Signal<AutoSendBlockedData>
   | Signal<import("./calendar.js").CalendarEventData>
-  | Signal<import("./calendar.js").CalendarResponseData>
   | Signal<import("./calendar.js").CalendarInviteInvalidData>
   | Signal<import("./calendar.js").DomainMisconfigurationData>;
 
@@ -1091,14 +1090,13 @@ export function resolveSesEventType(feedback: { eventType?: string; notification
 export type {
   CalendarEventData,
   CalendarAttendee,
-  CalendarResponseData,
+  CalendarRsvpResponse,
   CalendarInviteInvalidData,
   DomainMisconfigurationData,
 } from "./calendar.js";
 
 export {
   isCalendarEventSignal,
-  isCalendarResponseSignal,
   isCalendarInviteInvalidSignal,
   isDomainMisconfigurationSignal,
 } from "./calendar.js";

@@ -103,6 +103,7 @@ function makeContentStore(icsContent: string = VALID_ICS): ContentStore {
 function makeArcDb() {
   return {
     saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
+    saveCalendarEventSignal: vi.fn().mockResolvedValue(ok(undefined)),
     updateThread: vi.fn().mockResolvedValue(ok(makeThread())),
   } as unknown as ThreadDatabase;
 }
@@ -165,8 +166,8 @@ describe("handlePostApprovalCalendar — triggers forwarding on approval", () =>
     await runPostApprovalCalendar(signal, arc, deps);
 
     // Calendar signal was saved
-    expect(threadDb.saveSignal).toHaveBeenCalledOnce();
-    const savedSignal = (threadDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(threadDb.saveCalendarEventSignal).toHaveBeenCalledOnce();
+    const savedSignal = (threadDb.saveCalendarEventSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(savedSignal.source).toBe("signal");
     expect(savedSignal.type).toBe("calendar_event");
     expect(savedSignal.data.linkedSignalId).toBe("sgn-email-001");
@@ -188,6 +189,7 @@ describe("handlePostApprovalCalendar — triggers forwarding on approval", () =>
     await runPostApprovalCalendar(signal, arc, deps);
 
     expect(threadDb.saveSignal).not.toHaveBeenCalled();
+    expect(threadDb.saveCalendarEventSignal).not.toHaveBeenCalled();
   });
 });
 
@@ -253,8 +255,8 @@ describe("handlePostApprovalCalendar — uses same construction rules as normal 
     await runPostApprovalCalendar(signal, arc, deps);
 
     // Calendar signal is still created (forwarding is a separate concern)
-    const threadDb = deps.threadDb as unknown as { saveSignal: ReturnType<typeof vi.fn> };
-    expect(threadDb.saveSignal).toHaveBeenCalledOnce();
+    const threadDb = deps.threadDb as unknown as { saveCalendarEventSignal: ReturnType<typeof vi.fn> };
+    expect(threadDb.saveCalendarEventSignal).toHaveBeenCalledOnce();
 
     // But email is NOT sent (forwardInvite no-ops on empty address)
     const emailSend = emailService.sendRaw as ReturnType<typeof vi.fn>;

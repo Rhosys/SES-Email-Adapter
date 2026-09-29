@@ -2,8 +2,7 @@ import { DateTime } from "luxon";
 
 import { ok, err } from "../errors.js";
 import type { Result, DbError } from "../errors.js";
-import type { AnySignal, Signal, Thread } from "../types/index.js";
-import type { CalendarResponseData } from "../types/calendar.js";
+import type { AnySignal, Thread } from "../types/index.js";
 import { isCalendarEventSignal } from "../types/calendar.js";
 import type { Notifier, NotificationReason } from "../notifier/types.js";
 import type { Logger } from "../logger.js";
@@ -15,7 +14,6 @@ import type { RsvpReminderMessage } from "./rsvp-reminder.js";
 
 export interface IRsvpReminderThreadDb {
   getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<AnySignal | null, DbError>>;
-  getLatestCalendarResponse(accountId: string, threadId: string, veventUid: string): Promise<Result<Signal<CalendarResponseData> | null, DbError>>;
   getThread(accountId: string, threadId: string): Promise<Result<Thread | null, DbError>>;
 }
 
@@ -53,7 +51,7 @@ export class RsvpReminderHandler {
       return ok(undefined);
     }
 
-    // 2. Extract startTime and veventUid. The reminder was scheduled against a calendar_event
+    // 2. Extract startTime and the recorded RSVP. The reminder was scheduled against a calendar_event
     // signal, so a row of any other type is a data-integrity fault (bad write, TTL, wrong id) —
     // discard after logging, same as the missing-signal case.
     if (!isCalendarEventSignal(signal)) {
@@ -63,7 +61,7 @@ export class RsvpReminderHandler {
       });
       return ok(undefined);
     }
-    const { veventUid, startTime } = signal.data;
+    const { startTime, rsvpResponse } = signal.data;
 
     // 3. Check if event has passed
     const eventStart = DateTime.fromISO(startTime, { zone: "utc" });
@@ -76,13 +74,10 @@ export class RsvpReminderHandler {
     }
 
     // 4. Check if user has already responded
-    const responseResult = await this.threadDb.getLatestCalendarResponse(accountId, threadId, veventUid);
-    if (responseResult.isErr()) return err(responseResult.error);
-
-    if (responseResult.value) {
+    if (rsvpResponse) {
       this.logger.track("RSVP reminder: user already responded, discarding.", {
         code: "rsvp_reminder.already_responded",
-        signal, veventUid,
+        signal,
       });
       return ok(undefined);
     }
