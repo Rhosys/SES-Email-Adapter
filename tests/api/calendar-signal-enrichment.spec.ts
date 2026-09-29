@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Signal } from "../../src/types/index.js";
-import type { CalendarEventData, CalendarResponseData } from "../../src/types/calendar.js";
+import type { CalendarEventData } from "../../src/types/calendar.js";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
 import type { AuthService, AccessService, IForwardingService } from "../../src/api/app.js";
@@ -62,7 +62,6 @@ function makeThreadDb() {
     createArc: vi.fn().mockResolvedValue(ok(undefined)),
     searchArcs: vi.fn().mockResolvedValue(ok({ items: [] })),
     saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
-    getLatestCalendarResponse: vi.fn().mockResolvedValue(ok(null)),
     getLinkedCalendarSignal: vi.fn().mockResolvedValue(ok(null)),
   };
 }
@@ -146,28 +145,6 @@ function makeCalendarEventSignal(overrides: Partial<Signal<CalendarEventData>> =
   };
 }
 
-function makeCalendarResponseSignal(overrides: Partial<Signal<CalendarResponseData>> = {}): Signal<CalendarResponseData> {
-  return {
-    id: "sgn-resp-001",
-    signalLookupId: "sgn-resp-001",
-    threadId: "arc-001",
-    accountId: TEST_ACCOUNT_ID,
-    source: "user",
-    type: "calendar_response",
-    status: "active",
-    labels: [],
-    createdAt: "2025-03-15T11:00:00Z",
-    data: {
-      decision: "accepted",
-      respondedAt: "2025-03-15T11:00:00Z",
-      veventUid: "uid-123",
-      linkedSignalId: "sgn-cal-001",
-      sendStatus: "sent",
-    },
-    ...overrides,
-  };
-}
-
 async function req(app: ReturnType<typeof createApp>, method: string, path: string) {
   return app.fetch(new Request(`http://localhost${path}`, {
     method,
@@ -215,7 +192,6 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
     const calSignal = makeCalendarEventSignal();
     threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-15T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-15T09:00:00Z" }));
     threadDb.listSignals.mockResolvedValueOnce(ok({ items: [calSignal] }));
-    threadDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
 
     const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
     expect(res.status).toBe(200);
@@ -231,7 +207,6 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
     const calSignal = makeCalendarEventSignal();
     threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-15T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-15T09:00:00Z" }));
     threadDb.listSignals.mockResolvedValueOnce(ok({ items: [calSignal] }));
-    threadDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
 
     const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
     expect(res.status).toBe(200);
@@ -243,7 +218,6 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
     const calSignal = makeCalendarEventSignal({ data: { ...makeCalendarEventSignal().data, method: "PUBLISH", organizer: "" } });
     threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-15T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-15T09:00:00Z" }));
     threadDb.listSignals.mockResolvedValueOnce(ok({ items: [calSignal] }));
-    threadDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
 
     const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
     expect(res.status).toBe(200);
@@ -251,12 +225,10 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
     expect(body.signals[0]!.data.rsvpable).toBe(false);
   });
 
-  it("includes most recent calendar_response decision alongside calendar signal", async () => {
-    const calSignal = makeCalendarEventSignal();
-    const responseSignal = makeCalendarResponseSignal();
+  it("returns the RSVP stored on the calendar event", async () => {
+    const calSignal = makeCalendarEventSignal({ data: { ...makeCalendarEventSignal().data, rsvpResponse: { decision: "accepted", respondedAt: "2025-03-15T11:00:00Z" } } });
     threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-15T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-15T09:00:00Z" }));
     threadDb.listSignals.mockResolvedValueOnce(ok({ items: [calSignal] }));
-    threadDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(responseSignal));
 
     const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
     expect(res.status).toBe(200);
@@ -268,11 +240,10 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
     });
   });
 
-  it("does not include rsvpResponse when no calendar_response exists", async () => {
+  it("does not include rsvpResponse when the user has not responded", async () => {
     const calSignal = makeCalendarEventSignal();
     threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-15T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-15T09:00:00Z" }));
     threadDb.listSignals.mockResolvedValueOnce(ok({ items: [calSignal] }));
-    threadDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
 
     const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
     expect(res.status).toBe(200);
@@ -284,7 +255,6 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
     const calSignal = makeCalendarEventSignal();
     threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-15T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-15T09:00:00Z" }));
     threadDb.listSignals.mockResolvedValueOnce(ok({ items: [calSignal] }));
-    threadDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
 
     const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
     const body = await res.json() as { signals: Array<{ source: string; type: string; data: { startTime: string; endTime: string } }> };
@@ -300,7 +270,6 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
     const cancelSignal = makeCalendarEventSignal({ data: { ...makeCalendarEventSignal().data, method: "CANCEL", status: "CANCELLED" } });
     threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-15T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-15T09:00:00Z" }));
     threadDb.listSignals.mockResolvedValueOnce(ok({ items: [cancelSignal] }));
-    threadDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
 
     const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
     const body = await res.json() as { signals: Array<{ type: string; data: { title: string } }> };
@@ -312,7 +281,6 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
     const calSignal = makeCalendarEventSignal();
     threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-15T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-15T09:00:00Z" }));
     threadDb.listSignals.mockResolvedValueOnce(ok({ items: [calSignal] }));
-    threadDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
 
     const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
     const body = await res.json() as { signals: Array<{ type: string; data: { linkedSignalId: string } }> };
@@ -332,7 +300,6 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
     });
     threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-16T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-16T09:00:00Z" }));
     threadDb.listSignals.mockResolvedValueOnce(ok({ items: [invite, update] }));
-    threadDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
 
     const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
     expect(res.status).toBe(200);
@@ -354,7 +321,6 @@ describe("GET /accounts/:accountId/threads/:threadId/signals — calendar signal
     });
     threadDb.getThread.mockResolvedValueOnce(ok({ id: "arc-001", accountId: TEST_ACCOUNT_ID, workflow: "job", labels: [], status: "active", summary: "Test", lastSignalAt: "2025-03-16T09:00:00Z", createdAt: "2025-03-15T09:00:00Z", updatedAt: "2025-03-16T09:00:00Z" }));
     threadDb.listSignals.mockResolvedValueOnce(ok({ items: [invite, cancel] }));
-    threadDb.getLatestCalendarResponse.mockResolvedValueOnce(ok(null));
 
     const res = await req(app, "GET", `${A}/threads/arc-001/signals`);
     expect(res.status).toBe(200);

@@ -151,7 +151,7 @@ export async function handlePostApprovalCalendar(
       continue;
     }
 
-    const saveCalResult = await threadDb.saveSignal(calendarSignal);
+    const saveCalResult = await threadDb.saveCalendarEventSignal(calendarSignal);
     if (saveCalResult.isErr()) {
       logger.warn("Post-approval calendar: failed to save calendar signal.", {
         code: "processor.post_approval_calendar.save_failed",

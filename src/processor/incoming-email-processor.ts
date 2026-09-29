@@ -2026,7 +2026,7 @@ export class IncomingEmailProcessor {
         },
       };
 
-      const saveCalResult = await this.threadDb.saveSignal(calendarSignal);
+      const saveCalResult = await this.threadDb.saveCalendarEventSignal(calendarSignal);
       if (saveCalResult.isErr()) {
         this.logger.warn("Failed to save calendar_event signal.", { code: "system_signal.write_failed", signal, thread, accountId, type: "calendar_event", error: saveCalResult.error });
         continue;

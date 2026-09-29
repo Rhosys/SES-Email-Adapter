@@ -19,7 +19,7 @@ import type { PostApprovalCalendarHandlerDeps } from "../../../src/processor/cal
 import { CalendarExtractor } from "../../../src/processor/calendar/calendar-event-extraction.js";
 import { buildProxyUid as buildProxyUidRaw } from "../../../src/processor/calendar/proxy-uid.js";
 import { buildCalendarSignalLookupId } from "../../../src/processor/calendar/signal-lookup.js";
-import type { CalendarEventData, CalendarResponseData } from "../../../src/types/calendar.js";
+import type { CalendarEventData } from "../../../src/types/calendar.js";
 import type { Signal, Thread, Attachment } from "../../../src/types/index.js";
 import type { InboundSignalMessage } from "../../../src/processor/incoming-email-processor.js";
 import type { EmailContentStore } from "../../../src/content-store.js";
@@ -188,7 +188,7 @@ function makeRsvpThreadStore(): RsvpThreadStore {
       lastSignalAt: "2025-03-15T09:00:00Z",
       createdAt: "2025-03-15T09:00:00Z",
     })),
-    saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
+    setCalendarEventRsvp: vi.fn().mockResolvedValue(ok(true)),
     listSignals: vi.fn().mockResolvedValue(ok({ items: [makeStoredInvite()] })),
   };
 }
@@ -343,7 +343,7 @@ describe("Scenario: reschedule with higher SEQUENCE is forwarded so calendar upd
 });
 
 // ===========================================================================
-// Scenario 4: User RSVP via UI → calendar_response signal created
+// Scenario 4: User RSVP via UI → RSVP recorded on the calendar event
 //             → masked REPLY sent to original organizer with original UID
 // ===========================================================================
 
@@ -402,8 +402,8 @@ describe("Scenario: UI RSVP sends masked reply to organizer preserving user priv
 
 // ===========================================================================
 // Scenario 5: User's calendar app sends native REPLY → inbound at proxy
-//             ORGANIZER address → HMAC validated → calendar_response signal
-//             created → masked REPLY sent to original organizer
+//             ORGANIZER address → HMAC validated → RSVP recorded on the
+//             calendar event → masked REPLY sent to original organizer
 // ===========================================================================
 
 describe("Scenario: native calendar REPLY is validated and forwarded to organizer", () => {
@@ -412,7 +412,7 @@ describe("Scenario: native calendar REPLY is validated and forwarded to organize
   // validate the HMAC to prevent spoofing, then forward the decision to the real
   // organizer. Without this flow, native calendar RSVPs are silently lost.
 
-  it("valid native REPLY creates calendar_response signal and sends masked REPLY", async () => {
+  it("valid native REPLY records the RSVP on the calendar event and sends masked REPLY", async () => {
     const proxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
       threadId: VALID_ARC_ID,
@@ -430,11 +430,10 @@ describe("Scenario: native calendar REPLY is validated and forwarded to organize
     const sendCall = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(sendCall.to).toEqual([ORGANIZER_EMAIL]);
 
-    // calendar_response signal was saved with the original UID and decision.
-    const savedSignal = (threadStore.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0];
-    expect(savedSignal.type).toBe("calendar_response");
-    expect(savedSignal.data.decision).toBe("accepted");
-    expect(savedSignal.data.veventUid).toBe(VEVENT_UID);
+    // RSVP was recorded on the stored invite for the original UID.
+    const [, signalLookupId, rsvp] = (threadStore.setCalendarEventRsvp as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(signalLookupId).toBe(makeStoredInvite().signalLookupId);
+    expect(rsvp.decision).toBe("accepted");
   });
 });
 
@@ -457,7 +456,7 @@ describe("Scenario: invalid HMAC REPLY is silently dropped to prevent spoofing",
 
     expect(result.isOk()).toBe(true);
     expect(threadStore.getThread).not.toHaveBeenCalled();
-    expect(threadStore.saveSignal).not.toHaveBeenCalled();
+    expect(threadStore.setCalendarEventRsvp).not.toHaveBeenCalled();
     expect(emailService.sendRaw).not.toHaveBeenCalled();
     expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "processor.calendar_response.hmac_failed")).toBe(true);
   });
@@ -515,6 +514,7 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
 
     const threadDb = {
       saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
+      saveCalendarEventSignal: vi.fn().mockResolvedValue(ok(undefined)),
       updateThread: vi.fn().mockResolvedValue(ok(undefined)),
     } as unknown as PostApprovalCalendarHandlerDeps["threadDb"];
 
@@ -596,8 +596,8 @@ describe("Scenario: approving quarantined email triggers calendar forwarding", (
     await handlePostApprovalCalendar(signal, arc, deps, extraction);
 
     // Calendar signal was saved
-    expect(threadDb.saveSignal).toHaveBeenCalledOnce();
-    const savedSignal = (threadDb.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(threadDb.saveCalendarEventSignal).toHaveBeenCalledOnce();
+    const savedSignal = (threadDb.saveCalendarEventSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(savedSignal.type).toBe("calendar_event");
     expect(savedSignal.source).toBe("signal");
     expect(savedSignal.data.organizer).toBe(ORGANIZER_EMAIL);
@@ -652,18 +652,15 @@ describe("Scenario: CalendarData is sourced from calendar signal, not email sign
 });
 
 // ===========================================================================
-// Scenario 10: API returns most recent calendar_response decision alongside
-//              the calendar signal
+// Scenario 10: the RSVP decision is stored on the calendar event itself
 // ===========================================================================
 
-describe("Scenario: most recent RSVP decision is recorded as calendar_response signal on same arc", () => {
-  // WHY: The UI must show the user's current RSVP state (accepted/declined/tentative)
-  // alongside the calendar card. This state is derived from the most recent
-  // calendar_response signal on the arc — not stored on the calendar signal itself.
-  // This design allows multiple RSVPs (change of mind) without mutating the
-  // immutable calendar signal.
+describe("Scenario: native RSVP decision is recorded on the calendar event", () => {
+  // WHY: The UI shows the user's current RSVP state on the calendar card. Storing it on the
+  // event row means the card reads it from one record, with no separate response history to
+  // resolve or accidentally render.
 
-  it("calendar_response signal records decision, veventUid, and linkedSignalId", async () => {
+  it("records the decision and respondedAt on the event's row", async () => {
     const proxyUid = await buildProxyUid({
       accountId: VALID_ACC_ID,
       threadId: VALID_ARC_ID,
@@ -675,27 +672,10 @@ describe("Scenario: most recent RSVP decision is recorded as calendar_response s
 
     await processor.process(makeRsvpMessage());
 
-    // calendar_response signal was saved
-    const savedSignal = (threadStore.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Signal<CalendarResponseData>;
-
-    // Type and source identify it as a user RSVP decision
-    expect(savedSignal.type).toBe("calendar_response");
-    expect(savedSignal.source).toBe("user");
-
-    // Decision matches the PARTSTAT from the native REPLY
-    expect(savedSignal.data.decision).toBe("tentative");
-
-    // veventUid is the ORIGINAL UID (not proxy) — enables joining with calendar signal
-    expect(savedSignal.data.veventUid).toBe(VEVENT_UID);
-
-    // linkedSignalId enables the API to find which calendar signal this responds to
-    expect(savedSignal.data.linkedSignalId).toBeDefined();
-
-    // Signal is on the same arc as the calendar signal
-    expect(savedSignal.threadId).toBe(VALID_ARC_ID);
-    expect(savedSignal.accountId).toBe(VALID_ACC_ID);
-
-    // respondedAt is populated
-    expect(savedSignal.data.respondedAt).toBeDefined();
+    const [accountId, signalLookupId, rsvp] = (threadStore.setCalendarEventRsvp as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(accountId).toBe(VALID_ACC_ID);
+    expect(signalLookupId).toBe(`cal-${ORGANIZER_EMAIL}-${VEVENT_UID}`);
+    expect(rsvp.decision).toBe("tentative");
+    expect(rsvp.respondedAt).toBeDefined();
   });
 });

@@ -54,8 +54,8 @@ function resolveInlineImageUrls(htmlBody: string, inlineImages: InlineImageRef[]
   return resolved;
 }
 
-// Calendar (.ics) attachments are surfaced as first-class calendar_event / calendar_response
-// signals — the raw invite file is redundant noise in the attachment list, so it is not returned
+// Calendar (.ics) attachments are surfaced as first-class calendar_event signals
+// — the raw invite file is redundant noise in the attachment list, so it is not returned
 // to the client. The stored attachment ref is left untouched (the calendar processor and
 // post-approval handler still read it); this filter is API-read-side only.
 function toApiAttachments(attachments: Attachment[], cdnBase: string): Api.Attachment[] {
@@ -175,14 +175,7 @@ function toApiCalendarData(type: string, data: unknown): unknown {
       // non-rsvpable — the safe default, since eligibility can only be decided across the
       // whole event group (a later CANCEL vetoes a REQUEST).
       rsvpable: false,
-    };
-  }
-  if (type === "calendar_response") {
-    const d = data as import("../types/calendar.js").CalendarResponseData;
-    return {
-      rsvpResponse: d.decision,
-      respondedAt: d.respondedAt,
-      linkedSignalId: d.linkedSignalId,
+      ...(d.rsvpResponse ? { rsvpResponse: d.rsvpResponse } : {}),
     };
   }
   return data;
@@ -229,7 +222,6 @@ export function toApiSignal(signal: AnySignal, cdnBase: string): Api.Signal {
     case "invalid_template_function":
     case "auto_send_blocked":
     case "calendar_event":
-    case "calendar_response":
     case "calendar_invite_invalid":
     case "domain_misconfiguration":
       // These data shapes match API shapes directly (after DB type cleanup)

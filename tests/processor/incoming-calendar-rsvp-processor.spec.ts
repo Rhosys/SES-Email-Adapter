@@ -10,13 +10,13 @@ import { generateId, generateAccountId } from "../../src/utils/id.js";
 import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import { ok, err, dbError } from "../../src/errors.js";
-import type { Signal, CalendarResponseData } from "../../src/types/index.js";
+import type { Signal } from "../../src/types/index.js";
 import type { CalendarEventData } from "../../src/types/calendar.js";
 
 // ---------------------------------------------------------------------------
 // IncomingCalendarRsvpProcessor — the lifecycle half of the inbound calendar
 // loop. Owns S3 fetch, MIME/.ics extraction, thread lookup, reply relay, and the
-// calendar_response signal write. Delegates stateless validation to a real
+// RSVP write onto the event's calendar_event. Delegates stateless validation to a real
 // CalendarForwarder (fed a deterministic HMAC fake). Every non-success path must
 // resolve to ok(undefined) with a WARN and write no signal.
 // ---------------------------------------------------------------------------
@@ -197,7 +197,7 @@ function makeThreadStore(overrides: Partial<RsvpThreadStore> = {}): RsvpThreadSt
       lastSignalAt: "2025-03-15T10:00:00Z",
       createdAt: "2025-03-15T09:00:00Z",
     })),
-    saveSignal: vi.fn().mockResolvedValue(ok(undefined)),
+    setCalendarEventRsvp: vi.fn().mockResolvedValue(ok(true)),
     listSignals: vi.fn().mockResolvedValue(ok({ items: [storedInvite()] })),
     ...overrides,
   };
@@ -233,7 +233,7 @@ function makeProcessor(opts: { raw: Uint8Array; threadStore?: RsvpThreadStore; f
 }
 
 describe("IncomingCalendarRsvpProcessor — happy path", () => {
-  it("relays the RSVP to the organizer and records a calendar_response signal", async () => {
+  it("relays the RSVP to the organizer and records it on the calendar event", async () => {
     const proxyUid = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
     const emailService = { sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })) } as unknown as EmailService;
     const { processor, threadStore } = makeProcessor({ raw: rawRsvpEmail({ proxyUid, partstat: "ACCEPTED" }), forwarder: makeForwarder(emailService) });
@@ -247,23 +247,20 @@ describe("IncomingCalendarRsvpProcessor — happy path", () => {
     expect(sendCall.to).toEqual([ORGANIZER]);
     expect(sendCall.fromSender).toBe(RECIPIENT);
 
-    // calendar_response signal recorded, keyed to the HMAC-authenticated identity.
-    const saved = (threadStore.saveSignal as ReturnType<typeof vi.fn>).mock.calls[0]![0] as Signal<CalendarResponseData>;
-    expect(saved.type).toBe("calendar_response");
-    expect(saved.source).toBe("user");
-    expect(saved.threadId).toBe(VALID_ARC_ID);
-    expect(saved.accountId).toBe(VALID_ACC_ID);
-    expect(saved.data.decision).toBe("accepted");
-    expect(saved.data.veventUid).toBe(ORIGINAL_UID);
+    // RSVP recorded on the stored invite row, keyed to the HMAC-authenticated identity.
+    const [accountId, signalLookupId, rsvp] = (threadStore.setCalendarEventRsvp as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(accountId).toBe(VALID_ACC_ID);
+    expect(signalLookupId).toBe(storedInvite().signalLookupId);
+    expect(rsvp.decision).toBe("accepted");
+    expect(typeof rsvp.respondedAt).toBe("string");
   });
 
-  it("records a second, separate RSVP-reply email for the same event as its own signal (a changed mind, not a duplicate)", async () => {
+  it("records a second, separate RSVP-reply email for the same event as a new decision (a changed mind, not a duplicate)", async () => {
     // Two DISTINCT inbound emails (their own S3 key / SQS message in production) for the SAME
     // event and attendee — e.g. the user accepted, then later declined from their calendar app.
     // Each is its own process() call; there is no per-event idempotency that would drop the
-    // second because "we already have a response for this veventUid". recordRsvpResponse is
-    // append-only (see rsvp-response-recorder.ts) and getLatestCalendarResponse resolves
-    // "current" by max(respondedAt), so both must be saved and the later one must win on read.
+    // second because "we already have a response for this event"; each overwrites the event's
+    // RSVP, so the later decision is the one left on the row.
     const proxyUid = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
     const emailService = { sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })) } as unknown as EmailService;
     const threadStore = makeThreadStore();
@@ -291,12 +288,11 @@ describe("IncomingCalendarRsvpProcessor — happy path", () => {
 
     // Both were relayed to the organizer and both were recorded — nothing was dropped as a dupe.
     expect(emailService.sendRaw).toHaveBeenCalledTimes(2);
-    const saveCalls = (threadStore.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
+    const saveCalls = (threadStore.setCalendarEventRsvp as ReturnType<typeof vi.fn>).mock.calls;
     expect(saveCalls).toHaveLength(2);
-    const decisions = saveCalls.map((call) => (call[0] as Signal<CalendarResponseData>).data.decision);
-    expect(decisions).toEqual(["accepted", "declined"]);
-    // Both signals share the same veventUid — same event, two records in its RSVP history.
-    expect(saveCalls.every((call) => (call[0] as Signal<CalendarResponseData>).data.veventUid === ORIGINAL_UID)).toBe(true);
+    expect(saveCalls.map((call) => call[2].decision)).toEqual(["accepted", "declined"]);
+    // Both target the same event row.
+    expect(saveCalls.every((call) => call[1] === storedInvite().signalLookupId)).toBe(true);
   });
 
   it("processes every calendar attachment on a message that bundles multiple replies", async () => {
@@ -313,20 +309,19 @@ describe("IncomingCalendarRsvpProcessor — happy path", () => {
     expect(result.isOk()).toBe(true);
     expect(emailService.sendRaw).toHaveBeenCalledTimes(2);
 
-    const saveCalls = (threadStore.saveSignal as ReturnType<typeof vi.fn>).mock.calls;
+    const saveCalls = (threadStore.setCalendarEventRsvp as ReturnType<typeof vi.fn>).mock.calls;
     expect(saveCalls).toHaveLength(2);
-    const decisions = saveCalls.map((call) => (call[0] as Signal<CalendarResponseData>).data.decision);
-    expect(decisions).toEqual(["accepted", "declined"]);
+    expect(saveCalls.map((call) => call[2].decision)).toEqual(["accepted", "declined"]);
   });
 
   it("still attempts every attachment when an earlier one hits an infra error, surfacing the error only at the end", async () => {
     const proxyUidA = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
     const proxyUidB = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
     const emailService = { sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })) } as unknown as EmailService;
-    const saveSignal = vi.fn()
+    const setCalendarEventRsvp = vi.fn()
       .mockResolvedValueOnce(err(dbError(new Error("write failed"))))
-      .mockResolvedValueOnce(ok(undefined));
-    const threadStore = makeThreadStore({ saveSignal });
+      .mockResolvedValueOnce(ok(true));
+    const threadStore = makeThreadStore({ setCalendarEventRsvp });
     const { processor } = makeProcessor({
       raw: rawMultiRsvpEmail({ proxyUidA, proxyUidB }),
       forwarder: makeForwarder(emailService),
@@ -337,7 +332,7 @@ describe("IncomingCalendarRsvpProcessor — happy path", () => {
 
     // Both attachments were relayed and both attempted to save, even though the first failed.
     expect(emailService.sendRaw).toHaveBeenCalledTimes(2);
-    expect(saveSignal).toHaveBeenCalledTimes(2);
+    expect(setCalendarEventRsvp).toHaveBeenCalledTimes(2);
     // The (first) error is only surfaced once every attachment has been attempted.
     expect(result.isErr()).toBe(true);
   });
@@ -348,10 +343,10 @@ describe("IncomingCalendarRsvpProcessor — happy path", () => {
     const emailService = { sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-reply-001" })) } as unknown as EmailService;
     // BOTH attachments fail to save — only returning the first error must not mean the
     // second failure goes unlogged and silently disappears.
-    const saveSignal = vi.fn()
+    const setCalendarEventRsvp = vi.fn()
       .mockResolvedValueOnce(err(dbError(new Error("write failed A"))))
       .mockResolvedValueOnce(err(dbError(new Error("write failed B"))));
-    const threadStore = makeThreadStore({ saveSignal });
+    const threadStore = makeThreadStore({ setCalendarEventRsvp });
     const { processor, logger } = makeProcessor({
       raw: rawMultiRsvpEmail({ proxyUidA, proxyUidB }),
       forwarder: makeForwarder(emailService),
@@ -374,7 +369,7 @@ describe("IncomingCalendarRsvpProcessor — drop paths (ok, no signal, WARN)", (
 
     expect(result.isOk()).toBe(true);
     expect(threadStore.getThread).not.toHaveBeenCalled();
-    expect(threadStore.saveSignal).not.toHaveBeenCalled();
+    expect(threadStore.setCalendarEventRsvp).not.toHaveBeenCalled();
     expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "processor.calendar_response.no_ics")).toBe(true);
   });
 
@@ -387,7 +382,7 @@ describe("IncomingCalendarRsvpProcessor — drop paths (ok, no signal, WARN)", (
 
     expect(result.isOk()).toBe(true);
     expect(threadStore.getThread).not.toHaveBeenCalled();
-    expect(threadStore.saveSignal).not.toHaveBeenCalled();
+    expect(threadStore.setCalendarEventRsvp).not.toHaveBeenCalled();
     expect(sendReplySpy).not.toHaveBeenCalled();
     expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "processor.calendar_response.hmac_failed")).toBe(true);
   });
@@ -399,7 +394,7 @@ describe("IncomingCalendarRsvpProcessor — drop paths (ok, no signal, WARN)", (
     const result = await processor.process(makeMessage());
 
     expect(result.isOk()).toBe(true);
-    expect(threadStore.saveSignal).not.toHaveBeenCalled();
+    expect(threadStore.setCalendarEventRsvp).not.toHaveBeenCalled();
     expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "processor.calendar_response.no_reply_method")).toBe(true);
   });
 
@@ -412,7 +407,7 @@ describe("IncomingCalendarRsvpProcessor — drop paths (ok, no signal, WARN)", (
 
     expect(result.isOk()).toBe(true);
     expect(threadStore.getThread).toHaveBeenCalledWith(VALID_ACC_ID, VALID_ARC_ID);
-    expect(threadStore.saveSignal).not.toHaveBeenCalled();
+    expect(threadStore.setCalendarEventRsvp).not.toHaveBeenCalled();
     expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "processor.calendar_response.thread_not_found")).toBe(true);
   });
 });

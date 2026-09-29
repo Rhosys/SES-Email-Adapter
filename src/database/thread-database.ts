@@ -6,7 +6,7 @@ import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { ListThreadsParams } from "../api/app.js";
 import type { Thread, Signal, AnySignal, OutboundEmailSignalData, Page, PageParams, ThreadStatus, ThreadUrgency, Workflow } from "../types/index.js";
-import type { CalendarEventData } from "../types/calendar.js";
+import type { CalendarEventData, CalendarRsvpResponse } from "../types/calendar.js";
 import { retentionTtl } from "../retention.js";
 
 // ---------------------------------------------------------------------------
@@ -75,6 +75,29 @@ function hydrateThreadObject(record: Omit<Thread, "threadId"> & { threadId?: str
 
 // Threads with a stale/placeholder lastSignalAt (e.g. never-updated legacy records) don't
 // represent real activity — excluded from every read path that returns threads to a caller.
+function signalItem(signal: AnySignal): Record<string, unknown> {
+  let gsi1pk: string;
+  if (signal.threadId) {
+    gsi1pk = threadPk(signal.accountId, signal.threadId);
+  } else if (signal.status === "quarantine_visible" || signal.status === "quarantine_hidden") {
+    gsi1pk = `ACCT#${signal.accountId}#QUARANTINED`;
+  } else {
+    gsi1pk = `ACCT#${signal.accountId}#BLOCKED`;
+  }
+  // TTL is derived state: always createdAt + retentionDuration. Compute it here at the write
+  // boundary and assign it last so it is authoritative. Absent/infinite retention → no ttl
+  // attribute → the item never expires.
+  const ttl = retentionTtl(signal.retentionDuration, signal.createdAt);
+  return {
+    ...signal,
+    pk: sigPk(signal.accountId, signal.signalLookupId),
+    sk: ITEM_SK,
+    gsi1pk,
+    gsi1sk: signal.id,
+    ttl, // authoritative — undefined omits the attribute (DynamoDB drops undefined values)
+  };
+}
+
 const MIN_LAST_SIGNAL_AT = "2000-01-01T00:00:00.000Z";
 function hasRecentSignal(thread: Thread): boolean {
   return thread.lastSignalAt >= MIN_LAST_SIGNAL_AT;
@@ -184,33 +207,61 @@ export class ThreadDatabase {
   }
 
   async saveSignal(signal: AnySignal): Promise<Result<void, DbError>> {
-    let gsi1pk: string;
-    if (signal.threadId) {
-      gsi1pk = threadPk(signal.accountId, signal.threadId);
-    } else if (signal.status === "quarantine_visible" || signal.status === "quarantine_hidden") {
-      gsi1pk = `ACCT#${signal.accountId}#QUARANTINED`;
-    } else {
-      gsi1pk = `ACCT#${signal.accountId}#BLOCKED`;
-    }
-    const gsi1sk = signal.id;
-    // TTL is derived state: always createdAt + retentionDuration. Compute it here at the write
-    // boundary and assign it last so it is authoritative. Absent/infinite retention → no ttl
-    // attribute → the item never expires.
-    const ttl = retentionTtl(signal.retentionDuration, signal.createdAt);
     try {
-      await dynamo.send(new PutCommand({
-        TableName: SIGNALS_TABLE,
-        Item: {
-          ...signal,
-          pk: sigPk(signal.accountId, signal.signalLookupId),
-          sk: ITEM_SK,
-          gsi1pk,
-          gsi1sk,
-          ttl, // authoritative — undefined omits the attribute (DynamoDB drops undefined values)
-        },
-      }));
+      await dynamo.send(new PutCommand({ TableName: SIGNALS_TABLE, Item: signalItem(signal) }));
       return ok(undefined);
     } catch (e) {
+      return err(dbError(e));
+    }
+  }
+
+  /**
+   * Save a calendar_event snapshot, keeping the account's RSVP. Every invite/update/cancel for an
+   * event shares one row (signalLookupId is stable per event), so a plain put would erase an RSVP
+   * recorded against an earlier snapshot. The carried RSVP is guarded by a condition so an RSVP
+   * written between the read and the put is re-read rather than lost.
+   */
+  async saveCalendarEventSignal(signal: Signal<CalendarEventData>): Promise<Result<void, DbError>> {
+    const key = { pk: sigPk(signal.accountId, signal.signalLookupId), sk: ITEM_SK };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const existing = await dynamo.send(new GetCommand({ TableName: SIGNALS_TABLE, Key: key }));
+        const prior = (existing.Item?.["data"] as { rsvpResponse?: CalendarRsvpResponse } | undefined)?.rsvpResponse;
+        const { rsvpResponse: _ignored, ...data } = signal.data;
+        await dynamo.send(new PutCommand({
+          TableName: SIGNALS_TABLE,
+          Item: signalItem({ ...signal, data: { ...data, ...(prior ? { rsvpResponse: prior } : {}) } }),
+          ...(prior
+            ? { ConditionExpression: "#data.rsvpResponse.respondedAt = :at", ExpressionAttributeValues: { ":at": prior.respondedAt } }
+            : { ConditionExpression: "attribute_not_exists(#data.rsvpResponse)" }),
+          ExpressionAttributeNames: { "#data": "data" },
+        }));
+        return ok(undefined);
+      } catch (e) {
+        if (e instanceof Error && e.name === "ConditionalCheckFailedException") continue;
+        return err(dbError(e));
+      }
+    }
+    return err(dbError(new Error("Calendar event RSVP kept changing while saving the event; giving up after 3 attempts.")));
+  }
+
+  /**
+   * Record the account's RSVP on the calendar_event row. Returns false when the row no longer
+   * exists (e.g. expired between the caller's read and this write).
+   */
+  async setCalendarEventRsvp(accountId: string, signalLookupId: string, rsvpResponse: CalendarRsvpResponse): Promise<Result<boolean, DbError>> {
+    try {
+      await dynamo.send(new UpdateCommand({
+        TableName: SIGNALS_TABLE,
+        Key: { pk: sigPk(accountId, signalLookupId), sk: ITEM_SK },
+        UpdateExpression: "SET #data.rsvpResponse = :rsvp",
+        ConditionExpression: "attribute_exists(pk)",
+        ExpressionAttributeNames: { "#data": "data" },
+        ExpressionAttributeValues: { ":rsvp": rsvpResponse },
+      }));
+      return ok(true);
+    } catch (e) {
+      if (e instanceof Error && e.name === "ConditionalCheckFailedException") return ok(false);
       return err(dbError(e));
     }
   }
@@ -682,39 +733,6 @@ export class ThreadDatabase {
         },
       );
       return ok(calendarSignal ? hydrateSignal(calendarSignal as Signal<CalendarEventData>) : null);
-    } catch (e) {
-      return err(dbError(e));
-    }
-  }
-
-  /**
-   * Find the most recent calendar_response signal on a thread for a given veventUid.
-   * Returns the decision from the most recent response, or null if none exists.
-   */
-  async getLatestCalendarResponse(accountId: string, threadId: string, veventUid: string): Promise<Result<Signal<import("../types/calendar.js").CalendarResponseData> | null, DbError>> {
-    try {
-      // Query all signals on the thread (sorted newest-first via ScanIndexForward: false)
-      const res = await dynamo.send(new QueryCommand({
-        TableName: SIGNALS_TABLE,
-        IndexName: "gsi1",
-        KeyConditionExpression: "gsi1pk = :pk",
-        ExpressionAttributeValues: { ":pk": threadPk(accountId, threadId) },
-        ScanIndexForward: false,
-      }));
-      // RSVPs are append-only history; "latest" is a wall-clock fact (data.respondedAt), NOT the
-      // gsi1sk (signal-id) scan order. A user who accepts then declines must resolve to "declined"
-      // regardless of which response got the larger sgn- id. Pick the max respondedAt among the
-      // calendar_response signals matching this veventUid.
-      const signals = (res.Items ?? []) as unknown[];
-      const responses = signals.filter((s) => {
-        const sig = s as { type?: string; data?: { veventUid?: string } };
-        return sig.type === "calendar_response" && sig.data?.veventUid === veventUid;
-      }) as Signal<import("../types/calendar.js").CalendarResponseData>[];
-      const responseSignal = responses.reduce<typeof responses[number] | undefined>(
-        (latest, s) => (latest === undefined || s.data.respondedAt > latest.data.respondedAt ? s : latest),
-        undefined,
-      );
-      return ok(responseSignal ? hydrateSignal(responseSignal) : null);
     } catch (e) {
       return err(dbError(e));
     }

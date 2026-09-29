@@ -10,8 +10,8 @@
 // single message, e.g. an assistant relaying several attendees' replies together),
 // and process each independently: ask CalendarForwarder to validate it (stateless:
 // METHOD:REPLY + PARTSTAT + proxy-UID HMAC), then — only on success — look up the
-// thread, relay the RSVP back to the organizer under the alias, and record a
-// calendar_response signal.
+// thread, relay the RSVP back to the organizer under the alias, and record the
+// RSVP on the event's calendar_event signal.
 //
 // Every failure short of that resolves to ok(undefined) with a WARN: a message
 // that reached this address but isn't a processable RSVP (no .ics, unparseable,
@@ -31,11 +31,9 @@ import { MailparserMimeParser } from "../mime-parser.js";
 import type { CalendarForwarder } from "./calendar/calendar-forwarder.js";
 import { parseIcs } from "./calendar/ics-parser.js";
 import { collapseCalendarSignals } from "../api/calendar-collapse.js";
-import { recordRsvpResponse } from "./calendar/rsvp-response-recorder.js";
 import { isCalendarEventSignal } from "../types/calendar.js";
 import type { Logger } from "../logger.js";
-import type { Thread, Signal, AnySignal, CalendarResponseData } from "../types/index.js";
-import { generateId } from "../utils/id.js";
+import type { Thread, AnySignal, CalendarRsvpResponse } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
 // Narrow database surface — only what the RSVP loop touches. Kept minimal so the
@@ -44,7 +42,7 @@ import { generateId } from "../utils/id.js";
 
 export interface RsvpThreadStore {
   getThread(accountId: string, id: string): Promise<Result<Thread | null, DbError>>;
-  saveSignal(signal: Signal<CalendarResponseData>): Promise<Result<void, DbError>>;
+  setCalendarEventRsvp(accountId: string, signalLookupId: string, rsvpResponse: CalendarRsvpResponse): Promise<Result<boolean, DbError>>;
   // Load the thread's signals so the relay path can find the ORIGINAL stored invite for the
   // RSVP's event and collapse the group to its latest state. The inbound REPLY tells us the
   // event identity (via the HMAC proxy UID); the stored invite is what we actually relay.
@@ -175,7 +173,8 @@ export class IncomingCalendarRsvpProcessor {
     }
     const collapse = collapseCalendarSignals(inviteGroup);
     const [winnerId, enrichment] = [...collapse.winners.entries()][0]!;
-    const originalCalendarMeetingInvite = inviteGroup.find(s => s.id === winnerId)!.data;
+    const winnerSignal = inviteGroup.find(s => s.id === winnerId)!;
+    const originalCalendarMeetingInvite = winnerSignal.data;
     const inviteCancelled = enrichment.cancelledAt !== undefined;
 
     // The reply address that received this RSVP is also the alias we send FROM,
@@ -196,16 +195,10 @@ export class IncomingCalendarRsvpProcessor {
     );
     if (replyResult.isErr()) return err(replyResult.error);
 
-    // --- 7. Record the calendar_response signal (shared writer — identical shape to the API path) ---
-    const recordResult = await recordRsvpResponse({
-      store: this.threadStore,
-      accountId,
-      threadId,
-      veventUid: originalVeventUid,
+    // --- 7. Record the RSVP on the event's current (winner) calendar_event, same as the API path ---
+    const recordResult = await this.threadStore.setCalendarEventRsvp(accountId, winnerSignal.signalLookupId, {
       decision,
-      winnerSignalId: winnerId,
-      now: DateTime.utc().toISO()!,
-      generateId: () => generateId("sgn-"),
+      respondedAt: DateTime.utc().toISO()!,
     });
     if (recordResult.isErr()) return err(recordResult.error);
 

@@ -8,14 +8,13 @@ import { computeUndoWindowSeconds } from "./undo-window.js";
 import { zParse } from "./validate.js";
 import { toApiThread, toApiSignal } from "./signal-transforms.js";
 import { collapseCalendarSignals } from "./calendar-collapse.js";
-import { recordRsvpResponse } from "../processor/calendar/rsvp-response-recorder.js";
 import type * as Api from "./schemas.js";
 import { buildScheduleName } from "../scheduler/schedule-name.js";
 import { durationToSeconds } from "../retention.js";
 import { isCalendarEventSignal, isEmailSignal } from "../types/index.js";
 import type { EmailContentStore } from "./content-store.js";
 import type { Signal, PageParams, ThreadStatus, Workflow, OutboundEmailSignalData } from "../types/index.js";
-import type { CalendarResponseData, DomainMisconfigurationData, Pagination } from "../types/index.js";
+import type { DomainMisconfigurationData, Pagination } from "../types/index.js";
 import type { UpdateThreadFields, ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
@@ -321,18 +320,6 @@ export class ThreadsApi {
 
       const signals = result.value.items;
       const calendarEventSignals = signals.filter(isCalendarEventSignal);
-      const enrichments = new Map<string, { decision: CalendarResponseData["decision"]; respondedAt: string }>();
-
-      if (calendarEventSignals.length > 0) {
-        const veventUids = new Set(calendarEventSignals.map(s => s.data.veventUid));
-        for (const veventUid of veventUids) {
-          const responseResult = await threadDb.getLatestCalendarResponse(accountId, thread.id, veventUid);
-          if (responseResult.isOk() && responseResult.value) {
-            const resp = responseResult.value.data;
-            enrichments.set(veventUid, { decision: resp.decision, respondedAt: resp.respondedAt });
-          }
-        }
-      }
 
       // Collapse each event's invite/update/cancellation signals into one card. Superseded
       // snapshots are dropped; the winner carries derived cancelledAt/previousValues.
@@ -352,14 +339,7 @@ export class ThreadsApi {
           if (collapse.superseded.has(signal.id)) continue;
           const apiSignal = toApiSignal(signal, contentCdnBaseUrl) as Extract<Api.Signal, { type: "calendar_event" }>;
           const calendarEnrichment = collapse.winners.get(signal.id) ?? {};
-          // The account's latest RSVP for this event (decision + when), resolved across the whole
-          // response history by respondedAt. Lives on the calendar_event data so the client renders
-          // "you responded" from one payload without a second query or reconstructing from cards.
-          const rsvpResponse = enrichments.get(signal.data.veventUid);
-          enrichedSignals.push({
-            ...apiSignal,
-            data: { ...apiSignal.data, ...calendarEnrichment, ...(rsvpResponse ? { rsvpResponse } : {}) },
-          });
+          enrichedSignals.push({ ...apiSignal, data: { ...apiSignal.data, ...calendarEnrichment } });
           continue;
         }
         enrichedSignals.push(toApiSignal(signal, contentCdnBaseUrl));
@@ -743,7 +723,8 @@ export class ThreadsApi {
       // request URL happened to name; a superseded invite must still resolve to the live event.
       const collapse = collapseCalendarSignals(groupSignals);
       const [winnerId, winnerEnrichment] = [...collapse.winners.entries()][0] ?? [signal.id, undefined];
-      const winnerInvite = groupSignals.find(s => s.id === winnerId)?.data ?? calendarData;
+      const winnerSignal = groupSignals.find(s => s.id === winnerId) ?? signal;
+      const winnerInvite = winnerSignal.data;
       const inviteCancelled = winnerEnrichment?.cancelledAt !== undefined;
 
       const rsvpResult = await calendarForwarder.sendRsvpToOrganizer(
@@ -760,21 +741,16 @@ export class ThreadsApi {
 
       if (rsvpResult.isErr()) return err(c, 422, "Failed to send RSVP", "RSVP_SEND_FAILED");
 
-      const recordResult = await recordRsvpResponse({
-        store: threadDb,
-        accountId,
-        threadId: thread.id,
-        veventUid: winnerInvite.originalVeventUid,
-        decision: body.decision,
-        winnerSignalId: winnerId,
-        now: DateTime.utc().toISO()!,
-        generateId: () => generateId("sgn-"),
-      });
+      // Recorded on the winner — the event's current state, which is what the reply responded to.
+      const rsvpResponse = { decision: body.decision, respondedAt: DateTime.utc().toISO()! };
+      const recordResult = await threadDb.setCalendarEventRsvp(accountId, winnerSignal.signalLookupId, rsvpResponse);
       if (recordResult.isErr()) {
-        logger.error(`Failed to save RSVP response signal: ${recordResult.error.message}`, { code: "api.rsvp.save_failed", error: recordResult.error });
+        logger.error(`Failed to save RSVP on calendar event: ${recordResult.error.message}`, { code: "api.rsvp.save_failed", error: recordResult.error });
         return err(c, 500, "Internal Server Error");
       }
-      const responseSignal = recordResult.value;
+      if (!recordResult.value) {
+        logger.warn("Calendar event disappeared after the RSVP was sent; the RSVP was relayed but not recorded.", { code: "api.rsvp.event_missing", accountId, threadId, signalId: winnerSignal.id });
+      }
 
       if (schedulerClient && calendarData.startTime) {
         const eventStart = DateTime.fromISO(calendarData.startTime, { zone: "utc" });
@@ -789,8 +765,9 @@ export class ThreadsApi {
         logger.track("Calendar event has no startTime — skipping RSVP schedule cancellation.", { code: "rsvp.cancel.no_start_time", signal, thread });
       }
 
-      logger.info("RSVP sent", { code: "api.threads.rsvp_sent", accountId, threadId, signalId, decision: body.decision, responseSignalId: responseSignal.id });
-      return c.json(toApiSignal(responseSignal, contentCdnBaseUrl), 200);
+      logger.info("RSVP sent", { code: "api.threads.rsvp_sent", accountId, threadId, signalId, decision: body.decision });
+      const apiEvent = toApiSignal({ ...winnerSignal, data: { ...winnerSignal.data, rsvpResponse } }, contentCdnBaseUrl) as Extract<Api.Signal, { type: "calendar_event" }>;
+      return c.json({ ...apiEvent, data: { ...apiEvent.data, ...(winnerEnrichment ?? {}) } }, 200);
     });
 
     // -------------------------------------------------------------------------
