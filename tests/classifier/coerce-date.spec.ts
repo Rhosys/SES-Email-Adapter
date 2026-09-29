@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { DateTime } from "luxon";
 import { coerceDate } from "../../src/classifier/coerce-workflow-data.js";
 
 const RECEIVED_AT = "2024-06-15T10:00:00Z";
@@ -560,6 +561,117 @@ describe("coerceDate — time-first ordering", () => {
 
     it("plain date-first is unchanged", () => {
       expect(coerceDate("February 01, 2027 at 9:30 a.m.", RECEIVED_AT)).toBe("2027-02-01T09:30");
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Explicit timezones in the time part of word-based / year-free dates
+// The classifier extracts dates verbatim from email text, so a human-readable
+// date can carry a trailing zone in several shapes. Today only ISO offsets on a
+// fully-ISO string (step 1, fromISO) are preserved; word-based dates fall into
+// the fromFormat loops, which have no zone token, so any trailing zone breaks
+// the parse and the value is nullified.
+//
+// These assert DESIRED behavior and fail until zone handling on the format path
+// lands. They assert the resolved UTC INSTANT, not a specific string, because a
+// zone-bearing value has exactly one correct moment while its representation is
+// free (17:30+02:00, 15:30+00:00 and 18:30+03:00 are the same instant). The test
+// only cares that coerceDate resolved the offset correctly, not which equivalent
+// offset spelling it emitted. Offset-free and date-only cases keep string
+// assertions elsewhere — those have no single instant to check.
+// ---------------------------------------------------------------------------
+
+function toInstant(displayDate: string | null): number {
+  if (displayDate === null) throw new Error("coerceDate returned null");
+  const dt = DateTime.fromISO(displayDate, { setZone: true });
+  if (!dt.isValid || dt.offset === undefined) throw new Error(`not an offset-bearing instant: ${displayDate}`);
+  if (!/[+-]\d{2}:\d{2}$|Z$/.test(displayDate)) throw new Error(`no explicit offset in output: ${displayDate}`);
+  return dt.toMillis();
+}
+
+describe("coerceDate — explicit timezone in time part", () => {
+  describe("ISO offset appended to a word-based date", () => {
+    it("+02:00 on MMMM d, yyyy with 12h time", () => {
+      expect(toInstant(coerceDate("March 15, 2025 2:30 PM +02:00", RECEIVED_AT))).toBe(Date.UTC(2025, 2, 15, 12, 30));
+    });
+
+    it("-05:00 on d MMMM yyyy with 24h time", () => {
+      expect(toInstant(coerceDate("15 March 2025 14:30 -05:00", RECEIVED_AT))).toBe(Date.UTC(2025, 2, 15, 19, 30));
+    });
+
+    it("+02:00 on a year-free date", () => {
+      expect(toInstant(coerceDate("August 15 2:30 PM +02:00", RECEIVED_AT))).toBe(Date.UTC(2024, 7, 15, 12, 30));
+    });
+
+    it("compact +0200 offset", () => {
+      expect(toInstant(coerceDate("March 15, 2025 14:30 +0200", RECEIVED_AT))).toBe(Date.UTC(2025, 2, 15, 12, 30));
+    });
+  });
+
+  describe("GMT-relative label", () => {
+    it("GMT+2 — the reported motivating shape", () => {
+      expect(toInstant(coerceDate("September 29 5:30 PM GMT+2", RECEIVED_AT))).toBe(Date.UTC(2024, 8, 29, 15, 30));
+    });
+
+    it("GMT+02:00 with full month and year", () => {
+      expect(toInstant(coerceDate("March 15, 2025 2:30 PM GMT+02:00", RECEIVED_AT))).toBe(Date.UTC(2025, 2, 15, 12, 30));
+    });
+
+    it("GMT-5 negative label", () => {
+      expect(toInstant(coerceDate("March 15, 2025 9:30 AM GMT-5", RECEIVED_AT))).toBe(Date.UTC(2025, 2, 15, 14, 30));
+    });
+
+    it("UTC+2 label", () => {
+      expect(toInstant(coerceDate("March 15, 2025 14:30 UTC+2", RECEIVED_AT))).toBe(Date.UTC(2025, 2, 15, 12, 30));
+    });
+
+    it("UTC-8 negative label", () => {
+      expect(toInstant(coerceDate("March 15, 2025 06:00 UTC-8", RECEIVED_AT))).toBe(Date.UTC(2025, 2, 15, 14, 0));
+    });
+  });
+
+  describe("bare GMT / UTC (zero offset)", () => {
+    it("bare GMT resolves to +00:00", () => {
+      expect(toInstant(coerceDate("March 15, 2025 14:30 GMT", RECEIVED_AT))).toBe(Date.UTC(2025, 2, 15, 14, 30));
+    });
+
+    it("bare UTC resolves to +00:00", () => {
+      expect(toInstant(coerceDate("March 15, 2025 14:30 UTC", RECEIVED_AT))).toBe(Date.UTC(2025, 2, 15, 14, 30));
+    });
+
+    it("parenthesized (GMT) resolves to +00:00", () => {
+      expect(toInstant(coerceDate("March 15, 2025 14:30 (GMT)", RECEIVED_AT))).toBe(Date.UTC(2025, 2, 15, 14, 30));
+    });
+  });
+
+  // Summer/standard abbreviations name their own offset ("Central European
+  // SUMMER Time" IS +02:00) so the resolved instant is date-independent for
+  // these. CEST at 14:30 is 12:30 UTC even on a March date, because the sender
+  // explicitly wrote summer time.
+  describe("named zone abbreviation (season in the name → fixed offset)", () => {
+    it("CEST → +02:00", () => {
+      expect(toInstant(coerceDate("March 15, 2025 14:30 CEST", RECEIVED_AT))).toBe(Date.UTC(2025, 2, 15, 12, 30));
+    });
+
+    it("CET → +01:00", () => {
+      expect(toInstant(coerceDate("March 15, 2025 14:30 CET", RECEIVED_AT))).toBe(Date.UTC(2025, 2, 15, 13, 30));
+    });
+
+    it("parenthesized (CEST) → +02:00", () => {
+      expect(toInstant(coerceDate("March 15, 2025 14:30 (CEST)", RECEIVED_AT))).toBe(Date.UTC(2025, 2, 15, 12, 30));
+    });
+
+    it("PST → -08:00", () => {
+      expect(toInstant(coerceDate("March 15, 2025 06:00 PST", RECEIVED_AT))).toBe(Date.UTC(2025, 2, 15, 14, 0));
+    });
+
+    it("PDT → -07:00", () => {
+      expect(toInstant(coerceDate("August 15, 2025 06:00 PDT", RECEIVED_AT))).toBe(Date.UTC(2025, 7, 15, 13, 0));
+    });
+
+    it("EDT → -04:00", () => {
+      expect(toInstant(coerceDate("August 15, 2025 09:30 EDT", RECEIVED_AT))).toBe(Date.UTC(2025, 7, 15, 13, 30));
     });
   });
 });
