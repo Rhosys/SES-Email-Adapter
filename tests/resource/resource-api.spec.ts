@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Resource } from "../../src/types/index.js";
 import { createApp } from "../../src/api/app.js";
 import { makeAppDeps } from "../helpers/app-deps.js";
-import { encodeResourceId } from "../../src/resource/resource-api.js";
+import { DateTime } from "luxon";
+import { encodeResourceId, isPastEvent } from "../../src/resource/resource-api.js";
 import type { AuthService, AccessService } from "../../src/api/app.js";
 import type { ResourceDatabase } from "../../src/resource/resource-database.js";
 import { ok } from "../../src/errors.js";
@@ -49,6 +50,7 @@ function makeResourceDb() {
     saveResource: vi.fn(),
     getResource: vi.fn().mockResolvedValue(ok(null)),
     listResources: vi.fn().mockResolvedValue(ok({ items: [] })),
+    listResourcesByThread: vi.fn().mockResolvedValue(ok([])),
     setResourceStatus: vi.fn(),
   };
 }
@@ -163,6 +165,60 @@ describe("Resources API", () => {
       resourceDb.listResources.mockResolvedValue(ok({ items: [] }));
       await req(app, "GET", `${A}/resources?workflow=package`);
       expect(access.checkAccess).toHaveBeenCalledWith("user-001", `accounts/${TEST_ACCOUNT_ID}/resources`, "resources:read");
+    });
+  });
+
+  describe("GET /accounts/:accountId/threads/:threadId/resources", () => {
+    it("omits past events but keeps upcoming events and past non-event resources", async () => {
+      resourceDb.listResourcesByThread.mockResolvedValue(ok([
+        makeResource({ workflow: "events", resourceKey: "past", title: "Past meetup", expectedResolutionDate: "2020-01-01" }),
+        makeResource({ workflow: "events", resourceKey: "future", title: "Future meetup", expectedResolutionDate: "2999-01-01" }),
+        makeResource({ workflow: "payments", resourceKey: "inv-1", expectedResolutionDate: "2020-01-01" }),
+      ]));
+
+      const res = await req(app, "GET", `${A}/threads/thr-001/resources`);
+
+      expect(res.status).toBe(200);
+      const body = await res.json() as { resources: Array<{ title?: string; workflow: string }> };
+      expect(body.resources.map(r => r.title ?? r.workflow).sort()).toEqual(["Future meetup", "payments"]);
+    });
+
+    it("omits past events regardless of status", async () => {
+      resourceDb.listResourcesByThread.mockResolvedValue(ok([
+        makeResource({ workflow: "events", resourceKey: "a", title: "Active", status: "active", expectedResolutionDate: "2020-01-01" }),
+        makeResource({ workflow: "events", resourceKey: "c", title: "Complete", status: "complete", expectedResolutionDate: "2020-01-02" }),
+      ]));
+
+      const res = await req(app, "GET", `${A}/threads/thr-001/resources`);
+      const body = await res.json() as { resources: unknown[] };
+      expect(body.resources).toHaveLength(0);
+    });
+
+    it("does not filter past events from the account-wide list endpoint", async () => {
+      resourceDb.listResources.mockResolvedValue(ok({
+        items: [makeResource({ workflow: "events", resourceKey: "past", expectedResolutionDate: "2020-01-01" })],
+      }));
+
+      const res = await req(app, "GET", `${A}/resources?status=active`);
+      const body = await res.json() as { resources: unknown[] };
+      expect(body.resources).toHaveLength(1);
+    });
+  });
+
+  describe("isPastEvent", () => {
+    const now = DateTime.fromISO("2026-09-30T10:00:00Z", { zone: "utc" });
+
+    it("only applies to the events workflow", () => {
+      expect(isPastEvent(makeResource({ workflow: "travel", expectedResolutionDate: "2020-01-01T00:00:00.000Z" }), now)).toBe(false);
+    });
+
+    it("compares expectedResolutionDate to now, ignoring displayDate", () => {
+      expect(isPastEvent(makeResource({ workflow: "events", displayDate: "2026-10-05", expectedResolutionDate: "2026-09-30T09:59:00.000Z" }), now)).toBe(true);
+      expect(isPastEvent(makeResource({ workflow: "events", displayDate: "2020-01-01", expectedResolutionDate: "2026-09-30T10:01:00.000Z" }), now)).toBe(false);
+    });
+
+    it("does not hide events with an unparseable date", () => {
+      expect(isPastEvent(makeResource({ workflow: "events", expectedResolutionDate: "not-a-date" }), now)).toBe(false);
     });
   });
 
