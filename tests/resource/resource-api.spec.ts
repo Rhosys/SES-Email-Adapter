@@ -209,22 +209,12 @@ describe("Resources API", () => {
     const now = DateTime.fromISO("2026-09-30T10:00:00Z", { zone: "utc" });
 
     it("only applies to the events workflow", () => {
-      expect(isPastEvent(makeResource({ workflow: "travel", expectedResolutionDate: "2020-01-01" }), now)).toBe(false);
+      expect(isPastEvent(makeResource({ workflow: "travel", expectedResolutionDate: "2020-01-01T00:00:00.000Z" }), now)).toBe(false);
     });
 
-    it("prefers displayDate over expectedResolutionDate", () => {
-      expect(isPastEvent(makeResource({ workflow: "events", displayDate: "2026-10-05", expectedResolutionDate: "2020-01-01" }), now)).toBe(false);
-    });
-
-    it("keeps an event visible for the rest of its day after the start time passes", () => {
-      expect(isPastEvent(makeResource({ workflow: "events", expectedResolutionDate: "2026-09-30T08:00:00+02:00" }), now)).toBe(false);
-      expect(isPastEvent(makeResource({ workflow: "events", expectedResolutionDate: "2026-09-29T18:00:00+02:00" }), now)).toBe(true);
-    });
-
-    it("treats a bare date as past only once that day has ended everywhere (UTC-12)", () => {
-      const event = makeResource({ workflow: "events", expectedResolutionDate: "2026-09-29" });
-      expect(isPastEvent(event, DateTime.fromISO("2026-09-30T11:59:00Z"))).toBe(false);
-      expect(isPastEvent(event, DateTime.fromISO("2026-09-30T12:00:00Z"))).toBe(true);
+    it("compares expectedResolutionDate to now, ignoring displayDate", () => {
+      expect(isPastEvent(makeResource({ workflow: "events", displayDate: "2026-10-05", expectedResolutionDate: "2026-09-30T09:59:00.000Z" }), now)).toBe(true);
+      expect(isPastEvent(makeResource({ workflow: "events", displayDate: "2020-01-01", expectedResolutionDate: "2026-09-30T10:01:00.000Z" }), now)).toBe(false);
     });
 
     it("does not hide events with an unparseable date", () => {

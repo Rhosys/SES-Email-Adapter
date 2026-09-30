@@ -55,19 +55,11 @@ function toApiResource(resource: DbResource, contentCdnBaseUrl: string): Api.Res
   };
 }
 
-// An event is past once its calendar day has ended. A datetime is bucketed into its own
-// offset's day; a bare date ("2026-09-29") carries no zone, so it's only past once that day
-// has ended everywhere (UTC-12) — never hidden early for a viewer west of UTC. Day-granular
-// rather than start-time so a pass stays reachable while the event is underway.
-const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+// An event is past once its expectedResolutionDate (a UTC instant) has passed.
 export function isPastEvent(resource: DbResource, now: DateTime = DateTime.utc()): boolean {
   if (resource.workflow !== "events") return false;
-  const date = resource.displayDate ?? resource.expectedResolutionDate;
-  const parsed = BARE_DATE.test(date)
-    ? DateTime.fromISO(date, { zone: "Etc/GMT+12" })
-    : DateTime.fromISO(date, { setZone: true });
-  if (!parsed.isValid) return false;
-  return parsed.endOf("day") < now;
+  const instant = DateTime.fromISO(resource.expectedResolutionDate);
+  return instant.isValid && instant < now;
 }
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
