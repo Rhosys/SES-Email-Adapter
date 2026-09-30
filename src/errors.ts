@@ -14,6 +14,7 @@ export type NoAccountError = { kind: "no_account_for_recipient"; recipientAddres
 export type TransientSesError = { kind: "transient_ses_error"; errorName: string; httpStatus: number; cause: unknown };
 export type PermanentSesError = { kind: "permanent_ses_error"; errorName: string; httpStatus: number; message: string; cause: unknown };
 export type InvalidArgumentError = { kind: "invalid_argument"; argument: string; message: string };
+export type UnknownSignalTypeError = { kind: "unknown_signal_type"; message: string; signalType: string; signalId: string };
 
 export type ReindexSegmentProcessingError = { kind: "reindex_segment_processing_error"; segment: number; failureCount: number; failures: Array<{ signalId: string; cause: unknown }> };
 
@@ -154,6 +155,7 @@ export const processorError = (cause: unknown): ProcessorError => {
 export const noAccountError = (recipientAddress: string, destination: string[], compositeMailMessageId: string, expectedAccountId?: string): NoAccountError => ({ kind: "no_account_for_recipient", recipientAddress, destination, compositeMailMessageId, expectedAccountId });
 export const reindexSegmentProcessingError = (segment: number, failures: Array<{ signalId: string; cause: unknown }>): ReindexSegmentProcessingError => ({ kind: "reindex_segment_processing_error", segment, failureCount: failures.length, failures });
 export const invalidArgumentError = (argument: string, message: string): InvalidArgumentError => ({ kind: "invalid_argument", argument, message });
+export const unknownSignalTypeError = (signalType: string, signalId: string): UnknownSignalTypeError => ({ kind: "unknown_signal_type", message: `No API transform exists for signal type "${signalType}"`, signalType, signalId });
 export const permanentSesError = (errorName: string, httpStatus: number, message: string, cause: unknown): PermanentSesError => ({ kind: "permanent_ses_error", errorName, httpStatus, message, cause });
 
 // Re-export neverthrow primitives for convenience

@@ -14,6 +14,7 @@ import type { Logger } from "../logger.js";
 import type { NotFoundError, ProcessorError } from "../errors.js";
 import { QuarantineResponse } from "./requests.js";
 import { ListSignalsResponse } from "./schemas.js";
+import type * as Api from "./schemas.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
 export interface SignalReprocessor {
@@ -89,7 +90,19 @@ export class SignalsApi {
         items = items.filter(s => isEmailSignal(s) && s.data.from.address.toLowerCase().includes(senderLower));
       }
 
-      return c.json(page("signals", items.map(s => toApiSignal(s, contentCdnBaseUrl)), result.value.nextCursor), 200);
+      const apiSignals: Api.Signal[] = [];
+      for (const s of items) {
+        const apiSignalResult = toApiSignal(s, contentCdnBaseUrl);
+        if (apiSignalResult.isErr()) {
+          logger.track("Quarantined signal has an unrecognized type and was omitted from the list; a signal type reached the DB without a matching toApiSignal case.", {
+            code: "api.signals.unknown_signal_type", accountId,
+            signalId: apiSignalResult.error.signalId, signalType: apiSignalResult.error.signalType,
+          });
+          continue;
+        }
+        apiSignals.push(apiSignalResult.value);
+      }
+      return c.json(page("signals", apiSignals, result.value.nextCursor), 200);
     });
 
     // -------------------------------------------------------------------------
@@ -261,7 +274,15 @@ export class SignalsApi {
       if (threadResult.isErr() || !threadResult.value) { logger.error("Failed to load thread after primary reprocess.", { code: "api.quarantine_response.get_thread_failed", accountId, signalId, threadId: activatedSignal.threadId, error: threadResult.isErr() ? threadResult.error : undefined }); return err(c, 500, "Internal Server Error"); }
 
       logger.info("Signal activated", { code: "api.signals.activated", accountId, signalId, threadId: activatedSignal.threadId });
-      return c.json({ thread: toApiThread(threadResult.value), signal: toApiSignal(activatedSignal, contentCdnBaseUrl) }, 200);
+      const activatedApi = toApiSignal(activatedSignal, contentCdnBaseUrl);
+      if (activatedApi.isErr()) {
+        logger.track("Activated signal has an unrecognized type and cannot be returned; a signal type reached the DB without a matching toApiSignal case.", {
+          code: "api.signals.unknown_signal_type", accountId,
+          signalId: activatedApi.error.signalId, signalType: activatedApi.error.signalType,
+        });
+        return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
+      }
+      return c.json({ thread: toApiThread(threadResult.value), signal: activatedApi.value }, 200);
     });
   }
 }

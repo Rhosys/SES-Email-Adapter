@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { toApiThread, toApiSignal } from "../../src/api/signal-transforms.js";
+import { toApiThread, toApiSignal as toApiSignalResult } from "../../src/api/signal-transforms.js";
 import { ErrorCode } from "../../src/api/schemas.js";
+import type { Signal as ApiSignal } from "../../src/api/schemas.js";
 import type { Thread, AnySignal, EmailSignalData } from "../../src/types/index.js";
+
+// These invariants feed a known email signal; unwrap the Result so assertions read
+// the API DTO directly. The unknown-type err path is exercised at the API boundary.
+function toApiSignal(signal: AnySignal, cdnBase: string): ApiSignal {
+  return toApiSignalResult(signal, cdnBase)._unsafeUnwrap();
+}
 
 // ---------------------------------------------------------------------------
 // Helpers: minimal DB objects for transform inputs

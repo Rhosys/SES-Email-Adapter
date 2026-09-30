@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { toApiSignal } from "../../src/api/signal-transforms.js";
-import type { Signal, InboundEmailSignalData, Attachment } from "../../src/types/index.js";
+import { toApiSignal as toApiSignalResult } from "../../src/api/signal-transforms.js";
+import type { AnySignal, Signal, InboundEmailSignalData, Attachment } from "../../src/types/index.js";
 import type { Signal as ApiSignal, InboundEmailSignalData as ApiInboundEmailSignalData, Attachment as ApiAttachment } from "../../src/api/schemas.js";
+
+// These cases all feed a known signal type; unwrap the Result so the assertions
+// read the API DTO directly. The unknown-type err path is exercised at the API boundary.
+function toApiSignal(signal: AnySignal, cdnBase: string): ApiSignal {
+  return toApiSignalResult(signal, cdnBase)._unsafeUnwrap();
+}
 
 function makeInboundSignal(overrides: { data?: Partial<Signal<InboundEmailSignalData>["data"]> } & Partial<Omit<Signal<InboundEmailSignalData>, "data">> = {}): Signal<InboundEmailSignalData> {
   const { data: dataOverrides, ...baseOverrides } = overrides;

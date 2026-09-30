@@ -14,6 +14,7 @@ import type {
   Workflow,
 } from "../types/index.js";
 import type * as Api from "./schemas.js";
+import { ok, err, type Result, unknownSignalTypeError, type UnknownSignalTypeError } from "../errors.js";
 
 // matchedRules is an append-only trace (e.g. a signal dismissed from quarantine gets a second
 // SR-00 entry alongside whatever originally quarantined it). Collapse same-id entries down to the
@@ -181,7 +182,7 @@ function toApiCalendarData(type: string, data: unknown): unknown {
   return data;
 }
 
-export function toApiSignal(signal: AnySignal, cdnBase: string): Api.Signal {
+export function toApiSignal(signal: AnySignal, cdnBase: string): Result<Api.Signal, UnknownSignalTypeError> {
   const base = {
     signalId: signal.id,
     threadId: signal.threadId ?? null,
@@ -194,21 +195,21 @@ export function toApiSignal(signal: AnySignal, cdnBase: string): Api.Signal {
     case "email": {
       const emailData = signal.data as EmailSignalData;
       if (signal.source === "user") {
-        return {
+        return ok({
           ...base,
           type: "email" as const,
           data: toApiEmailSignalData(emailData, signal.source, cdnBase) as Api.OutboundEmailSignalData,
-        } as Api.Signal;
+        } as Api.Signal);
       }
-      return {
+      return ok({
         ...base,
         type: "email" as const,
         data: toApiEmailSignalData(emailData, signal.source, cdnBase) as Api.InboundEmailSignalData,
-      } as Api.Signal;
+      } as Api.Signal);
     }
     case "deliverability": {
       const d = signal.data as DeliverabilitySignalData;
-      return {
+      return ok({
         ...base,
         type: "deliverability" as const,
         data: {
@@ -216,7 +217,7 @@ export function toApiSignal(signal: AnySignal, cdnBase: string): Api.Signal {
           bouncedRecipients: d.bouncedRecipients,
           subject: d.subject,
         },
-      } as Api.Signal;
+      } as Api.Signal);
     }
     case "invalid_rule_function":
     case "invalid_template_function":
@@ -225,10 +226,12 @@ export function toApiSignal(signal: AnySignal, cdnBase: string): Api.Signal {
     case "calendar_invite_invalid":
     case "domain_misconfiguration":
       // These data shapes match API shapes directly (after DB type cleanup)
-      return {
+      return ok({
         ...base,
         type: signal.type,
         data: toApiCalendarData(signal.type, signal.data),
-      } as Api.Signal;
+      } as Api.Signal);
+    default:
+      return err(unknownSignalTypeError((signal as AnySignal).type, (signal as AnySignal).id));
   }
 }
