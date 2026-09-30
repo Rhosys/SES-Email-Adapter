@@ -675,3 +675,9 @@ describe("coerceDate — explicit timezone in time part", () => {
     });
   });
 });
+
+describe("coerceDate — ordinal day with dot-separated time", () => {
+  it("November 4th, 10.00 AM (year-free, ordinal, dot-time)", () => {
+    expect(coerceDate("November 4th, 10.00 AM", RECEIVED_AT)).toBe("2024-11-04T10:00");
+  });
+});

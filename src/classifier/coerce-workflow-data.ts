@@ -345,6 +345,11 @@ const TIME_SUFFIXES = [
   ...TRAILING_TIME_CONNECTOR_WORDS.flatMap(word => [` '${word}' HH:mm`, ` '${word}' h:mm a`]),
   // Comma before the time, and a dot instead of a colon (e.g. "Oct 27, 2026, 18.30").
   ", HH.mm",
+  // Dot-separated time (dot instead of colon), covering 24h and 12h-meridiem forms
+  // with and without a comma before the time — e.g. "November 4th, 10.00 AM".
+  " HH.mm",
+  " h.mm a",
+  ", h.mm a",
 ];
 
 /** Ordinal day suffixes ("1st", "2nd", "3rd", "10th") — luxon's `d` token needs a bare number. */
