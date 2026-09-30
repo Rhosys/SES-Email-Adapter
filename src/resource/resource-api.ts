@@ -11,6 +11,7 @@ import type * as Api from "../api/schemas.js";
 import type { AppEnv, RouteHelpers } from "../api/route-helpers.js";
 import type { Pagination } from "../types/index.js";
 import { collapseResources } from "./resource-collapse.js";
+import { DateTime } from "luxon";
 
 // Public resource id is an opaque token encoding threadId + the item's own sk
 // (workflow#resourceKey), so a direct-by-id lookup needs no secondary index —
@@ -52,6 +53,21 @@ function toApiResource(resource: DbResource, contentCdnBaseUrl: string): Api.Res
     createdAt: resource.createdAt,
     updatedAt: resource.updatedAt,
   };
+}
+
+// An event is past once its calendar day has ended. A datetime is bucketed into its own
+// offset's day; a bare date ("2026-09-29") carries no zone, so it's only past once that day
+// has ended everywhere (UTC-12) — never hidden early for a viewer west of UTC. Day-granular
+// rather than start-time so a pass stays reachable while the event is underway.
+const BARE_DATE = /^\d{4}-\d{2}-\d{2}$/;
+export function isPastEvent(resource: DbResource, now: DateTime = DateTime.utc()): boolean {
+  if (resource.workflow !== "events") return false;
+  const date = resource.displayDate ?? resource.expectedResolutionDate;
+  const parsed = BARE_DATE.test(date)
+    ? DateTime.fromISO(date, { zone: "Etc/GMT+12" })
+    : DateTime.fromISO(date, { setZone: true });
+  if (!parsed.isValid) return false;
+  return parsed.endOf("day") < now;
 }
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
@@ -130,7 +146,8 @@ export class ResourcesApi {
     });
 
     // -------------------------------------------------------------------------
-    // 1b. GET /accounts/{accountId}/threads/{threadId}/resources — all resources for a thread
+    // 1b. GET /accounts/{accountId}/threads/{threadId}/resources — resources for a thread,
+    //     excluding events whose day has passed (the list endpoint still returns them).
     // -------------------------------------------------------------------------
     app.openapi(route({
       method: "get",
@@ -147,7 +164,7 @@ export class ResourcesApi {
         logger.error("Failed to list resources by thread.", { code: "api.resources.list_by_thread_failed", error: result.error });
         return err(c, 500, "Internal Server Error");
       }
-      const items = collapseResources(result.value);
+      const items = collapseResources(result.value).filter(r => !isPastEvent(r));
       return c.json(page("resources", items.map(r => toApiResource(r, contentCdnBaseUrl))), 200);
     });
 
