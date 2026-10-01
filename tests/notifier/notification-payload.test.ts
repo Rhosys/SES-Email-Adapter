@@ -6,6 +6,7 @@ describe("NotificationPayload type shape", () => {
     const payload: NotificationPayload = {
       type: "thread:updated",
       signalId: "sgn-test",
+      status: "active",
       threadId: "thr-test",
       from: { address: "sender@example.com", name: "Sender" },
       subject: "Test subject",

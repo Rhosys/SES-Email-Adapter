@@ -1,5 +1,5 @@
 import type { Result } from "neverthrow";
-import type { Thread, ThreadUrgency, PushPriority, Signal, AuthData } from "../types/index.js";
+import type { Thread, ThreadUrgency, PushPriority, Signal, SignalStatus, AuthData } from "../types/index.js";
 import type { DbError } from "../errors.js";
 
 export { urgencyToPushPriority } from "../processor/priority.js";
@@ -32,7 +32,8 @@ export type NotificationReason = "new_signal" | "followup" | "rsvp_reminder";
 export interface NotificationPayload {
   type: "thread:updated";
   signalId?: string;
-  threadId: string;
+  threadId?: string;
+  status: SignalStatus;
   from: { address: string; name?: string };
   subject: string;
   workflow: string;
@@ -73,9 +74,10 @@ export interface WsConnectedFrame {
 // ─── Notifier Interface ──────────────────────────────────────────────────────
 
 export interface Notifier {
-  /** A new email signal arrived on the thread — the notification's from/subject are taken from
-   *  the signal itself. Only email signals carry from/subject, so the param is email-only. */
-  notifySignal(accountId: string, thread: Thread, signal: Signal, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>>;
+  /** A new email signal arrived — the notification's from/subject are taken from the signal
+   *  itself. `thread` is null for a quarantined signal, which is never attached to a persisted
+   *  thread; the payload then omits threadId and sources workflow from the signal. */
+  notifySignal(accountId: string, thread: Thread | null, signal: Signal, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>>;
   /** A time-based re-surface of an existing thread (follow-up, RSVP reminder) — there is no
    *  triggering signal, so the notification's from/subject come from the thread. */
   notifyThread(accountId: string, thread: Thread, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>>;

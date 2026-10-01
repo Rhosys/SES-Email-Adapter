@@ -36,6 +36,7 @@ const device: Device = {
 const payload: NotificationPayload = {
   type: "thread:updated",
   signalId: "SES#msg-001",
+  status: "active",
   threadId: "arc-uuid-1",
   from: { address: "alice@example.com", name: "Alice" },
   subject: "Test subject",

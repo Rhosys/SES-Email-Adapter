@@ -2,6 +2,7 @@ import { ok, err, dbError } from "../errors.js";
 import type { Result, DbError } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { Thread, ThreadUrgency, Signal } from "../types/index.js";
+import { isInboundEmailSignalData } from "../types/index.js";
 import type { DeviceStore } from "./device-store.js";
 import type { Deliverer, DeviceType, Notifier, NotificationPayload, NotificationReason } from "./types.js";
 import { urgencyToPushPriority } from "./types.js";
@@ -21,7 +22,7 @@ export class DeviceNotifier implements Notifier {
     this.logger = opts.logger;
   }
 
-  async notifySignal(accountId: string, thread: Thread, signal: Signal, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>> {
+  async notifySignal(accountId: string, thread: Thread | null, signal: Signal, urgency?: ThreadUrgency, reason?: NotificationReason): Promise<Result<void, DbError>> {
     const effectiveUrgency: ThreadUrgency = urgency ?? "normal";
     return this.deliver(accountId, thread, buildSignalPayload(thread, signal, effectiveUrgency, reason), effectiveUrgency, signal);
   }
@@ -31,7 +32,7 @@ export class DeviceNotifier implements Notifier {
     return this.deliver(accountId, thread, buildThreadPayload(thread, effectiveUrgency, reason), effectiveUrgency, undefined);
   }
 
-  private async deliver(accountId: string, thread: Thread, payload: NotificationPayload, effectiveUrgency: ThreadUrgency, signal: Signal | undefined): Promise<Result<void, DbError>> {
+  private async deliver(accountId: string, thread: Thread | null, payload: NotificationPayload, effectiveUrgency: ThreadUrgency, signal: Signal | undefined): Promise<Result<void, DbError>> {
     const priority = urgencyToPushPriority(effectiveUrgency);
 
     const devicesResult = await this.deviceStore.listDevices(accountId);
@@ -74,12 +75,12 @@ export class DeviceNotifier implements Notifier {
 
     // Ok if at least one succeeded or no eligible devices; Err only on total failure
     if (successCount > 0 || eligibleCount === 0) {
-      this.logger.info("Notification delivered", { code: "notifier.delivered", accountId, threadId: thread.id, deviceCount: successCount });
+      this.logger.info("Notification delivered", { code: "notifier.delivered", accountId, threadId: thread?.id, deviceCount: successCount });
       return ok(undefined);
     }
 
     const reasonSummary = failureReasons.length > 0 ? failureReasons.join("; ") : "no eligible devices attempted";
-    this.logger.error("Total notification delivery failure", { code: "notifier.total_delivery_failure", accountId, threadId: thread.id, reasons: failureReasons });
+    this.logger.error("Total notification delivery failure", { code: "notifier.total_delivery_failure", accountId, threadId: thread?.id, reasons: failureReasons });
     return err(dbError(`Total delivery failure: all device deliveries failed (${reasonSummary})`));
   }
 
@@ -88,15 +89,17 @@ export class DeviceNotifier implements Notifier {
   }
 }
 
-function buildSignalPayload(thread: Thread, signal: Signal, urgency: ThreadUrgency, reason?: NotificationReason): NotificationPayload {
+function buildSignalPayload(thread: Thread | null, signal: Signal, urgency: ThreadUrgency, reason?: NotificationReason): NotificationPayload {
+  const workflow = thread ? thread.workflow : isInboundEmailSignalData(signal.data) ? signal.data.workflow : "";
   const payload: NotificationPayload = {
     type: "thread:updated",
     signalId: signal.id,
-    threadId: thread.id,
+    status: signal.status,
     from: { address: signal.data.from.address, ...(signal.data.from.name ? { name: signal.data.from.name } : {}) },
     subject: signal.data.subject,
-    workflow: thread.workflow,
+    workflow,
     urgency,
+    ...(thread ? { threadId: thread.id } : {}),
   };
   if (reason) {
     payload.reason = reason;
@@ -105,9 +108,12 @@ function buildSignalPayload(thread: Thread, signal: Signal, urgency: ThreadUrgen
 }
 
 function buildThreadPayload(thread: Thread, urgency: ThreadUrgency, reason?: NotificationReason): NotificationPayload {
+  // A time-based re-surface (followup/rsvp) always acts on an active thread — the notify path
+  // reactivates archived threads before calling here, so the signal-status the client sees is active.
   const payload: NotificationPayload = {
     type: "thread:updated",
     threadId: thread.id,
+    status: "active",
     from: { address: thread.sender.address, ...(thread.sender.name ? { name: thread.sender.name } : {}) },
     subject: thread.subject,
     workflow: thread.workflow,

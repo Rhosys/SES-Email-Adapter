@@ -1660,6 +1660,22 @@ export class IncomingEmailProcessor {
       const saveResult = await this.threadDb.saveSignal(quarantinedSignal);
       if (saveResult.isErr()) return err(saveResult.error);
       this.logger.info("Quarantined email — rule or sender filter matched.", { code: "processor.quarantine", accountId, threadId: thread.id, signalId: quarantinedSignal.id, status: quarantineStatus, matchedRules: matchedRules.map(r => r.ruleId) });
+
+      // A quarantined signal is never attached to a persisted thread, so notify with a null thread —
+      // the client surfaces it from the signal alone (status drives the quarantine queue refresh).
+      // Notify failure is non-fatal: the signal is already saved, so a delivery error must not
+      // trigger an SQS retry that would re-save it. Mirrors the active-path notify guard.
+      if (!outcome.suppressNotification && !(opts?.skipNotify ?? false)) {
+        try {
+          const notifyResult = await this.notifier.notifySignal(accountId, null, quarantinedSignal, outcome.urgency ?? "normal", "new_signal");
+          if (notifyResult.isErr()) {
+            this.logger.track(`Quarantine notification failed: ${notifyResult.error.message}`, { code: "processor.quarantine.notify_failed", signal: quarantinedSignal, accountId, error: notifyResult.error, receiveCount });
+          }
+        } catch (e) {
+          this.logger.error(`Quarantine notification threw unexpectedly: ${e instanceof Error ? e.message : e}`, { code: "processor.quarantine.notify_error", signal: quarantinedSignal, accountId, error: e, receiveCount });
+        }
+      }
+
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, quarantineStatus);
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: quarantinedSignal, thread, error: repResult.error, msg, receiveCount, opts });

@@ -196,6 +196,7 @@ describe("DeviceNotifier", () => {
       const expectedPayload: NotificationPayload = {
         type: "thread:updated",
         signalId: "sgn-msg001",
+        status: "active",
         threadId: "arc-001",
         from: { address: "alice@example.com", name: "Alice" },
         subject: "Your order has shipped",
