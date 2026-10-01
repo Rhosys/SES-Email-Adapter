@@ -1,15 +1,14 @@
 import type { SQSEvent } from "aws-lambda";
 import { DateTime } from "luxon";
-import type { AnySignal, DeliverabilitySignalData, SesFeedback, Signal, SuppressedAddress } from "../types/index.js";
+import type { AnySignal, SesFeedback, Signal, SuppressedAddress } from "../types/index.js";
 import { SES_EVENT_TYPES, resolveSesEventType, isEmailSignal } from "../types/index.js";
-import { generateId } from "../utils/id.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import { ok, err, dbError } from "../errors.js";
 import type { DbError, Result } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { TAG_ACCOUNT_ID, TAG_TYPE, TAG_SIGNAL_ID, TAG_THREAD_ID, TAG_HEALTHCHECK_ID, TAG_PURPOSE, isEmailSendType, systemResponsibleForBounces } from "../email/ses-tags.js";
-import { buildBounceSuppressionEntry } from "./bounce-suppression.js";
+import { BounceHandler } from "./bounce-handler.js";
 
 export interface FeedbackSignalStore {
   getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<AnySignal | null, DbError>>;
@@ -28,12 +27,14 @@ export class SesFeedbackProcessor {
   private readonly accountDb: AccountDatabase;
   private readonly signalStore: FeedbackSignalStore;
   private readonly logger: Logger;
+  private readonly bounceHandler: BounceHandler;
 
   constructor(processingDb: ProcessingDatabase, accountDb: AccountDatabase, logger: Logger, signalStore: FeedbackSignalStore) {
     this.processingDb = processingDb;
     this.accountDb = accountDb;
     this.signalStore = signalStore;
     this.logger = logger;
+    this.bounceHandler = new BounceHandler(signalStore, processingDb, accountDb, logger);
   }
 
   async process(event: SQSEvent): Promise<Result<void, DbError>> {
@@ -103,120 +104,43 @@ export class SesFeedbackProcessor {
 
     if (type === "Bounce" && feedback.bounce) {
       const isPermanent = feedback.bounce.bounceType === "Permanent";
-
       const sendType = this.describeSendType(feedback);
-      const recipients = feedback.bounce.bouncedRecipients.map(r => r.emailAddress).join(", ") || "(none)";
-      const kind = `${feedback.bounce.bounceType}/${feedback.bounce.bounceSubType}`;
-      const messageId = feedback.mail.messageId;
-      const from = feedback.mail.source;
-      if (sendType.systemResponsible) {
-        this.logger.error(`SES ${kind} bounce on a ${sendType.sendType} send — a system email we send (from ${from}, messageId ${messageId}) failed delivery to ${recipients}.`, { code: "feedback.system_bounce", feedback });
-      } else {
-        this.logger.track(`SES ${kind} bounce on a ${sendType.sendType} send — email from ${from} (messageId ${messageId}) bounced for ${recipients}.`, { code: "feedback.bounce", feedback });
+      const bouncedRecipients = feedback.bounce.bouncedRecipients.map(r => ({
+        address: r.emailAddress,
+        bounceType: isPermanent ? "permanent" as const : "transient" as const,
+        ...(r.status ? { reason: r.status } : {}),
+      }));
+
+      // Resolve the originating send from the tags we stamped. A user-composed email surfaces a
+      // deliverability signal; machine sends (healthcheck, forward, calendar-rsvp, …) only suppress.
+      const signalId = feedback.mail.tags?.[TAG_SIGNAL_ID];
+      const accountId = feedback.mail.tags?.[TAG_ACCOUNT_ID] ?? feedback.mail.tags?.["accountId"];
+      const tagThreadId = feedback.mail.tags?.[TAG_THREAD_ID];
+      let sentSignal: AnySignal | null = null;
+      if (signalId && accountId && tagThreadId) {
+        const sentSignalResult = await this.signalStore.getSignalById(accountId, signalId, tagThreadId);
+        if (sentSignalResult.isErr()) return err(sentSignalResult.error);
+        sentSignal = sentSignalResult.value;
       }
+      const userSend = sentSignal && sentSignal.source === "user" && isEmailSignal(sentSignal) ? sentSignal : null;
 
-      for (const r of feedback.bounce.bouncedRecipients) {
-        const address = r.emailAddress;
-        const tagSignalId = feedback.mail.tags?.[TAG_SIGNAL_ID];
-        const entry = buildBounceSuppressionEntry({
-          address,
-          isPermanent,
-          reason: isPermanent ? "hard_bounce" : "soft_bounce",
-          feedback,
-          sesMessageId: feedback.mail.messageId,
-          ...(tagSignalId ? { linkedSignalId: tagSignalId } : {}),
-        });
-        const suppressResult = await this.processingDb.suppressAddress(entry);
-        if (suppressResult.isErr()) return err(suppressResult.error);
+      // Revert the draft only when every recipient it was sent to permanently bounced — a partial
+      // bounce leaves the send intact. Computed here where the full recipient list is in hand.
+      const revertToDraft = isPermanent && userSend !== null && userSend.data.to.length > 0 &&
+        userSend.data.to.every(addr => bouncedRecipients.some(b => b.address.toLowerCase() === addr.address.toLowerCase() && b.bounceType === "permanent"));
 
-        if (!isPermanent && suppressResult.value.bounceCount > 2) {
-          this.logger.error("Address has bounced transiently more than 2 times in 7 days — investigate.", { code: "feedback.repeated_transient_bounce", address, bounceCount: suppressResult.value.bounceCount, feedback });
-        }
-      }
-
-      // On permanent bounce, disable forward rules if this was a forwarded email
-      if (isPermanent) {
-        const accountId = feedback.mail.tags?.[TAG_ACCOUNT_ID];
-        if (accountId && feedback.mail.tags?.[TAG_TYPE] === "forward") {
-          for (const r of feedback.bounce!.bouncedRecipients) {
-            const disableResult = await this.accountDb.disableRulesForwardingTo(accountId, r.emailAddress);
-            if (disableResult.isErr()) {
-              this.logger.track(`Failed to disable rules forwarding to bounced address. The DynamoDB update returned an error. Emails may continue to be forwarded to the bouncing address: ${disableResult.error.message}`, { code: "feedback.disable_forward_failed", accountId, address: r.emailAddress, error: disableResult.error });
-            } else {
-              for (const ruleId of disableResult.value) {
-                this.logger.track("Rule disabled due to permanent forward bounce", { code: "feedback.rule_disabled_on_bounce", accountId, ruleId, bouncedAddress: r.emailAddress });
-              }
-            }
-          }
-        }
-      }
-
-      // Check if this bounce is for a user-sent signal
-      {
-        const signalId = feedback.mail.tags?.[TAG_SIGNAL_ID];
-        // Prefixed tag takes priority; fall back to bare "accountId" for pre-migration emails
-        const accountId = feedback.mail.tags?.[TAG_ACCOUNT_ID] ?? feedback.mail.tags?.["accountId"];
-
-        // Requirement 5.6: if neither TAG_SIGNAL_ID nor TAG_ACCOUNT_ID is present, skip signal lookup
-        // Requirement 5.3: if TAG_ACCOUNT_ID is absent, skip account-specific correlation
-        const tagThreadId = feedback.mail.tags?.[TAG_THREAD_ID];
-        let sentSignalResult: Result<AnySignal | null, DbError> | undefined;
-        if (signalId && accountId && tagThreadId) {
-          sentSignalResult = await this.signalStore.getSignalById(accountId, signalId, tagThreadId);
-        }
-
-        if (sentSignalResult?.isOk()) {
-          const sentSignal = sentSignalResult.value;
-          if (sentSignal && sentSignal.source === "user" && isEmailSignal(sentSignal)) {
-            const bouncedRecipients = feedback.bounce!.bouncedRecipients.map(r => ({
-              address: r.emailAddress,
-              bounceType: isPermanent ? "permanent" as const : "transient" as const,
-              ...(r.status ? { reason: r.status } : {}),
-            }));
-
-            // Create deliverability signal in the same thread
-            // Direct thread assignment: TAG_THREAD_ID takes precedence (no thread-matching needed)
-            const tagThreadId = feedback.mail.tags?.[TAG_THREAD_ID];
-            const resolvedThreadId = tagThreadId || sentSignal.threadId;
-
-            const id = generateId("sgn-");
-            const deliverabilitySignal: Signal<DeliverabilitySignalData> = {
-              id,
-              signalLookupId: id,
-              ...(resolvedThreadId ? { threadId: resolvedThreadId } : {}),
-              accountId: sentSignal.accountId,
-              source: "ses_feedback",
-              type: "deliverability",
-              status: "active",
-              labels: [],
-              createdAt: DateTime.utc().toISO()!,
-              data: {
-                linkedSignalId: sentSignal.id,
-                bouncedRecipients,
-                subject: `Delivery failure: ${bouncedRecipients.length} recipient(s) bounced`,
-              },
-            };
-            const deliverabilityResult = await this.signalStore.saveSignal(deliverabilitySignal);
-            if (deliverabilityResult.isErr()) return err(deliverabilityResult.error);
-
-            // If ALL recipients permanently bounced → revert sent signal to draft
-            if (isPermanent) {
-              const allTo = sentSignal.data.to.map(t => t.address.toLowerCase());
-              const allBounced = allTo.every(addr =>
-                bouncedRecipients.some(b => b.address.toLowerCase() === addr && b.bounceType === "permanent")
-              );
-              if (allBounced) {
-                const revertResult = await this.signalStore.updateSignalSendStatus(sentSignal.accountId, sentSignal.signalLookupId, {
-                  status: "draft",
-                  sendFailureReason: "all_recipients_bounced",
-                  sendInitiatedAt: null,
-                });
-                if (revertResult.isErr()) { this.logger.warn("Failed to revert bounced signal to draft", { code: "ses_feedback.revert_draft_failed", signalId: sentSignal.id, error: revertResult.error }); }
-              }
-            }
-          }
-        }
-      }
+      return this.bounceHandler.handleBounce({
+        accountId: accountId ?? userSend?.accountId ?? "",
+        bouncedRecipients,
+        isPermanent,
+        description: sendType,
+        logContext: { from: feedback.mail.source, messageId: feedback.mail.messageId, kind: `${feedback.bounce.bounceType}/${feedback.bounce.bounceSubType}` },
+        suppressionReason: isPermanent ? "hard_bounce" : "soft_bounce",
+        ...(userSend ? { linkedSend: { linkedSignalId: userSend.id, signalLookupId: userSend.signalLookupId, ...(tagThreadId || userSend.threadId ? { threadId: tagThreadId || userSend.threadId! } : {}) } } : {}),
+        revertToDraft,
+        disableForwardingRules: accountId !== undefined && feedback.mail.tags?.[TAG_TYPE] === "forward",
+        feedback,
+      });
     } else if (type === "Complaint" && feedback.complaint) {
       const suppressedAt = DateTime.utc().toISO()!;
 
