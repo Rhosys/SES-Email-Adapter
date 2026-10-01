@@ -42,10 +42,8 @@ export interface HandleBounceParams {
   accountId: string;
   bouncedRecipients: BouncedRecipient[];
   isPermanent: boolean;
-  /** How to describe the bounce in the log, and whether a failure here is our own pipeline's fault. */
-  description: { sendType: string; systemResponsible: boolean };
-  /** Human-readable log context — the from address and messageId of the bounced send. */
-  logContext: { from: string; messageId: string; kind: string };
+  /** The outbound SES messageId, recorded on each suppression entry for traceability. */
+  sesMessageId?: string;
   suppressionReason: SuppressionReason;
   /**
    * The send this bounce belongs to, when known. Drives the user-facing deliverability signal.
@@ -62,12 +60,14 @@ export interface HandleBounceParams {
 }
 
 /**
- * The consequence of a bounced recipient, shared by every bounce source (SES send-time feedback and
- * out-of-band DSNs that arrive as inbound mail). Owns the full outcome so the two channels cannot
- * drift: log at the right severity, suppress each failed address so we stop sending into a dead
- * target, optionally disable forward rules, optionally surface a user-facing deliverability signal,
- * and optionally revert a fully-bounced draft. Channel-specific inputs (send-type, whether to disable
- * forwarding, whether to revert) are computed by the caller — this class executes, never guesses.
+/**
+ * The channel-agnostic consequence of a bounced recipient, shared by every bounce source (SES
+ * send-time feedback and out-of-band DSNs that arrive as inbound mail). Owns the full outcome so
+ * the two channels cannot drift: suppress each failed address so we stop sending into a dead target,
+ * optionally disable forward rules, optionally surface a user-facing deliverability signal, and
+ * optionally revert a fully-bounced draft. The caller logs its own channel-appropriate headline and
+ * computes the channel-specific decisions (whether to disable forwarding, whether to revert) — this
+ * class executes, never guesses.
  */
 export class BounceHandler {
   private readonly signalStore: BounceSignalStore;
@@ -83,14 +83,7 @@ export class BounceHandler {
   }
 
   async handleBounce(params: HandleBounceParams): Promise<Result<void, DbError>> {
-    const { accountId, bouncedRecipients, isPermanent, description, logContext, suppressionReason, linkedSend, revertToDraft, disableForwardingRules, feedback } = params;
-
-    const recipientList = bouncedRecipients.map(r => r.address).join(", ") || "(none)";
-    if (description.systemResponsible) {
-      this.logger.error(`SES ${logContext.kind} bounce on a ${description.sendType} send — a system email we send (from ${logContext.from}, messageId ${logContext.messageId}) failed delivery to ${recipientList}.`, { code: "feedback.system_bounce", feedback });
-    } else {
-      this.logger.track(`SES ${logContext.kind} bounce on a ${description.sendType} send — email from ${logContext.from} (messageId ${logContext.messageId}) bounced for ${recipientList}.`, { code: "feedback.bounce", feedback });
-    }
+    const { accountId, bouncedRecipients, isPermanent, sesMessageId, suppressionReason, linkedSend, revertToDraft, disableForwardingRules, feedback } = params;
 
     for (const recipient of bouncedRecipients) {
       const suppressResult = await this.processingDb.suppressAddress(buildBounceSuppressionEntry({
@@ -98,7 +91,7 @@ export class BounceHandler {
         isPermanent,
         reason: suppressionReason,
         feedback,
-        sesMessageId: logContext.messageId,
+        ...(sesMessageId ? { sesMessageId } : {}),
         ...(linkedSend ? { linkedSignalId: linkedSend.linkedSignalId } : {}),
       }));
       if (suppressResult.isErr()) return err(suppressResult.error);

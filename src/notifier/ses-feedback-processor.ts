@@ -111,6 +111,14 @@ export class SesFeedbackProcessor {
         ...(r.status ? { reason: r.status } : {}),
       }));
 
+      const recipients = bouncedRecipients.map(r => r.address).join(", ") || "(none)";
+      const kind = `${feedback.bounce.bounceType}/${feedback.bounce.bounceSubType}`;
+      if (sendType.systemResponsible) {
+        this.logger.error(`SES ${kind} bounce on a ${sendType.sendType} send — a system email we send (from ${feedback.mail.source}, messageId ${feedback.mail.messageId}) failed delivery to ${recipients}.`, { code: "feedback.system_bounce", feedback });
+      } else {
+        this.logger.track(`SES ${kind} bounce on a ${sendType.sendType} send — email from ${feedback.mail.source} (messageId ${feedback.mail.messageId}) bounced for ${recipients}.`, { code: "feedback.bounce", feedback });
+      }
+
       // Resolve the originating send from the tags we stamped. A user-composed email surfaces a
       // deliverability signal; machine sends (healthcheck, forward, calendar-rsvp, …) only suppress.
       const signalId = feedback.mail.tags?.[TAG_SIGNAL_ID];
@@ -133,8 +141,7 @@ export class SesFeedbackProcessor {
         accountId: accountId ?? userSend?.accountId ?? "",
         bouncedRecipients,
         isPermanent,
-        description: sendType,
-        logContext: { from: feedback.mail.source, messageId: feedback.mail.messageId, kind: `${feedback.bounce.bounceType}/${feedback.bounce.bounceSubType}` },
+        sesMessageId: feedback.mail.messageId,
         suppressionReason: isPermanent ? "hard_bounce" : "soft_bounce",
         ...(userSend ? { linkedSend: { linkedSignalId: userSend.id, signalLookupId: userSend.signalLookupId, ...(tagThreadId || userSend.threadId ? { threadId: tagThreadId || userSend.threadId! } : {}) } } : {}),
         revertToDraft,
