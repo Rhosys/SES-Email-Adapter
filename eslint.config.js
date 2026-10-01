@@ -16,6 +16,9 @@ export default [
       // codebase already uses that convention everywhere for interface-mandated unused params
       // (e.g. ProviderAdapter.deactivate(_emx)). Recognize it instead of fighting it file by file.
       "@typescript-eslint/no-unused-vars": ["error", { vars: "all", args: "after-used", argsIgnorePattern: "^_", ignoreRestSiblings: true }],
+      "no-restricted-syntax": ["error",
+        { selector: "UnaryExpression[operator='void']", message: "The `void` operator is banned in Lambda backends: it detaches a promise the frozen container will not finish, which resumes into EPIPE on thaw. Await the promise. Only the repo owner may add an inline eslint-disable for a specific justified site." },
+      ],
     },
   },
 

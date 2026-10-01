@@ -233,9 +233,7 @@ export class AccountsApi {
         previousDigest?.forwardingTargetId !== body.digest.forwardingTargetId ||
         (FREQ_RANK[body.digest.frequency] ?? 0) > (FREQ_RANK[previousDigest?.frequency ?? ""] ?? 0)
       )) {
-        void this.triggerDigest(accountId).then(undefined, e => {
-          logger.warn("Failed to trigger immediate digest after config change", { code: "accounts.digest_trigger_failed", accountId, error: e });
-        });
+        await this.triggerDigest(accountId);
       }
 
       logger.info("Account updated", { code: "api.accounts.updated", accountId });

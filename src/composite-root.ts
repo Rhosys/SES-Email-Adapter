@@ -191,6 +191,7 @@ export class CompositeRoot {
 
     const encryptionManager = new EncryptionManager(kms, logger);
     // Lazy init: KMS decrypt happens on first IMAP request (cold start resolves before traffic)
+    // eslint-disable-next-line no-restricted-syntax -- cold-start init on a process-scoped singleton: the KMS key warms in the background and every consumer awaits its own operation, so detaching here only overlaps init with the rest of composite construction. Not a request-path promise.
     void encryptionManager.init();
 
     const imapAdapter = new ImapAdapter({

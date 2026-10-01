@@ -168,9 +168,8 @@ export class S3ObjectStorage {
       let body = "";
       try {
         body = await response.text();
-      } catch (e) {
+      } catch {
         // best-effort — fall back to the status alone below
-        void e;
       }
       return err(uploadError(`HTTP ${response.status}${body ? `: ${body.slice(0, 300)}` : ""}`));
     } catch (e) {
