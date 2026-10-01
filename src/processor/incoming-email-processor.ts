@@ -52,7 +52,7 @@ import { CalendarForwarder } from "./calendar/calendar-forwarder.js";
 import type { CalendarEventData, CalendarInviteInvalidData } from "../types/calendar.js";
 import type { SchedulerClient } from "../scheduler/scheduler-client.js";
 import { RSVP_REMINDER_HOURS_BEFORE } from "../scheduler/rsvp-reminder.js";
-import { extractMsgId, buildSignalGsi3pk, extractFirstInReplyTo } from "./message-id.js";
+import { extractMsgId, buildSignalGsi3pk, extractFirstInReplyTo, extractReferencedOutboundMsgId } from "./message-id.js";
 
 const EPOCH = new Date(0).toISOString(); // 1970-01-01T00:00:00.000Z
 
@@ -1198,6 +1198,34 @@ export class IncomingEmailProcessor {
 
     // 2a. External bounce/DSN detection — see handleExternalBounce for what this covers and why.
     const bounceInfo = sanitizedParsed.bounce;
+
+    // A DSN bouncing one of OUR OWN outbound sends (e.g. a calendar RSVP relayed to an organizer)
+    // arrives twice: once as structured SES feedback (attributed via the send's tags and recorded
+    // there), and once as this inbound DSN. The DSN carries no usable provenance except the standard
+    // In-Reply-To/References, which echo the amazonses.com Message-ID we sent under. Resolving that
+    // against GSI3 tells us the bounce is ours — so we drop it here before classify/rules, rather
+    // than letting it be misclassified as untrusted inbound mail and blocked (SR-04). The real
+    // deliverability outcome is handled on the SES feedback path, not here.
+    if (bounceInfo) {
+      const referencedMsgId = extractReferencedOutboundMsgId(sanitizedParsed.headers);
+      if (referencedMsgId) {
+        const ownSendResult = await this.threadDb.findSignalByEmailMessageId(buildSignalGsi3pk(accountId, referencedMsgId));
+        if (ownSendResult.isErr()) return err(ownSendResult.error);
+        if (ownSendResult.value) {
+          this.logger.info("Inbound DSN references one of our own outbound sends — dropping; the SES feedback path owns this bounce.", {
+            code: "processor.own_send_bounce_dropped",
+            accountId,
+            referencedMsgId,
+            linkedSignalId: ownSendResult.value.id,
+            threadId: ownSendResult.value.threadId,
+            from: sanitizedParsed.from.address,
+            compositeMailMessageId: msg.compositeMailMessageId,
+          });
+          return ok(undefined);
+        }
+      }
+    }
+
     await this.handleExternalBounce(bounceInfo, sanitizedParsed.from.address, accountId, msg.compositeMailMessageId);
 
     if (sanitizedParsed.droppedAttachments && sanitizedParsed.droppedAttachments.length > 0) {
@@ -1639,7 +1667,9 @@ export class IncomingEmailProcessor {
       const blockSignal = buildSignal({ status: outcome.blockDisposition, ...buildArgs, ...spamRetentionArgs }, this.logger);
       const saveResult = await this.threadDb.saveSignal({ ...blockSignal, data: { ...blockSignal.data, matchedRules } });
       if (saveResult.isErr()) return err(saveResult.error);
-      this.logger.track(`Blocked email — rule matched with block disposition. accountId=${accountId}, signalId=${blockSignal.id}, alias=${recipientAddress}, subject="${parsed.subject}", sender=${parsed.from.address}`, { code: "processor.rule_block", signal: blockSignal, thread, disposition: outcome.blockDisposition, matchedRules: matchedRules.map(r => r.ruleId), msg, receiveCount, opts });
+      // `thread` is an in-memory shell here (the block path returns before any thread is persisted),
+      // so it is deliberately omitted from this log — including it implied a thread row exists.
+      this.logger.track(`Blocked email — rule matched with block disposition. accountId=${accountId}, signalId=${blockSignal.id}, alias=${recipientAddress}, subject="${parsed.subject}", sender=${parsed.from.address}`, { code: "processor.rule_block", signal: blockSignal, disposition: outcome.blockDisposition, matchedRules: matchedRules.map(r => r.ruleId), msg, receiveCount, opts });
       const repResult = await this.processingDb.updateGlobalReputation(senderETLD1, outcome.blockDisposition);
       if (repResult.isErr()) {
         this.logger.warn("Failed to update global sender reputation after signal processing. The DynamoDB update returned an error. Reputation data may be stale for this domain.", { code: "processor.reputation_update_failed", signal: blockSignal, thread, error: repResult.error, msg, receiveCount, opts });

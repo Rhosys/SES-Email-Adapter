@@ -8,6 +8,7 @@ import type { ListThreadsParams } from "../api/app.js";
 import type { Thread, Signal, AnySignal, OutboundEmailSignalData, Page, PageParams, ThreadStatus, ThreadUrgency, Workflow } from "../types/index.js";
 import type { CalendarEventData, CalendarRsvpResponse } from "../types/calendar.js";
 import { retentionTtl } from "../retention.js";
+import { buildSignalGsi3pk } from "../processor/message-id.js";
 
 // ---------------------------------------------------------------------------
 // Key helpers
@@ -248,16 +249,33 @@ export class ThreadDatabase {
   /**
    * Record the account's RSVP on the calendar_event row. Returns false when the row no longer
    * exists (e.g. expired between the caller's read and this write).
+   *
+   * When the RSVP was actually relayed to the organizer, `sentRsvp` carries the outbound SES
+   * messageId and its amazonses.com Message-ID form. Both are persisted so a later bounce of that
+   * reply — arriving as an inbound DSN whose In-Reply-To is the Message-ID form — resolves back to
+   * this event via gsi3pk, instead of being misclassified as untrusted inbound mail.
    */
-  async setCalendarEventRsvp(accountId: string, signalLookupId: string, rsvpResponse: CalendarRsvpResponse): Promise<Result<boolean, DbError>> {
+  async setCalendarEventRsvp(
+    accountId: string,
+    signalLookupId: string,
+    rsvpResponse: CalendarRsvpResponse,
+    sentRsvp?: { sesMessageId: string; outboundMsgId: string },
+  ): Promise<Result<boolean, DbError>> {
+    const setParts = ["#data.rsvpResponse = :rsvp"];
+    const exprValues: Record<string, unknown> = { ":rsvp": rsvpResponse };
+    if (sentRsvp) {
+      setParts.push("#data.sesMessageId = :smid", "gsi3pk = :gsi3pk");
+      exprValues[":smid"] = sentRsvp.sesMessageId;
+      exprValues[":gsi3pk"] = buildSignalGsi3pk(accountId, sentRsvp.outboundMsgId);
+    }
     try {
       await dynamo.send(new UpdateCommand({
         TableName: SIGNALS_TABLE,
         Key: { pk: sigPk(accountId, signalLookupId), sk: ITEM_SK },
-        UpdateExpression: "SET #data.rsvpResponse = :rsvp",
+        UpdateExpression: `SET ${setParts.join(", ")}`,
         ConditionExpression: "attribute_exists(pk)",
         ExpressionAttributeNames: { "#data": "data" },
-        ExpressionAttributeValues: { ":rsvp": rsvpResponse },
+        ExpressionAttributeValues: exprValues,
       }));
       return ok(true);
     } catch (e) {

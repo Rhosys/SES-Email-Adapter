@@ -98,6 +98,8 @@ describe("CalendarForwarder.sendRsvpToOrganizer — RSVP targets ORGANIZER mailt
         aliasAddress: "alias@proxy.com",
         fromAddress: "alias@proxy.com",
         accountId: "acct-test",
+        calendarSignalId: "sgn-cal-1",
+        threadId: "thr-1",
       },
       createMockLogger(),
     );
@@ -143,6 +145,8 @@ describe("CalendarForwarder.sendRsvpToOrganizer — REPLY uses original UID not 
         aliasAddress: "alias@proxy.com",
         fromAddress: "alias@proxy.com",
         accountId: "acct-test",
+        calendarSignalId: "sgn-cal-1",
+        threadId: "thr-1",
       },
       createMockLogger(),
     );
@@ -176,6 +180,8 @@ describe("CalendarForwarder.sendRsvpToOrganizer — identity and MIME shape", ()
         aliasAddress: "alias@proxy.com",
         fromAddress: "alias@proxy.com",
         accountId: "acct-test",
+        calendarSignalId: "sgn-cal-1",
+        threadId: "thr-1",
       },
       createMockLogger(),
     );
@@ -211,12 +217,14 @@ describe("CalendarForwarder.sendRsvpToOrganizer — permanent SES error", () => 
         aliasAddress: "alias@proxy.com",
         fromAddress: "alias@proxy.com",
         accountId: "acct-test",
+        calendarSignalId: "sgn-cal-1",
+        threadId: "thr-1",
       },
       logger,
     );
 
     expect(result.isOk()).toBe(true);
-    expect(result._unsafeUnwrap()).toEqual({ messageId: "" });
+    expect(result._unsafeUnwrap()).toEqual({ messageId: "", outboundMsgId: "" });
     expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "rsvp.send_permanent")).toBe(true);
   });
 });

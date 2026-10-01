@@ -366,6 +366,8 @@ describe("Scenario: UI RSVP sends masked reply to organizer preserving user priv
         aliasAddress: ALIAS_ADDRESS,
         fromAddress: ALIAS_ADDRESS,
         accountId: "acct-test",
+        calendarSignalId: "sgn-cal-1",
+        threadId: "thr-1",
       },
       createMockLogger(),
     );

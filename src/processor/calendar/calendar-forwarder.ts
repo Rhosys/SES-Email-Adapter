@@ -26,6 +26,8 @@ import type { Logger } from "../../logger.js";
 import { buildProxyUid, validateProxyUid } from "./proxy-uid.js";
 import { buildForwardIcs, buildReplyIcs } from "./ics-builder.js";
 import { buildMimeMessage } from "../../email/mime-builder.js";
+import { buildOutboundMsgId } from "../message-id.js";
+import { TAG_SIGNAL_ID, TAG_THREAD_ID, TAG_ACCOUNT_ID } from "../../email/ses-tags.js";
 import type { HmacSecretGenerator } from "./hmac-secret-generator.js";
 
 // ---------------------------------------------------------------------------
@@ -66,6 +68,14 @@ export interface SendRsvpToOrganizerOpts {
   /** The From address of the outgoing REPLY (the alias, masking the user's real mailbox). */
   fromAddress: string;
   accountId: string;
+  /**
+   * The calendar_event signal and its thread, carried as SES correlation tags on the outgoing
+   * REPLY. A bounce of this reply arrives twice — as SES feedback (which reads these tags to
+   * attribute it) and as an inbound DSN (which the processor correlates via the returned
+   * outboundMsgId). Both routes need the originating signal; neither can derive it after the fact.
+   */
+  calendarSignalId: string;
+  threadId: string;
 }
 
 const PARTSTAT_MAP = {
@@ -131,6 +141,8 @@ interface CalendarSend {
   sendType: "calendar-forward" | "calendar-rsvp";
   /** Extra MIME headers (e.g. the calendar signal ID). Also mirrored as SES tags. */
   headers?: Array<{ Name: string; Value: string }>;
+  /** SES-only correlation tags (signal/thread/account) — carried in feedback, never in the MIME. */
+  tags?: Array<{ Name: string; Value: string }>;
   /** Log `code` used when SES permanently rejects the send. */
   permanentLogCode: string;
   /** Context fields attached to the permanent-rejection warn log. */
@@ -229,8 +241,8 @@ export class CalendarForwarder {
    * else is accepted but not relayed upstream — an expected, benign outcome, swallowed to an empty
    * messageId (the client already gates its RSVP control on the same `rsvpable` rule).
    */
-  async sendRsvpToOrganizer(opts: SendRsvpToOrganizerOpts, logger: Logger): Promise<Result<{ messageId: string }, DbError | EmailServiceError>> {
-    const { decision, originalCalendarMeetingInvite, cancelled, aliasAddress, fromAddress, accountId } = opts;
+  async sendRsvpToOrganizer(opts: SendRsvpToOrganizerOpts, logger: Logger): Promise<Result<{ messageId: string; outboundMsgId: string }, DbError | EmailServiceError>> {
+    const { decision, originalCalendarMeetingInvite, cancelled, aliasAddress, fromAddress, accountId, calendarSignalId, threadId } = opts;
     const organizerAddress = originalCalendarMeetingInvite.organizer;
     const veventUid = originalCalendarMeetingInvite.originalVeventUid;
 
@@ -239,7 +251,7 @@ export class CalendarForwarder {
       logger.info("RSVP for a cancelled calendar invite — accepted but not relayed to the organizer.", {
         code: "rsvp.invite_cancelled", accountId, veventUid,
       });
-      return ok({ messageId: "" });
+      return ok({ messageId: "", outboundMsgId: "" });
     }
 
     // Not a schedulable REQUEST (PUBLISH informational, CANCEL, REPLY/COUNTER, …): nothing to
@@ -248,7 +260,7 @@ export class CalendarForwarder {
       logger.info("RSVP for a non-REQUEST calendar invite — not RSVP-eligible. Dropping.", {
         code: "rsvp.not_rsvpable_method", accountId, veventUid, method: originalCalendarMeetingInvite.method,
       });
-      return ok({ messageId: "" });
+      return ok({ messageId: "", outboundMsgId: "" });
     }
 
     // A REQUEST with no organizer has nowhere to reply to. Per RFC 5546 a METHOD:REQUEST MUST
@@ -258,7 +270,7 @@ export class CalendarForwarder {
       logger.error("RSVP invite has no organizer address — non-conformant (RFC 5546 requires ORGANIZER on a REQUEST). Dropping.", {
         code: "rsvp.no_organizer_address", accountId, veventUid,
       });
-      return ok({ messageId: "" });
+      return ok({ messageId: "", outboundMsgId: "" });
     }
 
     const icsContent = buildReplyIcs({
@@ -277,6 +289,11 @@ export class CalendarForwarder {
       method: "REPLY",
       tenant: accountId,
       sendType: "calendar-rsvp",
+      tags: [
+        { Name: TAG_SIGNAL_ID, Value: calendarSignalId },
+        { Name: TAG_THREAD_ID, Value: threadId },
+        { Name: TAG_ACCOUNT_ID, Value: accountId },
+      ],
       permanentLogCode: "rsvp.send_permanent",
       logContext: { accountId },
     }, logger);
@@ -328,7 +345,7 @@ export class CalendarForwarder {
    * A permanent rejection is logged WARN and resolved to ok with an empty messageId
    * so the caller never retries a malformed send; transient errors propagate.
    */
-  private async sendCalendarMessage(send: CalendarSend, logger: Logger): Promise<Result<{ messageId: string }, DbError | EmailServiceError>> {
+  private async sendCalendarMessage(send: CalendarSend, logger: Logger): Promise<Result<{ messageId: string; outboundMsgId: string }, DbError | EmailServiceError>> {
     const rawData = buildMimeMessage({
       from: send.from,
       to: send.to,
@@ -338,6 +355,10 @@ export class CalendarForwarder {
       ...(send.headers ? { headers: send.headers } : {}),
     });
 
+    // Custom MIME headers are auto-promoted to SES tags for feedback correlation; SES-only
+    // correlation tags (signal/thread/account) are appended after.
+    const tags = [...(send.headers ?? []), ...(send.tags ?? [])];
+
     try {
       const result = await this.emailService.sendRaw({
         to: [send.to],
@@ -345,8 +366,7 @@ export class CalendarForwarder {
         fromSender: send.from,
         accountId: send.tenant,
         sendType: send.sendType,
-        // Mirror any extra custom MIME headers as tags alongside the send-type tag.
-        ...(send.headers ? { tags: send.headers } : {}),
+        ...(tags.length ? { tags } : {}),
       });
 
       if (result.isErr()) {
@@ -356,12 +376,14 @@ export class CalendarForwarder {
             ...send.logContext,
             error: result.error,
           });
-          return ok({ messageId: "" });
+          return ok({ messageId: "", outboundMsgId: "" });
         }
         return err(result.error);
       }
 
-      return ok({ messageId: result.value.messageId });
+      const sesRegion = process.env["SES_REGION"] ?? "eu-central-1";
+      const messageId = result.value.messageId;
+      return ok({ messageId, outboundMsgId: messageId ? buildOutboundMsgId(messageId, sesRegion) : "" });
     } catch (e) {
       logger.warn("Calendar send unexpected error", { code: "calendar_forwarder.unexpected_error", error: e });
       return err(dbError(e));

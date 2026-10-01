@@ -766,6 +766,8 @@ export class ThreadsApi {
           aliasAddress: recipientAddress,
           fromAddress: recipientAddress,
           accountId,
+          calendarSignalId: winnerSignal.id,
+          threadId,
         },
         logger,
       );
@@ -773,8 +775,16 @@ export class ThreadsApi {
       if (rsvpResult.isErr()) return err(c, 422, "Failed to send RSVP", "RSVP_SEND_FAILED");
 
       // Recorded on the winner — the event's current state, which is what the reply responded to.
+      // When the reply was actually relayed, persist its outbound SES messageId + gsi3pk so a later
+      // bounce (arriving as an inbound DSN) resolves back to this event instead of being blocked.
       const rsvpResponse = { decision: body.decision, respondedAt: DateTime.utc().toISO()! };
-      const recordResult = await threadDb.setCalendarEventRsvp(accountId, winnerSignal.signalLookupId, rsvpResponse);
+      const sentRsvpMessageId = rsvpResult.value.messageId;
+      const recordResult = await threadDb.setCalendarEventRsvp(
+        accountId,
+        winnerSignal.signalLookupId,
+        rsvpResponse,
+        sentRsvpMessageId ? { sesMessageId: sentRsvpMessageId, outboundMsgId: rsvpResult.value.outboundMsgId } : undefined,
+      );
       if (recordResult.isErr()) {
         logger.error(`Failed to save RSVP on calendar event: ${recordResult.error.message}`, { code: "api.rsvp.save_failed", error: recordResult.error });
         return err(c, 500, "Internal Server Error");

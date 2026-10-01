@@ -26,3 +26,24 @@ export function extractFirstInReplyTo(headerValue: string): string | null {
   const match = headerValue.match(/<([^>]+)>/)
   return match?.[1] ?? null
 }
+
+/**
+ * The msg-id a DSN/bounce says it is responding to, as it would key GSI3. A bounce echoes the
+ * message it failed to deliver via In-Reply-To (preferred — the single direct parent) and
+ * References (fallback — the thread chain, whose LAST entry is the immediate parent). Returns the
+ * bare id (brackets stripped), or null when neither header is present/parseable.
+ */
+export function extractReferencedOutboundMsgId(headers: Record<string, string>): string | null {
+  const inReplyTo = headers["in-reply-to"]
+  if (inReplyTo) {
+    const id = extractMsgId(inReplyTo)
+    if (id) return id
+  }
+  const references = headers["references"]
+  if (references) {
+    const all = references.match(/<([^>]+)>/g)
+    const last = all?.[all.length - 1]
+    if (last) return extractMsgId(last)
+  }
+  return null
+}

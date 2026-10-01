@@ -42,7 +42,7 @@ import type { Thread, AnySignal, CalendarRsvpResponse } from "../types/index.js"
 
 export interface RsvpThreadStore {
   getThread(accountId: string, id: string): Promise<Result<Thread | null, DbError>>;
-  setCalendarEventRsvp(accountId: string, signalLookupId: string, rsvpResponse: CalendarRsvpResponse): Promise<Result<boolean, DbError>>;
+  setCalendarEventRsvp(accountId: string, signalLookupId: string, rsvpResponse: CalendarRsvpResponse, sentRsvp?: { sesMessageId: string; outboundMsgId: string }): Promise<Result<boolean, DbError>>;
   // Load the thread's signals so the relay path can find the ORIGINAL stored invite for the
   // RSVP's event and collapse the group to its latest state. The inbound REPLY tells us the
   // event identity (via the HMAC proxy UID); the stored invite is what we actually relay.
@@ -190,16 +190,23 @@ export class IncomingCalendarRsvpProcessor {
         aliasAddress,
         fromAddress: aliasAddress,
         accountId,
+        calendarSignalId: winnerSignal.id,
+        threadId,
       },
       this.logger,
     );
     if (replyResult.isErr()) return err(replyResult.error);
 
     // --- 7. Record the RSVP on the event's current (winner) calendar_event, same as the API path ---
-    const recordResult = await this.threadStore.setCalendarEventRsvp(accountId, winnerSignal.signalLookupId, {
-      decision,
-      respondedAt: DateTime.utc().toISO()!,
-    });
+    // When the reply was actually relayed, persist its outbound SES messageId + gsi3pk so a later
+    // bounce (arriving as an inbound DSN) resolves back to this event instead of being blocked.
+    const sentMessageId = replyResult.value.messageId;
+    const recordResult = await this.threadStore.setCalendarEventRsvp(
+      accountId,
+      winnerSignal.signalLookupId,
+      { decision, respondedAt: DateTime.utc().toISO()! },
+      sentMessageId ? { sesMessageId: sentMessageId, outboundMsgId: replyResult.value.outboundMsgId } : undefined,
+    );
     if (recordResult.isErr()) return err(recordResult.error);
 
     this.logger.track("Calendar RSVP processed successfully.", {

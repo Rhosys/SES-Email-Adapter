@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractMsgId, buildSignalGsi3pk, buildOutboundMsgId, extractFirstInReplyTo } from '../../src/processor/message-id.js'
+import { extractMsgId, buildSignalGsi3pk, buildOutboundMsgId, extractFirstInReplyTo, extractReferencedOutboundMsgId } from '../../src/processor/message-id.js'
 
 describe('extractMsgId', () => {
   it.each([
@@ -47,5 +47,39 @@ describe('extractFirstInReplyTo', () => {
     { input: '   ', expected: null, label: 'whitespace only' },
   ])('$label: "$input" → $expected', ({ input, expected }) => {
     expect(extractFirstInReplyTo(input)).toBe(expected)
+  })
+})
+
+describe('extractReferencedOutboundMsgId', () => {
+  it('prefers In-Reply-To over References', () => {
+    const headers = {
+      'in-reply-to': '<parent@eu-central-1.amazonses.com>',
+      'references': '<root@eu-central-1.amazonses.com> <mid@eu-central-1.amazonses.com>',
+    }
+    expect(extractReferencedOutboundMsgId(headers)).toBe('parent@eu-central-1.amazonses.com')
+  })
+
+  it('falls back to the LAST References entry when In-Reply-To is absent', () => {
+    const headers = {
+      'references': '<root@eu-central-1.amazonses.com> <immediate-parent@eu-central-1.amazonses.com>',
+    }
+    expect(extractReferencedOutboundMsgId(headers)).toBe('immediate-parent@eu-central-1.amazonses.com')
+  })
+
+  it('resolves the real SES DSN shape — In-Reply-To is the id we sent under', () => {
+    const sentMsgId = '010701a0f2a72130-9bd8ddfc-298d-4624-a2c6-ea25b3ce66a6-000000@eu-central-1.amazonses.com'
+    const headers = {
+      'in-reply-to': `<${sentMsgId}>`,
+      'references': `<${sentMsgId}>`,
+    }
+    expect(extractReferencedOutboundMsgId(headers)).toBe(sentMsgId)
+  })
+
+  it('returns null when neither header is present', () => {
+    expect(extractReferencedOutboundMsgId({ 'subject': 'Delivery Status Notification (Failure)' })).toBeNull()
+  })
+
+  it('returns null when References has no parseable msg-id', () => {
+    expect(extractReferencedOutboundMsgId({ 'references': 'garbage without brackets' })).toBeNull()
   })
 })

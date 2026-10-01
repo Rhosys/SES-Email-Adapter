@@ -260,6 +260,8 @@ describe("CalendarForwarder.sendRsvpToOrganizer — eligibility validation", () 
       aliasAddress: "alias@customer.com",
       fromAddress: "alias@customer.com",
       accountId: "acc-abc123",
+      calendarSignalId: "sgn-cal-1",
+      threadId: "thr-1",
     }, logger);
 
     expect(result.isOk()).toBe(true);
@@ -280,6 +282,8 @@ describe("CalendarForwarder.sendRsvpToOrganizer — eligibility validation", () 
       aliasAddress: "alias@customer.com",
       fromAddress: "alias@customer.com",
       accountId: "acc-abc123",
+      calendarSignalId: "sgn-cal-1",
+      threadId: "thr-1",
     }, logger);
 
     expect(result.isOk()).toBe(true);
@@ -300,6 +304,8 @@ describe("CalendarForwarder.sendRsvpToOrganizer — eligibility validation", () 
       aliasAddress: "alias@customer.com",
       fromAddress: "alias@customer.com",
       accountId: "acc-abc123",
+      calendarSignalId: "sgn-cal-1",
+      threadId: "thr-1",
     }, logger);
 
     expect(result.isOk()).toBe(true);
@@ -320,6 +326,8 @@ describe("CalendarForwarder.sendRsvpToOrganizer — eligibility validation", () 
       aliasAddress: "alias@customer.com",
       fromAddress: "alias@customer.com",
       accountId: "acc-abc123",
+      calendarSignalId: "sgn-cal-1",
+      threadId: "thr-1",
     }, logger);
 
     expect(result.isOk()).toBe(true);
