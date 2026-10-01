@@ -1717,43 +1717,29 @@ describe("IncomingEmailProcessor", () => {
       })));
     });
 
-    it("classifies the signal as a notice/bounce, overriding whatever the classifier returned", async () => {
+    it("is terminal — never saves a signal, so a bounce can never reach rule evaluation (SR-04)", async () => {
       await processor.processInbound(makeMessage(), 1);
 
-      const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect((saved.data as InboundEmailSignalData).workflow).toBe("notice");
-      expect((saved.data as InboundEmailSignalData).workflowData).toMatchObject({ workflow: "notice", noticeType: "bounce" });
+      expect(threadDb.saveSignal).not.toHaveBeenCalled();
     });
 
-    it("logs a WARN naming the failed address and diagnostic detail", async () => {
-      const warnSpy = vi.spyOn(mockLogger, "warn");
+    it("TRACKs an unmatched DSN (no Message-ID resolved to one of our sends) with full context", async () => {
+      const trackSpy = vi.spyOn(mockLogger, "track");
 
       await processor.processInbound(makeMessage(), 1);
 
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining("External bounce/DSN"),
-        expect.objectContaining({ code: "processor.external_bounce_detected", failedAddress: "no-reply@mindstone.com" }),
+      expect(trackSpy).toHaveBeenCalledWith(
+        expect.stringContaining("did not resolve to any send of ours"),
+        expect.objectContaining({ code: "processor.inbound_bounce.unmatched", failedAddress: "no-reply@mindstone.com" }),
       );
     });
 
-    it("records the failed address in the suppression list with reason external_bounce", async () => {
+    it("suppresses the failed address so a dead target is not repeatedly mailed", async () => {
       await processor.processInbound(makeMessage(), 1);
 
       expect(processingDb.suppressAddress).toHaveBeenCalledWith(
         expect.objectContaining({ address: "no-reply@mindstone.com", reason: "external_bounce" }),
       );
-    });
-
-    it("exposes the failure to the account owner via summary and workflowData", async () => {
-      await processor.processInbound(makeMessage(), 1);
-
-      const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect(saved.data.summary).toContain("no-reply@mindstone.com");
-      expect(saved.data.summary).toContain("does not exist");
-      expect((saved.data as InboundEmailSignalData).workflowData).toMatchObject({
-        failedAddress: "no-reply@mindstone.com",
-        bounceReason: "smtp; 550-5.1.1 The email account that you tried to reach does not exist",
-      });
     });
 
     it("does not affect a message with no delivery-status part", async () => {
@@ -1796,24 +1782,25 @@ describe("IncomingEmailProcessor", () => {
       })));
     }
 
-    it("does not suppress a transient bounce (Action: delayed, 4.x.x status) — only logs it", async () => {
+    it("suppresses a transient bounce with a TTL so the address can retry after it expires", async () => {
       mockBounce({ action: "delayed", status: "4.2.2", originalRecipient: "someone@example.com" });
 
       await processor.processInbound(makeMessage(), 1);
 
-      expect(processingDb.suppressAddress).not.toHaveBeenCalled();
-      const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
-      expect((saved.data as InboundEmailSignalData).workflowData).toMatchObject({ noticeType: "bounce" });
+      const entry = vi.mocked(processingDb.suppressAddress).mock.calls[0]![0];
+      expect(entry).toMatchObject({ address: "someone@example.com", reason: "external_bounce" });
+      expect(entry.ttl).toBeGreaterThan(0);
+      expect(threadDb.saveSignal).not.toHaveBeenCalled();
     });
 
-    it("treats a 5.x.x status as permanent even when Action says delayed (status is the authoritative signal)", async () => {
+    it("treats a 5.x.x status as permanent even when Action says delayed (status is the authoritative signal) — suppressed with no TTL", async () => {
       mockBounce({ action: "delayed", status: "5.1.1", diagnosticCode: "550 does not exist", originalRecipient: "someone@example.com" });
 
       await processor.processInbound(makeMessage(), 1);
 
-      expect(processingDb.suppressAddress).toHaveBeenCalledWith(
-        expect.objectContaining({ address: "someone@example.com", reason: "external_bounce" }),
-      );
+      const entry = vi.mocked(processingDb.suppressAddress).mock.calls[0]![0];
+      expect(entry).toMatchObject({ address: "someone@example.com", reason: "external_bounce" });
+      expect(entry.ttl).toBeUndefined();
     });
 
     it("falls back to Action when no Status is present", async () => {
@@ -1824,6 +1811,54 @@ describe("IncomingEmailProcessor", () => {
       expect(processingDb.suppressAddress).toHaveBeenCalledWith(
         expect.objectContaining({ address: "someone@example.com" }),
       );
+    });
+  });
+
+  describe("inbound bounce/DSN — resolved to one of our own sends", () => {
+    function mockBounceReferencing(referencedMsgId: string) {
+      vi.mocked(contentSanitizer.invoke).mockReturnValueOnce(Promise.resolve(ok({
+        success: true as const,
+        parsed: {
+          from: { address: "mailer-daemon@organizer.com" },
+          to: [{ address: "user@example.com" }],
+          cc: [],
+          subject: "Delivery Status Notification (Failure)",
+          textBody: "Your message wasn't delivered.",
+          attachments: [],
+          headers: { "in-reply-to": `<${referencedMsgId}>` },
+          bounce: { action: "failed", status: "4.2.2", originalRecipient: "organizer@organizer.com" },
+        },
+        urlMapping: {},
+      })));
+    }
+
+    it("drops a bounce of our own calendar RSVP — suppresses the address, saves no signal", async () => {
+      mockBounceReferencing("rsvp-msg-1@eu-central-1.amazonses.com");
+      vi.mocked(threadDb.findSignalByEmailMessageId).mockReturnValueOnce(Promise.resolve(ok({
+        id: "sgn-cal-1", signalLookupId: "ses-rsvp-1", threadId: "thr-1", accountId: TEST_ACCOUNT_ID, status: "active", source: "signal", type: "calendar_event",
+      })));
+      const trackSpy = vi.spyOn(mockLogger, "track");
+
+      await processor.processInbound(makeMessage(), 1);
+
+      expect(processingDb.suppressAddress).toHaveBeenCalledWith(expect.objectContaining({ address: "organizer@organizer.com" }));
+      expect(threadDb.saveSignal).not.toHaveBeenCalled();
+      expect(trackSpy).not.toHaveBeenCalledWith(expect.stringContaining("did not resolve"), expect.anything());
+    });
+
+    it("surfaces a deliverability signal for a bounce of a user-composed send", async () => {
+      mockBounceReferencing("draft-msg-1@eu-central-1.amazonses.com");
+      vi.mocked(threadDb.findSignalByEmailMessageId).mockReturnValueOnce(Promise.resolve(ok({
+        id: "sgn-draft-1", signalLookupId: "ses-draft-1", threadId: "thr-9", accountId: TEST_ACCOUNT_ID, status: "sent", source: "user", type: "email",
+      })));
+
+      await processor.processInbound(makeMessage(), 1);
+
+      const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
+      expect(saved.type).toBe("deliverability");
+      expect(saved.threadId).toBe("thr-9");
+      expect((saved.data as { linkedSignalId: string }).linkedSignalId).toBe("sgn-draft-1");
+      expect(processingDb.suppressAddress).toHaveBeenCalledWith(expect.objectContaining({ address: "organizer@organizer.com" }));
     });
   });
 

@@ -10,9 +10,10 @@ import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, NoAc
 import type { AccessService } from "../api/accountsApi.js";
 import type { EmailServiceError } from "../email/email-service.js";
 import type { ProviderSendError } from "../external-exchanges/provider-adapter.js";
-import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency, MatchedRuleResult, InvalidRuleFunctionData, UnsubscribeInfo, InboundEmailSignalData, NoticeData, HealthcheckData } from "../types/index.js";
+import type { Signal, Thread, Rule, Workflow, WorkflowData, Alias, ThreadUrgency, MatchedRuleResult, InvalidRuleFunctionData, UnsubscribeInfo, InboundEmailSignalData, HealthcheckData } from "../types/index.js";
 import { deriveGroupingKey } from "../grouping-key.js";
 import { DEFAULT_UNKNOWN_SENDER_POLICY, resolveUnknownSenderPolicy, isEmailSignal, isInboundEmailSignalData } from "../types/index.js";
+import type { SuppressionReason } from "../types/index.js";
 import type { ParsedMime } from "./mime.js";
 import type { ContentSanitizerClient, BounceInfo } from "./content-sanitizer-client.js";
 import type { UserCodeExecutorClient, TemplateParameterResult } from "./user-code-client.js";
@@ -22,7 +23,7 @@ import type { SignalClassifier, ClassificationOutput } from "../classifier/class
 import { RELEVANT_HEADERS } from "../classifier/prompt-builder.js";
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { MultiClusterAuroraWriter } from "../database/thread-matcher.js";
-import type { ThreadDatabase, UpdateThreadFields } from "../database/thread-database.js";
+import type { ThreadDatabase, UpdateThreadFields, ThreadedSignalRef } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { ProcessingDatabase } from "../database/processing-database.js";
 import type { ResourceDatabase } from "../resource/resource-database.js";
@@ -38,7 +39,7 @@ import { getETLD1, assignSystemLabels } from "./filter.js";
 import { isSystemAccount } from "../database/system-account-db.js";
 import { parseHopCount, type EmailSendType } from "../email/ses-tags.js";
 import { toRuleSignalContext, toRuleThreadContext } from "./rule-context.js";
-import { buildBounceSuppressionEntry } from "../notifier/bounce-suppression.js";
+import { BounceHandler } from "../notifier/bounce-handler.js";
 import type { Notifier } from "../notifier/types.js";
 import { statusToMetric } from "../database/stats-writer.js";
 import type { DraftSendDispatch } from "./draft-send-dispatcher.js";
@@ -232,13 +233,6 @@ function isPermanentBounce(bounceInfo: BounceInfo): boolean {
   if (statusClass === "5") return true;
   if (statusClass === "4") return false;
   return bounceInfo.action !== "delayed";
-}
-
-/** One-line, human-readable summary of a bounce for the thread/signal's `summary` field. */
-function describeBounceFailure(bounceInfo: BounceInfo, failedAddress: string | undefined): string {
-  const target = failedAddress ? `delivery to ${failedAddress}` : "a message";
-  const reason = bounceInfo.diagnosticCode ?? bounceInfo.status ?? "unknown reason";
-  return `Bounce: ${target} failed — ${reason}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -457,6 +451,7 @@ export class IncomingEmailProcessor {
   private readonly contentStore: ContentStore;
   private readonly accessService: Pick<AccessService, "listUsers" | "getUserProfile">;
   private readonly platformTenantName: string;
+  private readonly bounceHandler: BounceHandler;
 
   constructor(opts: IncomingEmailProcessorOptions) {
     this.threadDb = opts.threadDb;
@@ -485,6 +480,7 @@ export class IncomingEmailProcessor {
     this.contentStore = opts.contentStore;
     this.accessService = opts.accessService;
     this.platformTenantName = opts.platformTenantName;
+    this.bounceHandler = new BounceHandler(opts.threadDb, opts.processingDb, opts.accountDb, opts.logger);
   }
 
   /**
@@ -508,50 +504,60 @@ export class IncomingEmailProcessor {
   }
 
   /**
-   * Reacts to an external bounce/DSN detected by the content sanitizer (see BounceInfo) — most
-   * likely one that never went through SES's own send-time bounce feedback loop
-   * (SesFeedbackProcessor): a receiving MTA that accepted the original message and rejected it
-   * later, out of band (e.g. Google Groups checking posting permission after acceptance), rather
-   * than at SMTP time. Authenticity for the bounce is already established by the time this is
-   * called — it comes from the DKIM/DMARC gate earlier in the pipeline (step 1b), not from
-   * anything checked here — so this method is purely about noticing and recording it: a WARN log,
-   * plus (for a permanent failure only) the failed address going into the same suppression list
-   * SES's own bounce feedback uses (see notifier/bounce-suppression.ts). A no-op when
-   * `bounceInfo` is undefined — including the case where the sanitizer already dropped it because
-   * the bounced message was itself a calendar reply (routine noise, not worth reporting).
+   * Handles a bounce/DSN that arrived as inbound mail (the content sanitizer flagged it — see
+   * BounceInfo), rather than through SES's own send-time feedback loop (SesFeedbackProcessor). This
+   * covers out-of-band rejections an MTA sends after accepting the message (e.g. Google Groups
+   * checking posting permission). The DSN carries no provenance except the standard In-Reply-To /
+   * References, which echo the amazonses.com Message-ID we sent under; resolving that against GSI3
+   * is the only way to attribute the bounce.
+   *
+   * Terminal in every branch (the caller returns right after), so a bounce never reaches rule
+   * evaluation and SR-04's blanket notice block:
+   *   - resolves to a calendar_event we sent → suppress the dead address, drop silently (machine
+   *     traffic the user never composed; the SES feedback path owns the real outcome).
+   *   - resolves to a user-composed send → suppress + surface a user-facing deliverability signal,
+   *     mirroring the SES feedback path (both channels may fire; de-dup is a read-time concern).
+   *   - resolves to nothing → suppress the dead address and TRACK with full context, then drop.
+   *     Origin is unknowable without a match; promote to WARN if this becomes frequent.
    */
-  private async handleExternalBounce(bounceInfo: BounceInfo | undefined, from: string, accountId: string, compositeMailMessageId: string): Promise<void> {
-    if (!bounceInfo) return;
-
+  private async handleInboundBounce(bounceInfo: BounceInfo, from: string, headers: Record<string, string>, accountId: string, compositeMailMessageId: string): Promise<Result<void, DbError>> {
     const failedAddress = bounceInfo.originalRecipient ?? bounceInfo.finalRecipient;
     const isPermanent = isPermanentBounce(bounceInfo);
-    this.logger.warn(`External bounce/DSN received from ${from} — a message could not be delivered, reported out-of-band rather than via SES's own bounce feedback.`, {
-      code: "processor.external_bounce_detected",
-      accountId,
-      from,
-      action: bounceInfo.action,
-      status: bounceInfo.status,
-      diagnosticCode: bounceInfo.diagnosticCode,
-      failedAddress,
-      isPermanent,
-      compositeMailMessageId,
-    });
+    const bouncedRecipients = failedAddress
+      ? [{ address: failedAddress, bounceType: isPermanent ? "permanent" as const : "transient" as const, ...(bounceInfo.status ? { reason: bounceInfo.status } : {}) }]
+      : [];
+    const suppressionReason: SuppressionReason = "external_bounce";
+    const logContext = { accountId, from, failedAddress, action: bounceInfo.action, status: bounceInfo.status, diagnosticCode: bounceInfo.diagnosticCode, isPermanent, compositeMailMessageId };
 
-    if (!failedAddress) return;
-    // A transient failure (4.x.x / Action: delayed) means "try again later" — suppressing the
-    // address on the very first one would block the retries that are the whole point of it being
-    // transient rather than permanent. Only a permanent failure (5.x.x) goes into the suppression
-    // list; a transient one is logged for visibility only, and sending is free to retry naturally.
-    if (!isPermanent) return;
-    const suppressResult = await this.processingDb.suppressAddress(buildBounceSuppressionEntry({
-      address: failedAddress,
-      isPermanent,
-      reason: "external_bounce",
-      feedback: bounceInfo,
-    }));
-    if (suppressResult.isErr()) {
-      this.logger.warn("Failed to record external bounce in suppression list.", { code: "processor.external_bounce_suppress_failed", accountId, failedAddress, error: suppressResult.error });
+    const referencedMsgId = extractReferencedOutboundMsgId(headers);
+    let matched: ThreadedSignalRef | null = null;
+    if (referencedMsgId) {
+      const matchResult = await this.threadDb.findSignalByEmailMessageId(buildSignalGsi3pk(accountId, referencedMsgId));
+      if (matchResult.isErr()) return err(matchResult.error);
+      matched = matchResult.value;
     }
+
+    if (matched && matched.type === "calendar_event") {
+      this.logger.info("Inbound DSN bounces one of our own calendar RSVPs — suppressing the organizer address and dropping; not surfaced to the user.", { code: "processor.inbound_bounce.calendar_rsvp_dropped", ...logContext, linkedSignalId: matched.id, threadId: matched.threadId });
+      return this.bounceHandler.handleBounce({ accountId, bouncedRecipients, isPermanent, suppressionReason, revertToDraft: false, disableForwardingRules: false, feedback: bounceInfo });
+    }
+
+    if (matched && matched.source === "user" && matched.type === "email") {
+      this.logger.info("Inbound DSN bounces a user-composed send — recording a deliverability signal and suppressing the address.", { code: "processor.inbound_bounce.user_send", ...logContext, linkedSignalId: matched.id, threadId: matched.threadId });
+      // A single DSN reports one recipient, so "all recipients bounced" is never knowable here — the
+      // draft is never reverted from this channel (the SES feedback path, which sees the full
+      // recipient set, owns that decision).
+      return this.bounceHandler.handleBounce({
+        accountId, bouncedRecipients, isPermanent, suppressionReason,
+        linkedSend: { linkedSignalId: matched.id, signalLookupId: matched.signalLookupId, ...(matched.threadId ? { threadId: matched.threadId } : {}) },
+        revertToDraft: false, disableForwardingRules: false, feedback: bounceInfo,
+      });
+    }
+
+    // No match: we cannot know what this DSN was for. Suppress the dead address anyway (anti-spam),
+    // TRACK with full context, drop. Promote to WARN if this becomes frequent.
+    this.logger.track("Inbound DSN did not resolve to any send of ours — suppressing the failed address and dropping. Origin is unknowable without a Message-ID match; promote to WARN if frequent.", { code: "processor.inbound_bounce.unmatched", ...logContext, referencedMsgId });
+    return this.bounceHandler.handleBounce({ accountId, bouncedRecipients, isPermanent, suppressionReason, revertToDraft: false, disableForwardingRules: false, feedback: bounceInfo });
   }
 
   /**
@@ -1198,35 +1204,13 @@ export class IncomingEmailProcessor {
 
     // 2a. External bounce/DSN detection — see handleExternalBounce for what this covers and why.
     const bounceInfo = sanitizedParsed.bounce;
-
-    // A DSN bouncing one of OUR OWN outbound sends (e.g. a calendar RSVP relayed to an organizer)
-    // arrives twice: once as structured SES feedback (attributed via the send's tags and recorded
-    // there), and once as this inbound DSN. The DSN carries no usable provenance except the standard
-    // In-Reply-To/References, which echo the amazonses.com Message-ID we sent under. Resolving that
-    // against GSI3 tells us the bounce is ours — so we drop it here before classify/rules, rather
-    // than letting it be misclassified as untrusted inbound mail and blocked (SR-04). The real
-    // deliverability outcome is handled on the SES feedback path, not here.
     if (bounceInfo) {
-      const referencedMsgId = extractReferencedOutboundMsgId(sanitizedParsed.headers);
-      if (referencedMsgId) {
-        const ownSendResult = await this.threadDb.findSignalByEmailMessageId(buildSignalGsi3pk(accountId, referencedMsgId));
-        if (ownSendResult.isErr()) return err(ownSendResult.error);
-        if (ownSendResult.value) {
-          this.logger.info("Inbound DSN references one of our own outbound sends — dropping; the SES feedback path owns this bounce.", {
-            code: "processor.own_send_bounce_dropped",
-            accountId,
-            referencedMsgId,
-            linkedSignalId: ownSendResult.value.id,
-            threadId: ownSendResult.value.threadId,
-            from: sanitizedParsed.from.address,
-            compositeMailMessageId: msg.compositeMailMessageId,
-          });
-          return ok(undefined);
-        }
-      }
+      const bounceResult = await this.handleInboundBounce(bounceInfo, sanitizedParsed.from.address, sanitizedParsed.headers, accountId, msg.compositeMailMessageId);
+      if (bounceResult.isErr()) return err(bounceResult.error);
+      // A detected bounce is always terminal here — it never falls through to classify/rules.
+      // Reaching SR-04 (block all notices) with a notice/bounce would mean bounce handling leaked.
+      return ok(undefined);
     }
-
-    await this.handleExternalBounce(bounceInfo, sanitizedParsed.from.address, accountId, msg.compositeMailMessageId);
 
     if (sanitizedParsed.droppedAttachments && sanitizedParsed.droppedAttachments.length > 0) {
       const reasonSummary = summarizeDroppedReasons(sanitizedParsed.droppedAttachments);
@@ -1377,25 +1361,9 @@ export class IncomingEmailProcessor {
       classificationOutput = classification.value;
     }
 
-    // 4a. Bounce override — deterministic from the sanitizer's DSN extraction, so it takes
-    // priority over whatever the classifier guessed. Overriding after classify() (rather than
-    // skipping classify() outright) keeps this on the same thread-matching/save path as every
-    // other notice, instead of duplicating that machinery for a fast-path exit. The failure
-    // itself is surfaced to the account owner two ways: `summary` (the one-line synopsis shown
-    // on the thread row) and structured `failedAddress`/`bounceReason` fields on workflowData
-    // (for a future dedicated notice/bounce UI panel — see NoticeData).
-    if (bounceInfo) {
-      const failedAddress = bounceInfo.originalRecipient ?? bounceInfo.finalRecipient;
-      classificationOutput.workflow = "notice";
-      classificationOutput.workflowData = {
-        workflow: "notice",
-        noticeType: "bounce",
-        provider: senderETLD1,
-        ...(failedAddress ? { failedAddress } : {}),
-        ...(bounceInfo.diagnosticCode || bounceInfo.status ? { bounceReason: bounceInfo.diagnosticCode ?? bounceInfo.status } : {}),
-      } satisfies NoticeData;
-      classificationOutput.summary = describeBounceFailure(bounceInfo, failedAddress);
-    }
+    // A detected bounce was already handled terminally at step 2a and returned before here, so no
+    // bounce reaches classification: there is no notice/bounce override and no bounce can flow into
+    // rule evaluation (SR-04). Any notice reaching the rules is therefore a genuine notice.
 
     // 4b. requiresReply override — if the alias is not a direct recipient (only CC/BCC),
     // the email is not addressed to the user so a reply is not expected.
