@@ -1788,6 +1788,7 @@ export class IncomingEmailProcessor {
         resourceKey: resourceInfo.resourceKey,
         expectedResolutionDate: resourceInfo.expectedResolutionDate,
         displayDate: resourceInfo.displayDate,
+        ...(resourceInfo.displayDateEnd !== undefined ? { displayDateEnd: resourceInfo.displayDateEnd } : {}),
         ...(resourceInfo.title !== undefined ? { title: resourceInfo.title } : {}),
         ...(resourceInfo.description !== undefined ? { description: resourceInfo.description } : {}),
         ttl: resourceTtl,

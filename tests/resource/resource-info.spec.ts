@@ -202,6 +202,47 @@ describe("deriveResourceInfo", () => {
         workflow: "events", eventType: "save_the_date", eventName: "Concert", eventDate: "not-a-date",
       })).toBeNull();
     });
+
+    it("resolves on the date-only end of a multi-day event and exposes displayDateEnd", () => {
+      const info = deriveResourceInfo("events", {
+        workflow: "events", eventType: "save_the_date", eventName: "DevConf",
+        eventDate: "2027-09-28", eventDateInstant: "2027-09-27T22:00:00.000Z",
+        eventEndDate: "2027-10-03", eventEndDateInstant: "2027-10-02T22:00:00.000Z",
+      });
+      expect(info).toEqual({
+        expectedResolutionDate: "2027-10-02T22:00:00.000Z",
+        displayDate: "2027-09-28",
+        displayDateEnd: "2027-10-03",
+        resourceKey: "DevConf", assets: [], title: "DevConf",
+      });
+    });
+
+    it("prefers eventEndDatetime over eventEndDate for the resolution instant and display end", () => {
+      const info = deriveResourceInfo("events", {
+        workflow: "events", eventType: "ticket_confirmation", eventName: "Summit", ticketReference: "TIX-2",
+        eventStartDatetime: "2027-09-28T09:00", eventStartDatetimeInstant: "2027-09-28T07:00:00.000Z",
+        eventEndDate: "2027-10-03", eventEndDateInstant: "2027-10-02T22:00:00.000Z",
+        eventEndDatetime: "2027-10-03T17:00", eventEndDatetimeInstant: "2027-10-03T15:00:00.000Z",
+      });
+      expect(info).toEqual({
+        expectedResolutionDate: "2027-10-03T15:00:00.000Z",
+        displayDate: "2027-09-28T09:00",
+        displayDateEnd: "2027-10-03T17:00",
+        resourceKey: "TIX-2", assets: [], title: "Summit",
+      });
+    });
+
+    it("omits displayDateEnd and resolves on the start when the event has no end", () => {
+      const info = deriveResourceInfo("events", {
+        workflow: "events", eventType: "reminder", eventName: "Concert", ticketReference: "TIX-3",
+        eventStartDatetime: "2027-06-01T20:00", eventStartDatetimeInstant: "2027-06-01T18:00:00.000Z",
+      });
+      expect(info).toEqual({
+        expectedResolutionDate: "2027-06-01T18:00:00.000Z",
+        displayDate: "2027-06-01T20:00",
+        resourceKey: "TIX-3", assets: [], title: "Concert",
+      });
+    });
   });
 
   describe("resolution date is the precomputed instant sibling (passthrough, no reparse)", () => {

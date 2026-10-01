@@ -39,6 +39,7 @@ function toApiResource(resource: DbResource, contentCdnBaseUrl: string): Api.Res
     status: resource.status as Api.Resource["status"],
     expectedResolutionDate: resource.expectedResolutionDate,
     ...(resource.displayDate ? { displayDate: resource.displayDate } : {}),
+    ...(resource.displayDateEnd ? { displayDateEnd: resource.displayDateEnd } : {}),
     ...(resource.title ? { title: resource.title } : {}),
     ...(resource.description ? { description: resource.description } : {}),
     ...(resource.resolvedAt ? { resolvedAt: resource.resolvedAt } : {}),

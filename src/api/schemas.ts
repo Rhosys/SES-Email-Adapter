@@ -579,6 +579,7 @@ export const Resource = z.object({
   status: ResourceStatus,
   expectedResolutionDate: z.string(),
   displayDate: z.string().optional(),
+  displayDateEnd: z.string().optional(),
   title: z.string().optional(),
   description: z.string().optional(),
   resolvedAt: z.string().optional().readonly(),

@@ -5,7 +5,8 @@ import type {
 
 export interface ResourceInfo {
   expectedResolutionDate: string; // UTC_Instant — "2027-03-15T13:00:00.000Z"
-  displayDate: string;            // Display_Date — passthrough from workflowData
+  displayDate: string;            // Display_Date — passthrough from workflowData (the start)
+  displayDateEnd?: string;        // Display end date for a span (e.g. a multi-day event), when stated
   resourceKey: string;
   assets: ResourceAsset[];
   title?: string;
@@ -72,13 +73,21 @@ export function deriveResourceInfo(
     case "events": {
       const d = workflowData as EventsData;
       const key = d.ticketReference ?? d.eventName;
-      // Prefer the precise start datetime; fall back to the date-only eventDate. A
-      // save-the-date with no time still yields a resource via eventDate.
+      // Start display: the precise start datetime, else the date-only eventDate. A save-the-date
+      // with no time still yields a resource via eventDate.
       const display = d.eventStartDatetime ?? d.eventDate;
-      const instant = d.eventStartDatetime ? d.eventStartDatetimeInstant : d.eventDateInstant;
+      // Resolution instant resolves on the END when the event spans time, so a multi-day event
+      // stays open until it is actually over — not when it begins. Prefer the most precise end
+      // available (datetime over date-only), falling back to the start for a single-moment event.
+      const endDisplay = d.eventEndDatetime ?? d.eventEndDate;
+      const instant = d.eventEndDatetime ? d.eventEndDatetimeInstant
+        : d.eventEndDate ? d.eventEndDateInstant
+        : d.eventStartDatetime ? d.eventStartDatetimeInstant
+        : d.eventDateInstant;
       if (!display || !instant || !key) return null;
       return {
         expectedResolutionDate: instant, displayDate: display, resourceKey: key, assets: [],
+        ...(endDisplay ? { displayDateEnd: endDisplay } : {}),
         title: d.eventName,
         ...(d.description ? { description: d.description } : {}),
       };

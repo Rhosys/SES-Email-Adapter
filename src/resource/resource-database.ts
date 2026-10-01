@@ -24,6 +24,7 @@ export interface SaveResourceParams {
   resourceKey: string;
   expectedResolutionDate: string;
   displayDate?: string;
+  displayDateEnd?: string;
   title?: string;
   description?: string;
   ttl?: number;
@@ -44,7 +45,7 @@ export class ResourceDatabase {
   // change a resource's status once it exists. Only setResourceStatus (an explicit user
   // action) changes status after creation.
   async saveResource(params: SaveResourceParams): Promise<Result<Resource, DbError>> {
-    const { accountId, threadId, workflow, resourceKey, expectedResolutionDate, displayDate, title, description, ttl, assets } = params;
+    const { accountId, threadId, workflow, resourceKey, expectedResolutionDate, displayDate, displayDateEnd, title, description, ttl, assets } = params;
     const now = DateTime.utc().toISO()!;
     const sk = `${workflow}#${resourceKey}`;
 
@@ -75,6 +76,11 @@ export class ResourceDatabase {
     if (displayDate !== undefined) {
       setParts.push("displayDate = :displayDate");
       exprValues[":displayDate"] = displayDate;
+    }
+
+    if (displayDateEnd !== undefined) {
+      setParts.push("displayDateEnd = :displayDateEnd");
+      exprValues[":displayDateEnd"] = displayDateEnd;
     }
 
     if (title !== undefined) {

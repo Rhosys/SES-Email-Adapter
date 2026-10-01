@@ -221,6 +221,10 @@ export interface EventsData {
   eventStartDatetime?: string;
   /** UTC instant derived from eventStartDatetime at classification time (internal; not in API schema). */
   eventStartDatetimeInstant?: string;
+  /** Date-only end of a multi-day event whose end carries no time — counterpart to eventDate. */
+  eventEndDate?: string;
+  /** UTC instant derived from eventEndDate at classification time (internal; not in API schema). */
+  eventEndDateInstant?: string;
   eventEndDatetime?: string;
   /** UTC instant derived from eventEndDatetime at classification time (internal; not in API schema). */
   eventEndDatetimeInstant?: string;
@@ -723,6 +727,8 @@ export interface Resource {
   status: ResourceStatus;
   expectedResolutionDate: string;
   displayDate?: string;
+  // Display end date for a span (e.g. a multi-day event) — passthrough from workflowData, when stated.
+  displayDateEnd?: string;
   // Human-readable label/detail passed through from the originating workflowData
   // (e.g. events' eventName/description) — not derived or reformatted here.
   title?: string;
