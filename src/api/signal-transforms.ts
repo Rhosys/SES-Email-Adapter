@@ -15,6 +15,7 @@ import type {
 } from "../types/index.js";
 import type * as Api from "./schemas.js";
 import { ok, err, type Result, unknownSignalTypeError, type UnknownSignalTypeError } from "../errors.js";
+import type { Logger } from "../logger.js";
 
 // matchedRules is an append-only trace (e.g. a signal dismissed from quarantine gets a second
 // SR-00 entry alongside whatever originally quarantined it). Collapse same-id entries down to the
@@ -233,5 +234,34 @@ export function toApiSignal(signal: AnySignal, cdnBase: string): Result<Api.Sign
       } as Api.Signal);
     default:
       return err(unknownSignalTypeError((signal as AnySignal).type, (signal as AnySignal).id));
+  }
+}
+
+/**
+/**
+ * Shapes internal signals into their API DTOs for the read endpoints (thread list, single signal,
+ * quarantine list, activation). Owns the logger so the one place that can fail — an unrecognised
+ * signal type reaching the DB without a matching transform — is logged canonically here, and every
+ * caller simply filters the `err` out of its response. The class carries no other state; it exists
+ * so transform failures are reported from one place instead of four call sites.
+ */
+export class SignalTransformer {
+  private readonly logger: Logger;
+
+  constructor(logger: Logger) {
+    this.logger = logger;
+  }
+
+  toApiSignal(signal: AnySignal, cdnBase: string): Result<Api.Signal, UnknownSignalTypeError> {
+    const result = toApiSignal(signal, cdnBase);
+    if (result.isErr()) {
+      this.logger.track(`Signal of type "${result.error.signalType}" has no API transform and was omitted from the response; a signal type reached the DB without a matching toApiSignal case.`, {
+        code: "api.unknown_signal_type",
+        levelThreshold: 20,
+        signalId: result.error.signalId,
+        signalType: result.error.signalType,
+      });
+    }
+    return result;
   }
 }

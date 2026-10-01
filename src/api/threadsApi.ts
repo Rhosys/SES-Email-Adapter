@@ -6,7 +6,7 @@ import { getDomain } from "tldts";
 import { isValidEmail } from "../email/validate-email.js";
 import { computeUndoWindowSeconds } from "./undo-window.js";
 import { zParse } from "./validate.js";
-import { toApiThread, toApiSignal } from "./signal-transforms.js";
+import { toApiThread, SignalTransformer } from "./signal-transforms.js";
 import { collapseCalendarSignals } from "./calendar-collapse.js";
 import type * as Api from "./schemas.js";
 import { buildScheduleName } from "../scheduler/schedule-name.js";
@@ -75,19 +75,13 @@ export class ThreadsApi {
 
   register(app: OpenAPIHono<AppEnv>, { authz, err, route }: RouteHelpers): void {
     const { threadDb, accountDb, logger, draftSendDispatcher, schedulerClient, emailService, calendarForwarder, signalReprocessor, emailContentStore, contentCdnBaseUrl, embeddingGenerator, threadMatcher, signalQueue } = this;
+    const signalTransformer = new SignalTransformer(logger);
 
-    // A single-signal endpoint cannot represent a signal whose type has no API transform,
-    // so it reports 404 (the resource is not renderable) and TRACKs the offending type for
-    // follow-up — a type reached the DB without a matching toApiSignal case.
-    const transformSignal = (signal: AnySignal, accountId: string, threadId: string): Result<Api.Signal, "unknown_type"> => {
-      const apiSignalResult = toApiSignal(signal, contentCdnBaseUrl);
-      if (apiSignalResult.isErr()) {
-        logger.track("Signal has an unrecognized type and cannot be returned; a signal type reached the DB without a matching toApiSignal case.", {
-          code: "api.thread.unknown_signal_type", accountId, threadId,
-          signalId: apiSignalResult.error.signalId, signalType: apiSignalResult.error.signalType,
-        });
-        return errResult("unknown_type");
-      }
+    // A single-signal endpoint cannot represent a signal whose type has no API transform, so it
+    // reports 404 (the resource is not renderable); the transformer logs the offending type.
+    const transformSignal = (signal: AnySignal): Result<Api.Signal, "unknown_type"> => {
+      const apiSignalResult = signalTransformer.toApiSignal(signal, contentCdnBaseUrl);
+      if (apiSignalResult.isErr()) return errResult("unknown_type");
       return okResult(apiSignalResult.value);
     };
 
@@ -351,14 +345,8 @@ export class ThreadsApi {
 
       const enrichedSignals: Api.Signal[] = [];
       for (const signal of signals) {
-        const apiSignalResult = toApiSignal(signal, contentCdnBaseUrl);
-        if (apiSignalResult.isErr()) {
-          logger.track("Signal has an unrecognized type and was omitted from the thread's signal list; a signal type reached the DB without a matching toApiSignal case.", {
-            code: "api.thread.unknown_signal_type", accountId, threadId: thread.id,
-            signalId: apiSignalResult.error.signalId, signalType: apiSignalResult.error.signalType,
-          });
-          continue;
-        }
+        const apiSignalResult = signalTransformer.toApiSignal(signal, contentCdnBaseUrl);
+        if (apiSignalResult.isErr()) continue;
         if (isCalendarEventSignal(signal)) {
           // Drop snapshots that lost to a later invite/cancellation in their event group.
           if (collapse.superseded.has(signal.id)) continue;
@@ -436,7 +424,7 @@ export class ThreadsApi {
       const draftThreadUpdateResult = await threadDb.updateThread(accountId, thread.id, thread.status, now, {});
       if (draftThreadUpdateResult.isErr()) { logger.warn("Failed to update thread recency after draft creation", { code: "api.thread.create_signal.update_thread_failed", accountId, threadId, error: draftThreadUpdateResult.error }); }
       logger.info("Draft signal created", { code: "api.threads.signal_created", accountId, threadId, signalId: id });
-      const createdApi = transformSignal(createResult.value, accountId, threadId);
+      const createdApi = transformSignal(createResult.value);
       if (createdApi.isErr()) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
       return c.json(createdApi.value, 201);
     });
@@ -487,7 +475,7 @@ export class ThreadsApi {
         return err(c, 500, "Internal Server Error");
       }
       logger.info("Draft signal replaced", { code: "api.threads.signal_replaced", accountId, threadId, signalId });
-      const replacedApi = transformSignal(updateResult.value, accountId, threadId);
+      const replacedApi = transformSignal(updateResult.value);
       if (replacedApi.isErr()) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
       return c.json(replacedApi.value, 200);
     });
@@ -571,7 +559,7 @@ export class ThreadsApi {
       }
 
       logger.info("Draft queued for send", { code: "api.threads.signal_send_queued", accountId, threadId, signalId });
-      const sentApi = transformSignal(updateResult.value, accountId, threadId);
+      const sentApi = transformSignal(updateResult.value);
       if (sentApi.isErr()) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
       return c.json({ ...sentApi.value, undoExpiresAt }, 200);
     });
@@ -807,7 +795,7 @@ export class ThreadsApi {
       }
 
       logger.info("RSVP sent", { code: "api.threads.rsvp_sent", accountId, threadId, signalId, decision: body.decision });
-      const apiEventResult = transformSignal({ ...winnerSignal, data: { ...winnerSignal.data, rsvpResponse } }, accountId, threadId);
+      const apiEventResult = transformSignal({ ...winnerSignal, data: { ...winnerSignal.data, rsvpResponse } });
       if (apiEventResult.isErr()) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
       const apiEvent = apiEventResult.value as Extract<Api.Signal, { type: "calendar_event" }>;
       return c.json({ ...apiEvent, data: { ...apiEvent.data, ...(winnerEnrichment ?? {}) } }, 200);
@@ -833,7 +821,7 @@ export class ThreadsApi {
       }
       const signal = signalResult.value;
       if (!signal) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
-      const getApi = transformSignal(signal, accountId, threadId);
+      const getApi = transformSignal(signal);
       if (getApi.isErr()) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
       return c.json(getApi.value, 200);
     });
@@ -924,7 +912,7 @@ export class ThreadsApi {
           return err(c, 500, "Internal Server Error");
         }
         logger.info("Signal reverted to draft", { code: "api.threads.signal_patched", accountId, threadId, signalId, statusTransition: "pending_send→draft" });
-        const revertedApi = transformSignal(updateResult.value, accountId, threadId);
+        const revertedApi = transformSignal(updateResult.value);
         if (revertedApi.isErr()) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
         return c.json(revertedApi.value, 200);
       }
@@ -939,7 +927,7 @@ export class ThreadsApi {
         return err(c, 500, "Internal Server Error");
       }
       logger.info("Signal updated", { code: "api.threads.signal_patched", accountId, threadId, signalId });
-      const updatedApi = transformSignal(updateResult.value, accountId, threadId);
+      const updatedApi = transformSignal(updateResult.value);
       if (updatedApi.isErr()) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
       return c.json(updatedApi.value, 200);
     });
@@ -1006,7 +994,7 @@ export class ThreadsApi {
         return err(c, 500, "Reprocess failed", undefined, error.message);
       }
       logger.info("Signal reprocessed", { code: "api.threads.reprocessed", accountId, threadId, signalId: id });
-      const reprocessedApi = transformSignal(result.value, accountId, threadId);
+      const reprocessedApi = transformSignal(result.value);
       if (reprocessedApi.isErr()) return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
       return c.json(reprocessedApi.value, 200);
     });
