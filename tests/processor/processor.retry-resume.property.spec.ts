@@ -694,7 +694,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
     expect(result.isErr()).toBe(true);
     expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
     expect(threadDb.saveSignal).not.toHaveBeenCalled();
-    expect(threadDb.saveThread).not.toHaveBeenCalled();
+    expect(threadDb.createThread).not.toHaveBeenCalled();
   });
 
   it.each(ARC_READ_FAILURE_CASES)("arc read failure returns batchItemFailure without Aurora upserts or DDB writes ($label)", async ({ error, receiveCount, messageId }) => {
@@ -728,7 +728,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
     expect(result.isErr()).toBe(true);
     expect(auroraWriter.upsertEmbedding).not.toHaveBeenCalled();
     expect(threadDb.saveSignal).not.toHaveBeenCalled();
-    expect(threadDb.saveThread).not.toHaveBeenCalled();
+    expect(threadDb.createThread).not.toHaveBeenCalled();
   });
 });
 
@@ -937,7 +937,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
     });
 
     await processor.processInbound(makeMessage(messageId), receiveCount);
-    expect(threadDb.saveThread).toHaveBeenCalled();
+    expect(threadDb.createThread).toHaveBeenCalled();
     expect(threadDb.saveSignal).toHaveBeenCalled();
   });
 

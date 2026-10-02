@@ -333,14 +333,14 @@ describe("IncomingEmailProcessor integration: end-to-end retry flow", () => {
 
       // Arc was saved before signal
       const callOrder: string[] = [];
-      vi.mocked(threadDb.saveThread).mock.invocationCallOrder.forEach(() => callOrder.push("saveArc"));
+      vi.mocked(threadDb.createThread).mock.invocationCallOrder.forEach(() => callOrder.push("saveArc"));
       vi.mocked(threadDb.saveSignal).mock.invocationCallOrder.forEach(() => callOrder.push("saveSignal"));
       // Verify saveArc was called
-      expect(threadDb.saveThread).toHaveBeenCalled();
+      expect(threadDb.createThread).toHaveBeenCalled();
       // Verify saveSignal was called
       expect(threadDb.saveSignal).toHaveBeenCalled();
       // saveArc invocation order < saveSignal invocation order
-      const arcOrder = vi.mocked(threadDb.saveThread).mock.invocationCallOrder[0]!;
+      const arcOrder = vi.mocked(threadDb.createThread).mock.invocationCallOrder[0]!;
       const signalOrder = vi.mocked(threadDb.saveSignal).mock.invocationCallOrder[0]!;
       expect(arcOrder).toBeLessThan(signalOrder);
 
@@ -405,7 +405,7 @@ describe("IncomingEmailProcessor integration: end-to-end retry flow", () => {
       expect(embeddingGenerator.generateForModel).not.toHaveBeenCalled();
 
       // No new DDB saves (arc and signal already exist)
-      expect(threadDb.saveThread).not.toHaveBeenCalled();
+      expect(threadDb.createThread).not.toHaveBeenCalled();
       expect(threadDb.saveSignal).not.toHaveBeenCalled();
 
       // S3 retention was attempted (idempotent, always runs)

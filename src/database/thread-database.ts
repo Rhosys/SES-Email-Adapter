@@ -1,8 +1,8 @@
 import { BatchGetCommand, DeleteCommand, GetCommand, PutCommand, QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { DateTime } from "luxon";
 import { dynamo, SIGNALS_TABLE, encodeCursor, decodeCursor } from "./shared.js";
-import { ok, err, dbError } from "../errors.js";
-import type { DbError, Result } from "../errors.js";
+import { ok, err, dbError, threadIdCollisionError } from "../errors.js";
+import type { DbError, Result, ThreadIdCollisionError } from "../errors.js";
 import type { Logger } from "../logger.js";
 import type { ListThreadsParams } from "../api/app.js";
 import type { Thread, Signal, AnySignal, OutboundEmailSignalData, Page, PageParams, ThreadStatus, ThreadUrgency, Workflow } from "../types/index.js";
@@ -406,28 +406,30 @@ export class ThreadDatabase {
     }
   }
 
-  async saveThread(thread: Thread): Promise<Result<void, DbError>> {
+  private buildThreadItem(thread: Thread): Record<string, unknown> {
     // TTL is derived state, computed here from the thread's retention. Per the product invariant it
     // is set once at creation and never refreshed (updateThread deliberately leaves it untouched).
     const ttl = retentionTtl(thread.retentionDuration, thread.createdAt);
+    const item: Record<string, unknown> = {
+      ...thread,
+      threadId: thread.id,
+      pk: threadPk(thread.accountId, thread.id),
+      sk: ITEM_SK,
+      gsi1pk: `ACCT#${thread.accountId}`,
+      gsi1sk: `LASTACT#${thread.status}#${thread.lastSignalAt}#${thread.id}`,
+      ttl, // authoritative — undefined omits the attribute (removeUndefinedValues)
+    };
+    if (thread.groupingKey) {
+      item.gsi3pk = buildThreadGsi3pk(thread.accountId, thread.groupingKey);
+    }
+    return item;
+  }
+
+  async saveThread(thread: Thread): Promise<Result<void, DbError>> {
     try {
-      const item: Record<string, unknown> = {
-        ...thread,
-        threadId: thread.id,
-        pk: threadPk(thread.accountId, thread.id),
-        sk: ITEM_SK,
-        gsi1pk: `ACCT#${thread.accountId}`,
-        gsi1sk: `LASTACT#${thread.status}#${thread.lastSignalAt}#${thread.id}`,
-        ttl, // authoritative — undefined omits the attribute (removeUndefinedValues)
-      };
-
-      if (thread.groupingKey) {
-        item.gsi3pk = buildThreadGsi3pk(thread.accountId, thread.groupingKey);
-      }
-
       await dynamo.send(new PutCommand({
         TableName: SIGNALS_TABLE,
-        Item: item,
+        Item: this.buildThreadItem(thread),
       }));
       return ok(undefined);
     } catch (e) {
@@ -435,8 +437,42 @@ export class ThreadDatabase {
     }
   }
 
-  async createThread(thread: Thread): Promise<Result<void, DbError>> {
-    return this.saveThread(thread);
+  /**
+   * Create a thread, failing closed if its id is already taken, then reconciling instead of
+   * clobbering. Thread ids are derived deterministically from the creating signal (see
+   * deriveThreadIdFromSignalId), so reprocessing a quarantined signal re-runs ingest against the
+   * same id. A prior partial run (e.g. a 504 after the thread write but before the signal write)
+   * leaves that exact thread already present; reusing it reclaims the orphan rather than minting a
+   * new vacant thread. The existing row is accepted as the same conversation only when its sender
+   * and recipient match what we were about to write — any divergence is a genuine id collision
+   * (astronomically improbable given UUIDv7 + checksum) and is surfaced as an error.
+   */
+  async createThread(thread: Thread): Promise<Result<void, DbError | ThreadIdCollisionError>> {
+    try {
+      await dynamo.send(new PutCommand({
+        TableName: SIGNALS_TABLE,
+        Item: this.buildThreadItem(thread),
+        ConditionExpression: "attribute_not_exists(pk)",
+      }));
+      return ok(undefined);
+    } catch (e) {
+      if (!(e instanceof Error && e.name === "ConditionalCheckFailedException")) return err(dbError(e));
+
+      const existingResult = await this.getThread(thread.accountId, thread.id);
+      if (existingResult.isErr()) return err(existingResult.error);
+      const existing = existingResult.value;
+      if (!existing) return err(dbError(e));
+
+      const sameConversation = existing.sender.address === thread.sender.address && existing.recipientAddress === thread.recipientAddress;
+      if (!sameConversation) {
+        const collision = threadIdCollisionError(thread.id, { sender: existing.sender.address, recipientAddress: existing.recipientAddress }, { sender: thread.sender.address, recipientAddress: thread.recipientAddress });
+        this.logger.error("Derived thread id already exists for a different conversation.", { code: "thread_database.thread_id_collision", accountId: thread.accountId, threadId: thread.id, existing: collision.existing, attempted: collision.attempted });
+        return err(collision);
+      }
+
+      this.logger.trackPoint("thread_reclaimed", { threadId: thread.id, accountId: thread.accountId });
+      return ok(undefined);
+    }
   }
 
   async updateThread(accountId: string, id: string, status: ThreadStatus, lastSignalAt: string, update: UpdateThreadFields): Promise<Result<Thread, DbError>> {

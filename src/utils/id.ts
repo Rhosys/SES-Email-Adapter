@@ -12,12 +12,27 @@ const translator = shortUuid.createTranslator(BASE58_ALPHABET);
 
 const BASE58_SET = new Set(BASE58_ALPHABET);
 
+function checkCharsFor(encoded: string): string {
+  const hash = createHash("sha256").update(encoded).digest("hex");
+  return hash.split("").filter(c => BASE58_SET.has(c)).slice(0, 3).join("");
+}
+
 export function generateId(prefix: string): string {
   const uuid = uuidv7();
   const encoded = translator.fromUUID(uuid);
-  const hash = createHash("sha256").update(encoded).digest("hex");
-  const checkChars = hash.split("").filter(c => BASE58_SET.has(c)).slice(0, 3).join("");
-  return `${prefix}${encoded}${checkChars}`;
+  return `${prefix}${encoded}${checkCharsFor(encoded)}`;
+}
+
+/**
+ * Derive a thread id deterministically from the signal that creates the thread, so that
+ * reprocessing a quarantined signal (which re-runs the full ingest pipeline) always lands
+ * on the same thread id instead of minting a fresh vacant thread on every retry. The
+ * encoded body — and therefore its checksum — is shared with the signal id; only the prefix
+ * differs, so `validateId(derived, "thr-")` holds.
+ */
+export function deriveThreadIdFromSignalId(signalId: string): string {
+  const encoded = signalId.slice("sgn-".length, -3);
+  return `thr-${encoded}${checkCharsFor(encoded)}`;
 }
 
 export function validateId(id: string, prefix: string): boolean {

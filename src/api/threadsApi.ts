@@ -28,7 +28,7 @@ import { getPrimaryThreadMatcherRegistry } from "../embedding/cluster-registry.j
 import type { EmbeddingGenerator } from "../embedding/embedding-generator.js";
 import type { ThreadMatcher } from "../database/thread-matcher.js";
 import type { SignalQueue } from "../messaging/signal-queue.js";
-import type { ProcessorError, NotFoundError } from "../errors.js";
+import type { ProcessorError, NotFoundError, ThreadIdCollisionError } from "../errors.js";
 import type { Result } from "neverthrow";
 import { ok as okResult, err as errResult } from "neverthrow";
 import {
@@ -42,7 +42,7 @@ import {
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
 export interface SignalReprocessor {
-  reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; skipAllMatchedRuleStatusActions?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
+  reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; skipAllMatchedRuleStatusActions?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError | ThreadIdCollisionError>>;
 }
 
 export interface ListThreadsParams extends PageParams {
@@ -987,6 +987,7 @@ export class ThreadsApi {
       if (result.isErr()) {
         const { error } = result;
         if (error.kind === "not_found") return err(c, 404, "Signal not found", "SIGNAL_NOT_FOUND");
+        if (error.kind === "thread_id_collision") { logger.error("Thread-id collision while reprocessing signal.", { code: "api.reprocess.thread_id_collision", accountId, signalId: id, threadId, error }); return err(c, 409, "The thread for this signal conflicts with an existing conversation", "THREAD_ID_COLLISION"); }
         if (error.message === "Only email signals can be reprocessed" || error.message === "Signal has no s3Key — cannot reprocess") {
           return err(c, 400, error.message);
         }

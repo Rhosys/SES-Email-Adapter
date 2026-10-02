@@ -17,6 +17,7 @@ export type InvalidArgumentError = { kind: "invalid_argument"; argument: string;
 export type UnknownSignalTypeError = { kind: "unknown_signal_type"; message: string; signalType: string; signalId: string };
 
 export type ReindexSegmentProcessingError = { kind: "reindex_segment_processing_error"; segment: number; failureCount: number; failures: Array<{ signalId: string; cause: unknown }> };
+export type ThreadIdCollisionError = { kind: "thread_id_collision"; message: string; threadId: string; existing: { sender: string; recipientAddress: string }; attempted: { sender: string; recipientAddress: string } };
 
 // --- Constructor helpers ---
 
@@ -154,6 +155,7 @@ export const processorError = (cause: unknown): ProcessorError => {
 };
 export const noAccountError = (recipientAddress: string, destination: string[], compositeMailMessageId: string, expectedAccountId?: string): NoAccountError => ({ kind: "no_account_for_recipient", recipientAddress, destination, compositeMailMessageId, expectedAccountId });
 export const reindexSegmentProcessingError = (segment: number, failures: Array<{ signalId: string; cause: unknown }>): ReindexSegmentProcessingError => ({ kind: "reindex_segment_processing_error", segment, failureCount: failures.length, failures });
+export const threadIdCollisionError = (threadId: string, existing: { sender: string; recipientAddress: string }, attempted: { sender: string; recipientAddress: string }): ThreadIdCollisionError => ({ kind: "thread_id_collision", message: `Derived thread id ${threadId} already exists for a different conversation`, threadId, existing, attempted });
 export const invalidArgumentError = (argument: string, message: string): InvalidArgumentError => ({ kind: "invalid_argument", argument, message });
 export const unknownSignalTypeError = (signalType: string, signalId: string): UnknownSignalTypeError => ({ kind: "unknown_signal_type", message: `No API transform exists for signal type "${signalType}"`, signalType, signalId });
 export const permanentSesError = (errorName: string, httpStatus: number, message: string, cause: unknown): PermanentSesError => ({ kind: "permanent_ses_error", errorName, httpStatus, message, cause });

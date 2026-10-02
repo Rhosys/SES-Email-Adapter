@@ -41,7 +41,7 @@ vi.mock("../../src/embedding/cluster-registry.js", () => {
 });
 
 
-describe("Single saveThread call with complete mutations", () => {
+describe("Single createThread call with complete mutations", () => {
   const TEST_ACCOUNT_ID = "acct-savearc";
 
   function makeMessage(messageId: string, recipientEmail: string): InboundSignalMessage {
@@ -71,7 +71,7 @@ describe("Single saveThread call with complete mutations", () => {
     { label: "all features combined", workflow: "test", additionalLabels: ["important"], hasRetention: true },
   ];
 
-  it.each(cases)("$label — saveThread called exactly once with accumulated mutations", async (testCase) => {
+  it.each(cases)("$label — createThread called exactly once with accumulated mutations", async (testCase) => {
     const recipientEmail = "user@testdomain.com";
     const senderEmail = "sender@external.com";
     const recipientDomain = "testdomain.com";
@@ -99,13 +99,13 @@ describe("Single saveThread call with complete mutations", () => {
       updatedAt: "2024-01-01T00:00:00Z",
     }));
 
-    let saveThreadCallCount = 0;
+    let createThreadCallCount = 0;
     let savedArc: Thread | null = null;
 
     const threadDb = {
       ...makeThreadDbMock(),
-      saveThread: vi.fn().mockImplementation((arc: Thread) => {
-        saveThreadCallCount++;
+      createThread: vi.fn().mockImplementation((arc: Thread) => {
+        createThreadCallCount++;
         savedArc = arc;
         return Promise.resolve(ok(undefined));
       }),
@@ -202,7 +202,7 @@ describe("Single saveThread call with complete mutations", () => {
 
     await processor.processInbound(makeMessage("test-ses-id", recipientEmail), 1);
 
-    expect(saveThreadCallCount).toBe(1);
+    expect(createThreadCallCount).toBe(1);
     expect(savedArc).not.toBeNull();
 
     const arc = savedArc!;
@@ -213,7 +213,7 @@ describe("Single saveThread call with complete mutations", () => {
     }
 
     if (testCase.hasRetention) {
-      // ttl is derived inside saveThread from retentionDuration — the domain object carries the
+      // ttl is derived at the write boundary from retentionDuration — the domain object carries the
       // duration, not the epoch ttl.
       expect(arc.retentionDuration).toBeDefined();
     }

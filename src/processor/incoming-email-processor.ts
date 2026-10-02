@@ -6,7 +6,7 @@ import type { Logger } from "../logger.js";
 import type { Result } from "neverthrow";
 import type { IForwardingService } from "../forwarding/forwarding-service.js";
 import { ok, err, dbError, processorError, noAccountError, notFoundError } from "../errors.js";
-import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, NoAccountError, AuthressServiceError } from "../errors.js";
+import type { DbError, InvalidResponseError, NotFoundError, ProcessorError, NoAccountError, AuthressServiceError, ThreadIdCollisionError } from "../errors.js";
 import type { AccessService } from "../api/accountsApi.js";
 import type { EmailServiceError } from "../email/email-service.js";
 import type { ProviderSendError } from "../external-exchanges/provider-adapter.js";
@@ -1031,7 +1031,7 @@ export class IncomingEmailProcessor {
     return ok(undefined);
   }
 
-  async processInbound(msg: InboundSignalMessage, receiveCount: number, opts?: ProcessInboundOptions): Promise<Result<void, DbError | InvalidResponseError | NoAccountError>> {
+  async processInbound(msg: InboundSignalMessage, receiveCount: number, opts?: ProcessInboundOptions): Promise<Result<void, DbError | InvalidResponseError | NoAccountError | ThreadIdCollisionError>> {
     try {
       return await this._processInboundUnsafe(msg, receiveCount, opts);
     } catch (e) {
@@ -1040,7 +1040,7 @@ export class IncomingEmailProcessor {
     }
   }
 
-  private async _processInboundUnsafe(msg: InboundSignalMessage, receiveCount: number, opts?: ProcessInboundOptions): Promise<Result<void, DbError | InvalidResponseError | NoAccountError>> {
+  private async _processInboundUnsafe(msg: InboundSignalMessage, receiveCount: number, opts?: ProcessInboundOptions): Promise<Result<void, DbError | InvalidResponseError | NoAccountError | ThreadIdCollisionError>> {
     const { s3Key, idempotencyKey, timestamp, destination } = msg;
     const recipientAddress = destination[0] ?? "";
 
@@ -1478,6 +1478,12 @@ export class IncomingEmailProcessor {
 
     const isMatchedThread = matchedThread !== null;
 
+    // The inbound signal's id is resolved before the thread shell so a brand-new thread can derive
+    // its id from it (see deriveThreadIdFromSignalId) — making thread creation idempotent across
+    // reprocess retries. On reprocess forceSignalId carries the original id; otherwise mint one now
+    // and reuse it for buildSignal below so the thread id and signal id stay in lockstep.
+    const inboundSignalId = opts?.forceSignalId ?? generateId("sgn-");
+
     // 7. Build thread shell (lastSignalAt applied after rules — archive outcome suppresses it on existing threads)
     let thread: Thread;
     if (matchedThread) {
@@ -1497,6 +1503,7 @@ export class IncomingEmailProcessor {
     } else {
       thread = buildActiveThread({
         accountId,
+        signalId: inboundSignalId,
         workflow: classificationOutput.workflow,
         summary: classificationOutput.summary,
         lastSignalAt: timestamp,
@@ -1572,7 +1579,7 @@ export class IncomingEmailProcessor {
       now,
       retentionDuration: effectiveRetentionForTtl,
       ...(gsi3pk !== undefined ? { gsi3pk } : {}),
-      ...(opts?.forceSignalId !== undefined ? { forceSignalId: opts.forceSignalId } : {}),
+      forceSignalId: inboundSignalId,
     }, this.logger);
 
     // 10. Evaluate all rules (system rules seeded at low position numbers, user rules at higher positions)
@@ -1773,7 +1780,7 @@ export class IncomingEmailProcessor {
       if (updateResult.isErr()) return err(updateResult.error);
     } else {
       if (outcome.archive) thread.status = "archived";
-      const saveThreadResult = await this.threadDb.saveThread(thread);
+      const saveThreadResult = await this.threadDb.createThread(thread);
       if (saveThreadResult.isErr()) return err(saveThreadResult.error);
       this.logger.info("New thread created.", { code: "processor.thread_created", threadId: thread.id, accountId, signalId: signal.id, compositeMailMessageId: msg.compositeMailMessageId, ...(groupingKey ? { groupingKey } : {}) });
     }
@@ -2124,7 +2131,7 @@ export class IncomingEmailProcessor {
   // Reprocess — thin wrapper that calls processMessage with force flags
   // ---------------------------------------------------------------------------
 
-  async reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; skipAllMatchedRuleStatusActions?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>> {
+  async reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; skipAllMatchedRuleStatusActions?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError | ThreadIdCollisionError>> {
     const existingResult = await this.threadDb.getSignalByMessageId(accountId, signalLookupId);
     if (existingResult.isErr()) return err(processorError(existingResult.error));
     const existing = existingResult.value;
@@ -2189,6 +2196,10 @@ export class IncomingEmailProcessor {
       // Best-effort recency repair even on failure — a previous 504 may have saved the thread
       // with updated lastSignalAt while the signal save never completed.
       if (sourceThreadId != null) await this.repairThreadRecency(accountId, sourceThreadId);
+      // A thread-id collision is a distinct, caller-actionable outcome (409), not a generic
+      // processor fault — pass it through un-wrapped so the API can branch on its kind, mirroring
+      // how no_account_for_recipient is special-cased at the handler boundary.
+      if (result.error.kind === "thread_id_collision") return err(result.error);
       return err(processorError(result.error));
     }
 

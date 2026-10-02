@@ -328,8 +328,8 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     const result = await processor.processInbound(makeMessage("msg-no-match"), 1);
     expect(result.isOk()).toBe(true);
 
-    // New arc was saved (saveThread called)
-    expect((threadDb as unknown as { saveThread: ReturnType<typeof vi.fn> }).saveThread).toHaveBeenCalled();
+    // New arc was saved (createThread called)
+    expect((threadDb as unknown as { createThread: ReturnType<typeof vi.fn> }).createThread).toHaveBeenCalled();
 
     // No "arc_matched" info log — instead a new arc is created
     const matchLog = mockLogger.calls.find(c => c.context?.code === "processor.thread_matched");
@@ -359,7 +359,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     expect((threadDb as unknown as { getThread: ReturnType<typeof vi.fn> }).getThread).not.toHaveBeenCalled();
 
     // New arc created (no tier matched)
-    expect((threadDb as unknown as { saveThread: ReturnType<typeof vi.fn> }).saveThread).toHaveBeenCalled();
+    expect((threadDb as unknown as { createThread: ReturnType<typeof vi.fn> }).createThread).toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
@@ -386,7 +386,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
     expect(warnLogs).toHaveLength(1);
 
     // Fell through → new arc created (no other tiers matched)
-    expect((threadDb as unknown as { saveThread: ReturnType<typeof vi.fn> }).saveThread).toHaveBeenCalled();
+    expect((threadDb as unknown as { createThread: ReturnType<typeof vi.fn> }).createThread).toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------

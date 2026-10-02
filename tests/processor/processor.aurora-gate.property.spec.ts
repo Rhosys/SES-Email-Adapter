@@ -178,8 +178,8 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
         callOrder.push("saveSignal");
         return Promise.resolve(ok(undefined));
       }),
-      saveThread: vi.fn().mockImplementation(() => {
-        callOrder.push("saveThread");
+      createThread: vi.fn().mockImplementation(() => {
+        callOrder.push("createThread");
         return Promise.resolve(ok(undefined));
       }),
     } as unknown as ThreadDatabase;
@@ -221,15 +221,15 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
 
     await processor.processInbound(makeMessage(messageId), 1);
 
-    const saveThreadIdx = callOrder.indexOf("saveThread");
+    const createThreadIdx = callOrder.indexOf("createThread");
     const saveSignalIdx = callOrder.indexOf("saveSignal");
 
-    expect(saveThreadIdx).toBeGreaterThanOrEqual(0);
+    expect(createThreadIdx).toBeGreaterThanOrEqual(0);
     expect(saveSignalIdx).toBeGreaterThanOrEqual(0);
-    expect(saveThreadIdx).toBeLessThan(saveSignalIdx);
+    expect(createThreadIdx).toBeLessThan(saveSignalIdx);
   });
 
-  it.each(ORDER_CASES)("when saveThread fails, saveSignal is never called and the record is a batchItemFailure ($label)", async ({ vectorA, vectorB, messageId }) => {
+  it.each(ORDER_CASES)("when createThread fails, saveSignal is never called and the record is a batchItemFailure ($label)", async ({ vectorA, vectorB, messageId }) => {
     let saveSignalCalled = false;
 
     const threadDb = {
@@ -238,7 +238,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
         saveSignalCalled = true;
         return Promise.resolve(ok(undefined));
       }),
-      saveThread: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("DDB write failed"))))),
+      createThread: vi.fn().mockReturnValue(Promise.resolve(err(dbError(new Error("DDB write failed"))))),
     } as unknown as ThreadDatabase;
     const accountDb = makeAccountDbMock(TEST_ACCOUNT_ID);
     applyCtx(accountDb, DEFAULT_CTX);

@@ -291,8 +291,8 @@ describe("IncomingEmailProcessor", () => {
     it("creates a new Arc when threadMatcher returns null", async () => {
       await processor.processInbound(makeMessage(), 1);
 
-      expect(threadDb.saveThread).toHaveBeenCalledOnce();
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      expect(threadDb.createThread).toHaveBeenCalledOnce();
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       expect(arc.id).toBeTruthy();
       expect(arc.status).toBe("active");
       expect(arc.accountId).toBe(TEST_ACCOUNT_ID);
@@ -301,7 +301,7 @@ describe("IncomingEmailProcessor", () => {
     it("links Signal to the newly created Arc", async () => {
       await processor.processInbound(makeMessage(), 1);
 
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.threadId).toBe(arc.id);
     });
@@ -337,7 +337,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       expect(arc.workflow).toBe("payments");
       expect(arc.summary).toBe("Receipt from Stripe for $99.");
       expect(arc.labels).toContain("billing");
@@ -413,7 +413,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       expect(arc.labels).toContain("billing");
     });
 
@@ -433,7 +433,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       expect(arc.status).toBe("archived");
     });
 
@@ -453,7 +453,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       expect(arc.status).toBe("active");
     });
 
@@ -802,7 +802,7 @@ describe("IncomingEmailProcessor", () => {
       await processor.processInbound(makeMessage(), 1);
 
       expect(threadDb.saveSignal).toHaveBeenCalledOnce();
-      expect(threadDb.saveThread).not.toHaveBeenCalled();
+      expect(threadDb.createThread).not.toHaveBeenCalled();
       // The address is real, so its alias must exist even though the signal is quarantined; but no
       // sender disposition is recorded (the sender is unknown/pending until the user acts).
       expect(accountDb.ensureAlias).toHaveBeenCalledWith("acct-001", "user@example.com", "quarantine_visible", null);
@@ -831,7 +831,7 @@ describe("IncomingEmailProcessor", () => {
       await processor.processInbound(makeMessage(), 1);
 
       expect(threadDb.saveSignal).toHaveBeenCalledOnce();
-      expect(threadDb.saveThread).toHaveBeenCalledOnce();
+      expect(threadDb.createThread).toHaveBeenCalledOnce();
       expect(accountDb.saveAlias).not.toHaveBeenCalled(); // no auto-approve needed
     });
 
@@ -841,7 +841,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      expect(threadDb.saveThread).not.toHaveBeenCalled();
+      expect(threadDb.createThread).not.toHaveBeenCalled();
       expect(threadDb.saveSignal).toHaveBeenCalledOnce();
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("quarantine_visible");
@@ -913,7 +913,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      expect(threadDb.saveThread).toHaveBeenCalledOnce();
+      expect(threadDb.createThread).toHaveBeenCalledOnce();
       expect(accountDb.saveSender).toHaveBeenCalledWith(TEST_ACCOUNT_ID, expect.any(String), "example.com", "allow");
     });
 
@@ -942,7 +942,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      expect(threadDb.saveThread).not.toHaveBeenCalled();
+      expect(threadDb.createThread).not.toHaveBeenCalled();
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       // aliasConfig is null → uses defaultUnknownSenderPolicy directly → system:sender:untrusted → quarantine_visible
       expect(saved.status).toBe("quarantine_visible");
@@ -1012,7 +1012,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       expect(arc.groupingKey).toBe("user@example.com:auth:example.com");
     });
 
@@ -1218,7 +1218,7 @@ describe("IncomingEmailProcessor", () => {
       };
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(full));
       await processor.processInbound(makeMessage({ messageId: randomUUID() }), 1);
-      return vi.mocked(threadDb.saveThread).mock.calls.at(-1)![0] as Thread;
+      return vi.mocked(threadDb.createThread).mock.calls.at(-1)![0] as Thread;
     }
 
     it("SR-07: conversation + requiresReply + urgent sentiment → high urgency", async () => {
@@ -1312,7 +1312,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      expect(threadDb.saveThread).toHaveBeenCalledOnce();
+      expect(threadDb.createThread).toHaveBeenCalledOnce();
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("active");
       expect((saved.data as InboundEmailSignalData).workflow).toBe("onboarding");
@@ -1328,7 +1328,7 @@ describe("IncomingEmailProcessor", () => {
       const proc = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...SHARED_NEW_DEPS, threadDb, accountDb, processingDb, contentSanitizer, emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, classifier, embeddingGenerator, auroraWriter, threadMatcher, ruleEvaluator, notifier, logger: mockLogger, forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarder: new CalendarForwarder({ emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })) } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() }) });
       await proc.processInbound(makeMessage(), 1);
 
-      expect(threadDb.saveThread).not.toHaveBeenCalled();
+      expect(threadDb.createThread).not.toHaveBeenCalled();
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("block_hidden");
     });
@@ -1343,7 +1343,7 @@ describe("IncomingEmailProcessor", () => {
       const proc = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never, ...SHARED_NEW_DEPS, threadDb, accountDb, processingDb, contentSanitizer, emailContentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, contentStore: { createReadUrl: vi.fn().mockResolvedValue("https://presigned-get"), getContent: vi.fn().mockResolvedValue(new Uint8Array()), saveRawEmail: vi.fn().mockResolvedValue(undefined), createContentUploadTicket: vi.fn().mockResolvedValue({ url: "https://presigned-post", fields: {} }), saveIcsContentAsCalendar: vi.fn().mockResolvedValue(undefined), getRawEmailUrl: vi.fn().mockResolvedValue("https://presigned-get") } as never, classifier, embeddingGenerator, auroraWriter, threadMatcher, ruleEvaluator, notifier, logger: mockLogger, forwardingService: { forward: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))), sendVerification: vi.fn().mockResolvedValue(ok(undefined)) }, retentionService: { applyPlanRetention: vi.fn().mockResolvedValue({ s3Key: "retained/test.eml" }) }, replySender: { sendReply: vi.fn().mockResolvedValue(ok({ messageId: "reply-msg-id" })) }, sqsDispatcher: { sendMessage: vi.fn().mockReturnValue(Promise.resolve(ok(undefined))) }, draftSendDispatcher: { dispatch: () => Promise.resolve(ok(undefined)) } as never, calendarForwarder: new CalendarForwarder({ emailService: { send: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })), sendRaw: vi.fn().mockResolvedValue(ok({ messageId: "ses-cal-001" })) } as unknown as EmailService, serviceDomain: "platform.email.rhosys.cloud", hmac: makeHmacGeneratorFake() }) });
       await proc.processInbound(makeMessage(), 1);
 
-      expect(threadDb.saveThread).not.toHaveBeenCalled();
+      expect(threadDb.createThread).not.toHaveBeenCalled();
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       // Plain `quarantine` action → quarantine_visible (shown in review queue)
       expect(saved.status).toBe("quarantine_visible");
@@ -1546,7 +1546,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      expect(threadDb.saveThread).not.toHaveBeenCalled();
+      expect(threadDb.createThread).not.toHaveBeenCalled();
       const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.status).toBe("block_hidden");
       expect((signal.data as InboundEmailSignalData).workflow).toBe("notice");
@@ -1573,7 +1573,7 @@ describe("IncomingEmailProcessor", () => {
 
       const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.status).toBe("block_hidden"); // SR-04 sets status → fallback skipped (hasStatusOutcome = true)
-      expect(threadDb.saveThread).not.toHaveBeenCalled();
+      expect(threadDb.createThread).not.toHaveBeenCalled();
     });
   });
 
@@ -1676,7 +1676,7 @@ describe("IncomingEmailProcessor", () => {
 
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("block_reject");
-      expect(threadDb.saveThread).not.toHaveBeenCalled();
+      expect(threadDb.createThread).not.toHaveBeenCalled();
     });
 
     it("blocks email and saves signal with block_reject status when DMARC fails", async () => {
@@ -1684,7 +1684,7 @@ describe("IncomingEmailProcessor", () => {
 
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(saved.status).toBe("block_reject");
-      expect(threadDb.saveThread).not.toHaveBeenCalled();
+      expect(threadDb.createThread).not.toHaveBeenCalled();
     });
   });
 
@@ -1882,7 +1882,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       expect(arc.workflow).toBe("content");
     });
 
@@ -1904,7 +1904,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       expect(arc.labels).toContain("archived-auto");
       expect(arc.status).toBe("archived");
     });
@@ -1943,7 +1943,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       expect(arc.workflow).toBe("content");
     });
 
@@ -1978,7 +1978,7 @@ describe("IncomingEmailProcessor", () => {
       const saved = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect((saved.data as InboundEmailSignalData).workflow).toBe("notification");
       // Thread also gets last-wins
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       expect(arc.workflow).toBe("notification");
     });
   });
@@ -2001,7 +2001,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       expect(arc.labels).toContain("original:john@gmail.com");
     });
 
@@ -2022,7 +2022,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       expect(arc.labels).toContain("original:alice@example.com");
     });
 
@@ -2043,7 +2043,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       expect(arc.labels).toContain("original:bob@example.com");
     });
 
@@ -2067,7 +2067,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       expect(arc.labels).toContain("original:primary@gmail.com");
       expect(arc.labels).not.toContain("original:secondary@gmail.com");
     });
@@ -2089,7 +2089,7 @@ describe("IncomingEmailProcessor", () => {
 
       await processor.processInbound(makeMessage(), 1);
 
-      const arc = vi.mocked(threadDb.saveThread).mock.calls[0]![0] as Thread;
+      const arc = vi.mocked(threadDb.createThread).mock.calls[0]![0] as Thread;
       expect(arc.labels.some((l) => l.startsWith("original:"))).toBe(false);
     });
   });

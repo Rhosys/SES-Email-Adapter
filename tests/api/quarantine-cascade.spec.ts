@@ -442,7 +442,7 @@ describe("Quarantine response — handler + real processor", () => {
       vi.mocked(threadDb.saveSignal).mockImplementation((sg: Signal) => { store.set(sg.signalLookupId, sg); return Promise.resolve(ok(undefined)); });
       vi.mocked(threadDb.getSignalByMessageId).mockImplementation((_a, lookupId) => Promise.resolve(ok(store.get(lookupId) ?? null)));
       vi.mocked(threadDb.listPreThreadSignals).mockImplementation(() => Promise.resolve(ok({ items: [...store.values()].filter(sg => !sg.threadId && isQuarantine(sg)) })));
-      vi.mocked(threadDb.saveThread).mockImplementation((t: Thread) => { threads.set(t.id, t); return Promise.resolve(ok(undefined)); });
+      vi.mocked(threadDb.createThread).mockImplementation((t: Thread) => { threads.set(t.id, t); return Promise.resolve(ok(undefined)); });
       vi.mocked(threadDb.getThread).mockImplementation((_a, id) => Promise.resolve(ok(threads.get(id) ?? null)));
       // Sender records persist across the handler's write and each replay's read, as in DynamoDB.
       const senders = new Map<string, "allow" | "block_hidden" | "block_reject" | "report_violation">();

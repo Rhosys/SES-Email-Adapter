@@ -232,6 +232,6 @@ describe("Blocked/quarantined signals never trigger saveArc", () => {
 
     await processor.processInbound(makeMessage("msg-blocked-test"), 1);
 
-    expect(threadDb.saveThread).not.toHaveBeenCalled();
+    expect(threadDb.createThread).not.toHaveBeenCalled();
   });
 });

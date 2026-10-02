@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generateId, validateId } from "./id.js";
+import { deriveThreadIdFromSignalId, generateId, validateId } from "./id.js";
 
 describe("validateId", () => {
   describe("roundtrip: generateId → validateId", () => {
@@ -73,5 +73,29 @@ describe("validateId", () => {
     it("rejects an ID that does not start with the expected prefix", () => {
       expect(validateId("noprefixhere", "thr-")).toBe(false);
     });
+  });
+});
+
+describe("deriveThreadIdFromSignalId", () => {
+  it("produces a valid thr- id", () => {
+    const signalId = generateId("sgn-");
+    expect(validateId(deriveThreadIdFromSignalId(signalId), "thr-")).toBe(true);
+  });
+
+  it("is deterministic — same signal id always yields the same thread id", () => {
+    const signalId = generateId("sgn-");
+    expect(deriveThreadIdFromSignalId(signalId)).toBe(deriveThreadIdFromSignalId(signalId));
+  });
+
+  it("shares the encoded body with the originating signal id", () => {
+    const signalId = generateId("sgn-");
+    const threadId = deriveThreadIdFromSignalId(signalId);
+    expect(threadId.slice("thr-".length)).toBe(signalId.slice("sgn-".length));
+  });
+
+  it("distinct signal ids yield distinct thread ids", () => {
+    const first = deriveThreadIdFromSignalId(generateId("sgn-"));
+    const second = deriveThreadIdFromSignalId(generateId("sgn-"));
+    expect(first).not.toBe(second);
   });
 });

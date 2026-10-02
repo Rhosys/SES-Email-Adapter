@@ -232,7 +232,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
     // existing arc fixture predates retention tracking (no retentionDuration of its own).
     const denormalized = { sender: { address: "sender@example.com", name: "Sender" }, recipientAddress: "user@example.com", subject: "Test email", retentionDuration: "P3M" };
     expect(fields).toEqual(denormalized);
-    expect(threadDb.saveThread).not.toHaveBeenCalled();
+    expect(threadDb.createThread).not.toHaveBeenCalled();
   });
 
   it("existing arc with a stale retention → updateArc refreshes to the most recently resolved retention", async () => {
@@ -322,7 +322,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
 
     await processor.processInbound(makeMessage(), 1);
 
-    expect(threadDb.saveThread).toHaveBeenCalledOnce();
+    expect(threadDb.createThread).toHaveBeenCalledOnce();
     expect(threadDb.updateThread).not.toHaveBeenCalled();
   });
 
@@ -353,7 +353,7 @@ describe("Processor delta computation — updateArc vs saveArc", () => {
   });
 
   it("matched thread — TTL is NOT refreshed on subsequent signals (product: expiry = createdAt + retention)", async () => {
-    // Product expectation: thread TTL is computed once at write time (saveThread, from createdAt +
+    // Product expectation: thread TTL is computed once at the write boundary (from createdAt +
     // retention) and pinned. ttl is DB-internal and not on the domain type; subsequent signals
     // update retentionDuration (metadata) but the updateThread delta must never carry a ttl.
     const existing = makeThread({

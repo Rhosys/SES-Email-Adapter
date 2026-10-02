@@ -11,14 +11,14 @@ import type { Pagination } from "../types/index.js";
 import type { ThreadDatabase } from "../database/thread-database.js";
 import type { AccountDatabase } from "../database/account-database.js";
 import type { Logger } from "../logger.js";
-import type { NotFoundError, ProcessorError } from "../errors.js";
+import type { NotFoundError, ProcessorError, ThreadIdCollisionError } from "../errors.js";
 import { QuarantineResponse } from "./requests.js";
 import { ListSignalsResponse } from "./schemas.js";
 import type * as Api from "./schemas.js";
 import type { AppEnv, RouteHelpers } from "./route-helpers.js";
 
 export interface SignalReprocessor {
-  reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; skipAllMatchedRuleStatusActions?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError>>;
+  reprocessSignal(accountId: string, signalLookupId: string, opts?: { skipNotify?: boolean; skipAllMatchedRuleStatusActions?: boolean }): Promise<Result<Signal, ProcessorError | NotFoundError | ThreadIdCollisionError>>;
 }
 
 function page<K extends string, T>(key: K, items: T[], nextCursor?: string): Record<K, T[]> & { pagination: Pagination } {
@@ -248,6 +248,7 @@ export class SignalsApi {
       //    a threaded, embedded active signal, so the threadId check below is a true invariant, not a symptom.
       //    skipNotify: the user is live in-app and does not want a notification for their own action.
       const primaryResult = await signalReprocessor.reprocessSignal(accountId, signal.signalLookupId, { skipNotify: true, skipAllMatchedRuleStatusActions: true });
+      if (primaryResult.isErr() && primaryResult.error.kind === "thread_id_collision") { logger.error("Thread-id collision while activating quarantined signal.", { code: "api.quarantine_response.thread_id_collision", accountId, signalId, error: primaryResult.error }); return err(c, 409, "The thread for this signal conflicts with an existing conversation", "THREAD_ID_COLLISION"); }
       if (primaryResult.isErr()) { logger.error("Failed to reprocess primary signal on quarantine approval.", { code: "api.quarantine_response.reprocess_primary_failed", accountId, signalId, error: primaryResult.error }); return err(c, 500, "Internal Server Error"); }
       const activatedSignal = primaryResult.value;
       if (!activatedSignal.threadId) { logger.error(`Primary reprocess of signal ${signalId} was forced active but assigned no threadId, so the quarantine-approval response has no thread to return.`, { code: "api.quarantine_response.reprocess_no_thread", accountId, signalId, signal: activatedSignal }); return err(c, 500, "Internal Server Error"); }

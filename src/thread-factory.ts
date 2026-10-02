@@ -11,12 +11,13 @@
 // ---------------------------------------------------------------------------
 
 import { DateTime } from "luxon";
-import { generateId } from "./utils/id.js";
+import { deriveThreadIdFromSignalId } from "./utils/id.js";
 import type { RetentionDuration } from "./retention.js";
 import type { Thread, Workflow } from "./types/index.js";
 
 export interface BuildActiveThreadParams {
   accountId: string;
+  signalId: string;
   workflow: Workflow;
   summary: string;
   lastSignalAt: string;
@@ -31,7 +32,7 @@ export function buildActiveThread(params: BuildActiveThreadParams): Thread {
   const now = DateTime.utc().toISO()!;
 
   return {
-    id: generateId("thr-"),
+    id: deriveThreadIdFromSignalId(params.signalId),
     accountId: params.accountId,
     workflow: params.workflow,
     labels: [],
