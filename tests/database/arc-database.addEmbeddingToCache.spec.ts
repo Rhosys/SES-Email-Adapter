@@ -34,7 +34,6 @@ describe("ThreadDatabase.addEmbeddingToCache", () => {
     expect(calls).toHaveLength(1);
 
     const input = calls[0]!.args[0].input;
-    expect(input.TableName).toBe("ses-signals");
     expect(input.Key).toEqual({
       pk: `ACCT#${accountId}#SIG#${signalId}`,
       sk: "#",

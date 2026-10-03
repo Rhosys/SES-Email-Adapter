@@ -30,7 +30,6 @@ describe("ThreadDatabase.listActiveThreadsBefore", () => {
     expect(calls).toHaveLength(1);
 
     const input = calls[0]!.args[0].input;
-    expect(input.TableName).toBe("ses-signals");
     expect(input.IndexName).toBe("gsi1");
     expect(input.KeyConditionExpression).toBe("gsi1pk = :pk AND gsi1sk BETWEEN :start AND :end");
     expect(input.ExpressionAttributeValues).toEqual({

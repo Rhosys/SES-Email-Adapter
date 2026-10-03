@@ -5,6 +5,7 @@ import { AccountDatabase } from "../../src/database/account-database.js";
 import { ThreadDatabase } from "../../src/database/thread-database.js";
 import { ProcessingDatabase } from "../../src/database/processing-database.js";
 import { AuditDatabase } from "../../src/database/audit-database.js";
+import { ACCOUNTS_TABLE } from "../../src/database/shared.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
@@ -153,7 +154,7 @@ describe("AccountDatabase", () => {
       // 30 senders chunked at 25 per BatchWriteItem call -> 2 parallel batches
       const batchCalls = ddbMock.commandCalls(BatchWriteCommand);
       expect(batchCalls).toHaveLength(2);
-      const batchSizes = batchCalls.map((c) => c.args[0]!.input.RequestItems!["ses-accounts"]!.length).sort((a, b) => a - b);
+      const batchSizes = batchCalls.map((c) => c.args[0]!.input.RequestItems![ACCOUNTS_TABLE]!.length).sort((a, b) => a - b);
       expect(batchSizes).toEqual([5, 25]);
     });
 
@@ -167,7 +168,7 @@ describe("AccountDatabase", () => {
         DeleteRequest: { Key: { pk: "ACCT#acct-1", sk: "DOMAIN#example.com#ALIAS#me#SENDER#sender1.com" } },
       };
       ddbMock.on(BatchWriteCommand)
-        .resolvesOnce({ UnprocessedItems: { "ses-accounts": [unprocessedRequest] } })
+        .resolvesOnce({ UnprocessedItems: { [ACCOUNTS_TABLE]: [unprocessedRequest] } })
         .resolvesOnce({});
       ddbMock.on(DeleteCommand).resolves({});
 

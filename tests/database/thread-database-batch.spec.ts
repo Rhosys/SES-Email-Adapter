@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mockClient } from "aws-sdk-client-mock";
 import { DynamoDBDocumentClient, BatchGetCommand } from "@aws-sdk/lib-dynamodb";
 import { ThreadDatabase } from "../../src/database/thread-database.js";
+import { SIGNALS_TABLE } from "../../src/database/shared.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 
 const ddbMock = mockClient(DynamoDBDocumentClient);
@@ -27,7 +28,7 @@ describe("ThreadDatabase.batchGetThreads", () => {
   });
 
   it("builds keys from threadPk(accountId, id) + ITEM_SK", async () => {
-    ddbMock.on(BatchGetCommand).resolves({ Responses: { "ses-signals": [] } });
+    ddbMock.on(BatchGetCommand).resolves({ Responses: { [SIGNALS_TABLE]: [] } });
 
     await db.batchGetThreads("acct-42", ["thr-aaa", "thr-bbb"]);
 
@@ -35,7 +36,7 @@ describe("ThreadDatabase.batchGetThreads", () => {
     expect(calls).toHaveLength(1);
 
     const input = calls[0]!.args[0].input;
-    expect(input.RequestItems!["ses-signals"]!.Keys).toEqual([
+    expect(input.RequestItems![SIGNALS_TABLE]!.Keys).toEqual([
       { pk: "ACCT#acct-42#ARC#thr-aaa", sk: "#" },
       { pk: "ACCT#acct-42#ARC#thr-bbb", sk: "#" },
     ]);
@@ -44,7 +45,7 @@ describe("ThreadDatabase.batchGetThreads", () => {
   it("applies hydrateThreadObject to each returned item", async () => {
     ddbMock.on(BatchGetCommand).resolves({
       Responses: {
-        "ses-signals": [
+        [SIGNALS_TABLE]: [
           { threadId: "thr-001", accountId: "acct-1", subject: "Hello", lastSignalAt: "2024-01-01T00:00:00.000Z" },
           { threadId: "thr-002", accountId: "acct-1", subject: "World", lastSignalAt: "2024-01-01T00:00:00.000Z" },
         ],
@@ -63,7 +64,7 @@ describe("ThreadDatabase.batchGetThreads", () => {
     // Request 3 threads but DynamoDB only returns 2 (one is missing/orphaned)
     ddbMock.on(BatchGetCommand).resolves({
       Responses: {
-        "ses-signals": [
+        [SIGNALS_TABLE]: [
           { threadId: "thr-aaa", accountId: "acct-1", subject: "First", lastSignalAt: "2024-01-01T00:00:00.000Z" },
           { threadId: "thr-ccc", accountId: "acct-1", subject: "Third", lastSignalAt: "2024-01-01T00:00:00.000Z" },
         ],
@@ -81,7 +82,7 @@ describe("ThreadDatabase.batchGetThreads", () => {
   it("excludes threads whose last signal predates the Jan 1 2000 cutoff", async () => {
     ddbMock.on(BatchGetCommand).resolves({
       Responses: {
-        "ses-signals": [
+        [SIGNALS_TABLE]: [
           { threadId: "thr-stale", accountId: "acct-1", subject: "Stale", lastSignalAt: "1999-12-31T23:59:59.000Z" },
           { threadId: "thr-fresh", accountId: "acct-1", subject: "Fresh", lastSignalAt: "2024-01-01T00:00:00.000Z" },
         ],
