@@ -5,7 +5,7 @@ import type { ProviderAdapter } from "../../src/external-exchanges/provider-adap
 import { EMX_PLATFORMS, type EmxPlatform } from "../../src/types/index.js";
 
 // Vitest-free default adapters. `app-deps.ts` is imported by the tsx-executed integration
-// harness (tests/integration/harness.ts), which runs outside the vitest runner — so this file
+// harness (tests-integration/harness.ts), which runs outside the vitest runner — so this file
 // must never pull in `vitest`. Tests that assert on adapter calls pass their own spy-backed
 // adapters via `makeMockAdapters` (see provider-adapters.ts); these no-op stubs only fill the
 // slots those tests don't exercise.

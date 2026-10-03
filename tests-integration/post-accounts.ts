@@ -6,7 +6,7 @@
 //   AUDIT_TABLE=ses-email-adapter-audit \
 //   AWS_ENDPOINT_URL=http://localhost:4566 \
 //   AUTHRESS_API_URL=http://localhost:4500 \
-//   npx tsx tests/integration/post-accounts.ts
+//   npx tsx tests-integration/post-accounts.ts
 //
 // CI sets all env vars automatically; see .github/workflows/build.yml.
 
