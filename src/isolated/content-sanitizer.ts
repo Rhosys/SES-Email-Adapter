@@ -351,9 +351,11 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   try {
     const response = await fetch(event.presignedGetUrl);
     if (!response.ok) {
+      let body = "";
+      try { body = (await response.text()).slice(0, 500); } catch { /* body is best-effort diagnostic */ }
       return {
         success: false,
-        error: { message: `Failed to fetch MIME: HTTP ${response.status}`, type: "fetch_failed" },
+        error: { message: `Failed to fetch MIME: HTTP ${response.status} ${body}`.trim(), type: "fetch_failed" },
       };
     }
     rawMime = Buffer.from(await response.arrayBuffer());
