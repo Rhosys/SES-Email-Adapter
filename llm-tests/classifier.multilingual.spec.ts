@@ -4,15 +4,15 @@
  * These tests invoke the REAL Bedrock model (qwen3-32b) and assert correct
  * workflow/workflowData extraction across multiple languages.
  *
- * Run: npm run test:integration
+ * Run: npm run test:llm-bedrock-classifier
  *
  * Requires: AWS credentials with Bedrock InvokeModel permission in eu-central-1.
  */
 import { describe, it, expect, beforeAll } from "vitest";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
-import { SignalClassifier } from "../../src/classifier/classifier.js";
-import type { ClassificationInput } from "../../src/classifier/classifier.js";
-import { createConsoleLogger } from "../helpers/logger.js";
+import { SignalClassifier } from "../src/classifier/classifier.js";
+import type { ClassificationInput } from "../src/classifier/classifier.js";
+import { createConsoleLogger } from "./helpers/logger.js";
 
 function makeInput(overrides: Partial<ClassificationInput>): ClassificationInput {
   return {

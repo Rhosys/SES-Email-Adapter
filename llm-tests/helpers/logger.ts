@@ -1,4 +1,4 @@
-import type { Logger } from "../../src/logger.js";
+import type { Logger } from "../src/logger.js";
 
 let invocationId = "integration-test";
 
