@@ -22,8 +22,13 @@ set -euo pipefail
 TOFU_VERSION="1.12.0"
 TOFU_BIN="/usr/local/bin/tofu"
 
-export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-ministack-test}"
-export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-ministack-test}"
+# MiniStack only recognises the credential pair test/test for presigned-URL
+# (query-string SigV4) validation — any other key id returns InvalidAccessKeyId
+# on a presigned GET, even though direct SDK calls accept any key. The content
+# sanitizer fetches raw MIME via a presigned GET, so the whole integration path
+# must sign with test/test.
+export AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID:-test}"
+export AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY:-test}"
 export AWS_REGION="${AWS_REGION:-eu-central-1}"
 
 # --- Install OpenTofu if not present ---
@@ -108,8 +113,8 @@ export SIGNAL_QUEUE_URL="${SIGNAL_QUEUE_URL}"
 export CONTENT_CDN_BASE_URL="${ENDPOINT}/ses-it-content"
 export AWS_ENDPOINT_URL="${ENDPOINT}"
 export AWS_REGION="eu-central-1"
-export AWS_ACCESS_KEY_ID="ministack-test"
-export AWS_SECRET_ACCESS_KEY="ministack-test"
+export AWS_ACCESS_KEY_ID="test"
+export AWS_SECRET_ACCESS_KEY="test"
 export AUTHRESS_API_URL="http://localhost:4500"
 EOF
 

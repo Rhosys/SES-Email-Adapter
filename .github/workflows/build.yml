@@ -157,8 +157,9 @@ jobs:
         run: bash tests-integration/infrastructure/provision.sh
         env:
           AWS_ENDPOINT_URL: http://localhost:4566
-          AWS_ACCESS_KEY_ID: ministack-test
-          AWS_SECRET_ACCESS_KEY: ministack-test
+          # MiniStack validates presigned-URL creds against test/test only (see provision.sh)
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
           AWS_REGION: eu-central-1
 
       - name: Run integration tests

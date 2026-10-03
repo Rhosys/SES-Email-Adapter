@@ -307,8 +307,8 @@ function normalizeSecurityGroupRules(resourceContainer: unknown): void {
 function ministackProvider(alias: string | undefined, region: string, endpoint: string): Record<string, unknown> {
   const block: Record<string, unknown> = {
     region,
-    access_key: "ministack-test",
-    secret_key: "ministack-test",
+    access_key: "test",
+    secret_key: "test",
     s3_use_path_style: true,
     skip_credentials_validation: true,
     skip_requesting_account_id: true,

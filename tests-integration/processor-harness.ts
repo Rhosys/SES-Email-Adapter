@@ -95,8 +95,15 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
 
   // forcePathStyle is required for MiniStack/LocalStack so presigned URLs use
   // http://localhost:4566/{bucket}/... rather than http://{bucket}.localhost:4566/...
+  // Explicit test/test credentials are mandatory: a presigned URL embeds the access
+  // key id as a query param that MiniStack validates, and it only recognises test/test
+  // (any other key — including an ambient ~/.aws/SSO key — returns InvalidAccessKeyId
+  // on a presigned GET). Direct SDK calls accept any key, so only the presigned path
+  // (content sanitizer MIME fetch) exposes this.
   const isLocal = ENDPOINT.includes('localhost') || ENDPOINT.includes('127.0.0.1');
-  const s3 = new S3Client(isLocal ? { forcePathStyle: true } : {});
+  const s3 = new S3Client(isLocal
+    ? { forcePathStyle: true, credentials: { accessKeyId: 'test', secretAccessKey: 'test' } }
+    : {});
   const sqs = new SQSClient({});
 
   // Provision S3 buckets and SQS queue (idempotent — CreateBucket is a no-op if it exists)
