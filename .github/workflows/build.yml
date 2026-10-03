@@ -20,7 +20,7 @@ env:
   STATE_KEY: "${{ github.event.repository.name }}/terraform.tfstate"
   TF_VAR_aws_account_id: "${{ secrets.AWS_ACCOUNT_ID }}"
   TF_LOG: ERROR
-  MINISTACK_VERSION: "1.3.59"
+  MINISTACK_VERSION: "1.5.21"
 
 permissions:
   id-token: write
@@ -142,58 +142,21 @@ jobs:
           done
           echo "MiniStack ready."
 
-      - name: Provision Integration Test Infrastructure via Tofu
-        run: |
-          mkdir -p /tmp/itf/secrets
-          cp deploy/*.tf /tmp/itf/
-          cp deploy/integration/providers.tf /tmp/itf/providers.tf
-          echo -n "dummy" > /tmp/itf/secrets/dkim-private-key.kms
-          # Remove single-line attributes MiniStack doesn't support at the emulation layer.
-          # These are operational/replication features; they don't affect the table schema
-          # (key attributes, GSIs) that the application code depends on.
-          sed -i '/replica { region_name/d' /tmp/itf/storage.tf
-          sed -i '/point_in_time_recovery { enabled = true }/d' /tmp/itf/storage.tf
-          sed -i '/deletion_protection_enabled/d' /tmp/itf/storage.tf
-          sed -i '/stream_enabled\|stream_view_type/d' /tmp/itf/storage.tf
-          tofu -chdir=/tmp/itf init -reconfigure -input=false
-          tofu -chdir=/tmp/itf apply -auto-approve -input=false -refresh=false \
-            -target=aws_dynamodb_table.accounts \
-            -target=aws_dynamodb_table.signals \
-            -target=aws_dynamodb_table.processing \
-            -target=aws_dynamodb_table.audit
-        env:
-          AWS_ACCESS_KEY_ID: ministack-test
-          AWS_SECRET_ACCESS_KEY: ministack-test
-
-      - name: Read resource names from Tofu outputs
-        id: tofu_outputs
-        run: |
-          echo "ACCOUNTS_TABLE=$(tofu -chdir=/tmp/itf output -raw dynamodb_accounts_table)" >> $GITHUB_OUTPUT
-          echo "SIGNALS_TABLE=$(tofu -chdir=/tmp/itf output -raw dynamodb_signals_table)" >> $GITHUB_OUTPUT
-          echo "PROCESSING_TABLE=$(tofu -chdir=/tmp/itf output -raw dynamodb_processing_table)" >> $GITHUB_OUTPUT
-          echo "AUDIT_TABLE=$(tofu -chdir=/tmp/itf output -raw dynamodb_audit_table)" >> $GITHUB_OUTPUT
-        env:
-          AWS_ACCESS_KEY_ID: ministack-test
-          AWS_SECRET_ACCESS_KEY: ministack-test
-
-      - name: Run integration tests
+      - name: Provision Integration Test Infrastructure
+        # Full apply of the real deploy/*.tf against MiniStack via the transformer
+        # (tests-integration/infrastructure/). Writes /tmp/integration-env.sh.
+        run: bash tests-integration/infrastructure/provision.sh
         env:
           AWS_ENDPOINT_URL: http://localhost:4566
           AWS_ACCESS_KEY_ID: ministack-test
           AWS_SECRET_ACCESS_KEY: ministack-test
           AWS_REGION: eu-central-1
-          ACCOUNTS_TABLE: ${{ steps.tofu_outputs.outputs.ACCOUNTS_TABLE }}
-          SIGNALS_TABLE: ${{ steps.tofu_outputs.outputs.SIGNALS_TABLE }}
-          PROCESSING_TABLE: ${{ steps.tofu_outputs.outputs.PROCESSING_TABLE }}
-          AUDIT_TABLE: ${{ steps.tofu_outputs.outputs.AUDIT_TABLE }}
-          AUTHRESS_API_URL: http://localhost:4500
-          EMAIL_BUCKET: ses-it-email
-          CONTENT_BUCKET: ses-it-content
-          SIGNAL_QUEUE_URL: http://localhost:4566/000000000000/ses-it-signals
-          CONTENT_CDN_BASE_URL: http://localhost:4566/ses-it-content
+
+      - name: Run integration tests
         run: |
-          npx tsx tests/integration/post-accounts.ts
-          npx tsx tests/integration/email-roundtrip.ts
+          source /tmp/integration-env.sh
+          npx tsx tests-integration/post-accounts.ts
+          npx tsx tests-integration/email-roundtrip.ts
 
   # ==========================================
   # PATH B: PRODUCTION BUILD & PLAN

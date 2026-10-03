@@ -11,8 +11,8 @@
 // CI sets all env vars automatically; see .github/workflows/build.yml.
 
 import { createHarness } from './harness.js';
-import { ok } from '../../src/errors.js';
-import type { Account } from '../../src/api/schemas.js';
+import { ok } from '../src/errors.js';
+import type { Account } from '../src/api/schemas.js';
 
 const h = await createHarness();
 

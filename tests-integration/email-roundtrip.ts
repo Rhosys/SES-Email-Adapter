@@ -19,7 +19,7 @@ import {
   buildCalendarEmail,
   MINIMAL_ICS,
 } from './mime-builders.js';
-import type { Thread, Signal } from '../../src/api/schemas.js';
+import type { Thread, Signal } from '../src/api/schemas.js';
 
 // ---------------------------------------------------------------------------
 // Assertion helpers (same pattern as post-accounts.ts)

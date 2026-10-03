@@ -1,4 +1,4 @@
-import type { IForwardingService } from "../../src/forwarding/forwarding-service.js";
+import type { IForwardingService } from "../src/forwarding/forwarding-service.js";
 // Processor integration harness.
 //
 // Extends the base harness with real S3, SQS, and IncomingEmailProcessor wired to
@@ -13,35 +13,35 @@ import type { IForwardingService } from "../../src/forwarding/forwarding-service
 //   CONTENT_CDN_BASE_URL  — CDN base for attachment URLs
 
 import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
-import { EmailContentStore, ContentStore } from "../../src/content-store.js";
+import { EmailContentStore, ContentStore } from "../src/content-store.js";
 import { SQSClient, CreateQueueCommand, SendMessageCommand, ReceiveMessageCommand, DeleteMessageCommand } from '@aws-sdk/client-sqs';
-import { AccountDatabase } from '../../src/database/account-database.js';
-import { ThreadDatabase } from '../../src/database/thread-database.js';
-import { AuditDatabase } from '../../src/database/audit-database.js';
-import { ProcessingDatabase } from '../../src/database/processing-database.js';
-import { IncomingEmailProcessor } from '../../src/processor/incoming-email-processor.js';
-import type { InboundSignalMessage, SideEffectPayload, SesVerdictStatus } from '../../src/processor/incoming-email-processor.js';
-import { JsonLogicRuleEvaluator } from '../../src/processor/rule-evaluator.js';
-import { createApp } from '../../src/api/app.js';
-import { makeAppDeps } from '../helpers/app-deps.js';
-import { makeHmacGeneratorFake } from '../helpers/hmac-generator-fake.js';
-import { AuthressAuthService } from '../../src/api/authress-auth.js';
+import { AccountDatabase } from '../src/database/account-database.js';
+import { ThreadDatabase } from '../src/database/thread-database.js';
+import { AuditDatabase } from '../src/database/audit-database.js';
+import { ProcessingDatabase } from '../src/database/processing-database.js';
+import { IncomingEmailProcessor } from '../src/processor/incoming-email-processor.js';
+import type { InboundSignalMessage, SideEffectPayload, SesVerdictStatus } from '../src/processor/incoming-email-processor.js';
+import { JsonLogicRuleEvaluator } from '../src/processor/rule-evaluator.js';
+import { createApp } from '../src/api/app.js';
+import { makeAppDeps } from '../tests/helpers/app-deps.js';
+import { makeHmacGeneratorFake } from '../tests/helpers/hmac-generator-fake.js';
+import { AuthressAuthService } from '../src/api/authress-auth.js';
 import { startMockAuthressServer } from './mock-authress.js';
 import type { MockAuthressServer } from './mock-authress.js';
 import { InProcessContentSanitizer } from './in-process-content-sanitizer.js';
 import { createConsoleLogger } from './logger.js';
-import { ok } from '../../src/errors.js';
-import type { AccessService } from '../../src/api/app.js';
-import type { EmailService } from '../../src/email/email-service.js';
-import { CalendarForwarder } from '../../src/processor/calendar/calendar-forwarder.js';
-import type { PostApprovalCalendarHandlerDeps } from '../../src/processor/calendar/post-approval-handler.js';
-import type { EmbeddingGenerator } from '../../src/embedding/embedding-generator.js';
-import type { MultiClusterAuroraWriter } from '../../src/database/thread-matcher.js';
-import type { WorkflowData } from '../../src/types/index.js';
-import { BillingHandler } from '../../src/billing/billing-handler.js';
-import type { UserCodeExecutorClient } from '../../src/processor/user-code-client.js';
-import type { HandlerRegistry } from '../../src/workflow/registry.js';
-import type { SchedulerClient } from '../../src/scheduler/scheduler-client.js';
+import { ok } from '../src/errors.js';
+import type { AccessService } from '../src/api/app.js';
+import type { EmailService } from '../src/email/email-service.js';
+import { CalendarForwarder } from '../src/processor/calendar/calendar-forwarder.js';
+import type { PostApprovalCalendarHandlerDeps } from '../src/processor/calendar/post-approval-handler.js';
+import type { EmbeddingGenerator } from '../src/embedding/embedding-generator.js';
+import type { MultiClusterAuroraWriter } from '../src/database/thread-matcher.js';
+import type { WorkflowData } from '../src/types/index.js';
+import { BillingHandler } from '../src/billing/billing-handler.js';
+import type { UserCodeExecutorClient } from '../src/processor/user-code-client.js';
+import type { HandlerRegistry } from '../src/workflow/registry.js';
+import type { SchedulerClient } from '../src/scheduler/scheduler-client.js';
 
 const ENDPOINT = process.env['AWS_ENDPOINT_URL'] ?? 'http://localhost:4566';
 const EMAIL_BUCKET = process.env['EMAIL_BUCKET'] ?? 'ses-it-email';

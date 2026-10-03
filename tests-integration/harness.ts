@@ -1,7 +1,8 @@
 // Reusable integration test harness.
 //
-// Connects to DynamoDB tables pre-provisioned by Tofu (see deploy/integration/)
-// and wires a real Hono app against them + a local Ed25519 JWKS server that
+// Connects to DynamoDB tables pre-provisioned by Tofu (see
+// tests-integration/infrastructure/) and wires a real Hono app against them +
+// a local Ed25519 JWKS server that
 // stands in for Authress.
 //
 // Required env vars (CI sets these; defaults shown in parentheses):
@@ -14,21 +15,21 @@
 //   AUDIT_TABLE
 //   AUTHRESS_API_URL   — mock JWKS server URL (http://localhost:4500)
 
-import { AccountDatabase } from '../../src/database/account-database.js';
-import { ThreadDatabase } from '../../src/database/thread-database.js';
-import { AuditDatabase } from '../../src/database/audit-database.js';
-import { AuthressAuthService } from '../../src/api/authress-auth.js';
-import { createApp } from '../../src/api/app.js';
-import { makeAppDeps } from '../helpers/app-deps.js';
+import { AccountDatabase } from '../src/database/account-database.js';
+import { ThreadDatabase } from '../src/database/thread-database.js';
+import { AuditDatabase } from '../src/database/audit-database.js';
+import { AuthressAuthService } from '../src/api/authress-auth.js';
+import { createApp } from '../src/api/app.js';
+import { makeAppDeps } from '../tests/helpers/app-deps.js';
 import { createConsoleLogger } from './logger.js';
-import { ok } from '../../src/errors.js';
-import type { AccessService } from '../../src/api/app.js';
-import type { EmailService } from '../../src/email/email-service.js';
-import type { CalendarForwarder } from '../../src/processor/calendar/calendar-forwarder.js';
-import type { PostApprovalCalendarHandlerDeps } from '../../src/processor/calendar/post-approval-handler.js';
+import { ok } from '../src/errors.js';
+import type { AccessService } from '../src/api/app.js';
+import type { EmailService } from '../src/email/email-service.js';
+import type { CalendarForwarder } from '../src/processor/calendar/calendar-forwarder.js';
+import type { PostApprovalCalendarHandlerDeps } from '../src/processor/calendar/post-approval-handler.js';
 import { startMockAuthressServer } from './mock-authress.js';
 import type { MockAuthressServer } from './mock-authress.js';
-import { BillingHandler } from '../../src/billing/billing-handler.js';
+import { BillingHandler } from '../src/billing/billing-handler.js';
 
 // ---------------------------------------------------------------------------
 // Harness interface
