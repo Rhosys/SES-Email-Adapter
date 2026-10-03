@@ -91,6 +91,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # MINISTACK_VERSION is the single explicit lever: it names the upstream
+      # Docker Hub version we promote. We mirror that version into GHCR and also
+      # move the GHCR `latest` tag to it. The integration job pulls GHCR `latest`,
+      # so bumping MINISTACK_VERSION is the deliberate act that upgrades CI — the
+      # rest of the pipeline tracks whatever is currently mirrored, never pulling
+      # Docker Hub directly (avoids its anonymous-pull rate limits on CI runners).
       - name: Mirror ministack (idempotent)
         run: |
           VERSIONED="ghcr.io/rhosys/ministack:${{ env.MINISTACK_VERSION }}"
@@ -111,7 +117,10 @@ jobs:
 
     services:
       ministack:
-        # Version controlled via MINISTACK_VERSION env var — update mirror_ministack job when bumping
+        # Always GHCR `latest` — the mirror_ministack job keeps `latest` pointed at
+        # the MINISTACK_VERSION it just mirrored. We pin the version only at the
+        # mirror (the one explicit Docker Hub pull); everything downstream runs on
+        # whatever is currently mirrored. Bump MINISTACK_VERSION to upgrade.
         image: ghcr.io/rhosys/ministack:latest
         ports:
           - 4566:4566
