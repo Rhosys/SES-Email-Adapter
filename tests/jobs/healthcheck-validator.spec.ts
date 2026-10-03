@@ -155,7 +155,7 @@ describe("HealthcheckValidator", () => {
     expect(checkById(result.checks, "thread-created").status).toBe("fail");
     expect(checkById(result.checks, "workflow-classified").status).toBe("unknown");
     expect(checkById(result.checks, "embedding-indexed").status).toBe("unknown");
-  });
+  }, 15_000); // exercises the real CloudWatch poll loop (setTimeout 1s × up to 10); 5s default is too tight
 
   it("reports overall unknown when listing SYSTEM threads errors", async () => {
     const { deps } = makeDeps({ listErr: true });
