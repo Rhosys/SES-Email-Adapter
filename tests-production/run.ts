@@ -10,7 +10,7 @@ const { getCredentials } = await import(join(homedir(), ".kiro/skills/lib/aws-ss
 const { stdout: gitOrigin } = await execFileAsync("git", ["remote", "get-url", "origin"]);
 const creds = await getCredentials(undefined, gitOrigin.trim());
 
-const result = await execFileAsync("npx", ["vitest", "run", "--config", "vitest.integration.config.ts"], {
+const result = await execFileAsync("npx", ["vitest", "run", "--config", "vitest.production.config.ts"], {
   env: {
     ...process.env,
     AWS_ACCESS_KEY_ID: creds.accessKeyId,
