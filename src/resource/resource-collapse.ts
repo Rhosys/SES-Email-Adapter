@@ -58,7 +58,15 @@ function mergeInto(target: Resource, other: Resource): void {
   if (other.createdAt < target.createdAt) target.createdAt = other.createdAt;
 }
 
-export function collapseResources(resources: readonly Resource[]): Resource[] {
+export interface CollapsedResource {
+  resource: Resource;
+  // Every resourceKey that collapsed into this one, the surviving resource's own key included.
+  // length > 1 means the public resourceId is a compound id and a status change must cascade
+  // to all members. Consumed only by the API layer — never serialized.
+  memberResourceKeys: string[];
+}
+
+export function collapseResources(resources: readonly Resource[]): CollapsedResource[] {
   const groups = new Map<string, Resource[]>();
   for (const resource of resources) {
     const key = `${resource.threadId}#${resource.workflow}`;
@@ -67,13 +75,17 @@ export function collapseResources(resources: readonly Resource[]): Resource[] {
     else groups.set(key, [resource]);
   }
 
-  const collapsed: Resource[] = [];
+  const collapsed: CollapsedResource[] = [];
   for (const group of groups.values()) {
-    const merged: Resource[] = [];
+    const merged: CollapsedResource[] = [];
     for (const resource of group) {
-      const match = merged.find(m => titlesMatch(m.title, resource.title) && sameDay(m.displayDate, resource.displayDate));
-      if (match) mergeInto(match, resource);
-      else merged.push({ ...resource, assets: [...(resource.assets ?? [])] });
+      const match = merged.find(m => titlesMatch(m.resource.title, resource.title) && sameDay(m.resource.displayDate, resource.displayDate));
+      if (match) {
+        mergeInto(match.resource, resource);
+        match.memberResourceKeys.push(resource.resourceKey);
+      } else {
+        merged.push({ resource: { ...resource, assets: [...(resource.assets ?? [])] }, memberResourceKeys: [resource.resourceKey] });
+      }
     }
     collapsed.push(...merged);
   }

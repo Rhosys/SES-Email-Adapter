@@ -352,6 +352,39 @@ describe("Resources API", () => {
 
       expect(access.checkAccess).toHaveBeenCalledWith("user-001", `accounts/${TEST_ACCOUNT_ID}/resources/${resourceId}`, "resources:write");
     });
+
+    it("cascades a compound id's status change to every collapsed member", async () => {
+      const primary = makeResource({ workflow: "events", resourceKey: "taylor-swift-concert-tour", title: "Taylor Swift Concert Tour", displayDate: "2024-07-01T20:00:00Z", updatedAt: "2024-06-16T10:00:00Z" });
+      const member = makeResource({ workflow: "events", resourceKey: "taylor-swift-concert", title: "Taylor Swift Concert", displayDate: "2024-07-01T19:00:00Z" });
+      resourceDb.getResource.mockResolvedValue(ok(primary));
+      resourceDb.listResourcesByThread.mockResolvedValue(ok([primary, member]));
+      resourceDb.setResourceStatus.mockImplementation((_a: string, _t: string, sk: string) =>
+        Promise.resolve(ok(sk === "events#taylor-swift-concert-tour"
+          ? { ...primary, status: "complete", resolvedAt: "2024-06-16T00:00:00Z" }
+          : { ...member, status: "complete", resolvedAt: "2024-06-16T00:00:00Z" })));
+      const compoundId = encodeResourceId("thr-001", "events#taylor-swift-concert-tour", true);
+
+      const res = await req(app, "PATCH", `${A}/resources/${compoundId}`, { status: "complete" });
+
+      expect(res.status).toBe(200);
+      expect(resourceDb.setResourceStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "thr-001", "events#taylor-swift-concert-tour", "complete");
+      expect(resourceDb.setResourceStatus).toHaveBeenCalledWith(TEST_ACCOUNT_ID, "thr-001", "events#taylor-swift-concert", "complete");
+      const body = await res.json() as { resourceId: string; status: string };
+      expect(body.resourceId).toBe(compoundId);
+      expect(body.status).toBe("complete");
+    });
+
+    it("404s a compound id whose primary no longer survives the recomputed collapse", async () => {
+      const primary = makeResource({ workflow: "events", resourceKey: "gone", title: "Gone" });
+      resourceDb.getResource.mockResolvedValue(ok(primary));
+      resourceDb.listResourcesByThread.mockResolvedValue(ok([]));
+      const compoundId = encodeResourceId("thr-001", "events#gone", true);
+
+      const res = await req(app, "PATCH", `${A}/resources/${compoundId}`, { status: "complete" });
+
+      expect(res.status).toBe(404);
+      expect(resourceDb.setResourceStatus).not.toHaveBeenCalled();
+    });
   });
 
   // The API must never reveal that content is stored in S3. Assets backed by a stored file

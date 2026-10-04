@@ -25,7 +25,28 @@ describe("collapseResources", () => {
     const result = collapseResources([a, b]);
 
     expect(result).toHaveLength(1);
-    expect(result[0]!.title).toBe("Taylor Swift Concert Tour");
+    expect(result[0]!.resource.title).toBe("Taylor Swift Concert Tour");
+  });
+
+  it("reports every merged resourceKey as a member of the surviving resource", () => {
+    const a = makeResource({ resourceKey: "a", title: "Concert" });
+    const b = makeResource({ resourceKey: "b", title: "Concert" });
+
+    const result = collapseResources([a, b]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]!.memberResourceKeys).toEqual(["a", "b"]);
+  });
+
+  it("reports a single-member group with just its own resourceKey", () => {
+    const a = makeResource({ resourceKey: "a", title: "Concert", displayDate: "2024-07-01T19:00:00Z" });
+    const b = makeResource({ resourceKey: "b", title: "Concert", displayDate: "2024-07-02T19:00:00Z" });
+
+    const result = collapseResources([a, b]);
+
+    expect(result).toHaveLength(2);
+    expect(result[0]!.memberResourceKeys).toEqual(["a"]);
+    expect(result[1]!.memberResourceKeys).toEqual(["b"]);
   });
 
   it("does not merge when dates fall on different days", () => {
@@ -79,7 +100,7 @@ describe("collapseResources", () => {
     const result = collapseResources([a, b]);
 
     expect(result).toHaveLength(1);
-    expect(result[0]!.assets).toHaveLength(2);
+    expect(result[0]!.resource.assets).toHaveLength(2);
   });
 
   it("handles DynamoDB items that lack the assets attribute", () => {
@@ -91,6 +112,6 @@ describe("collapseResources", () => {
     const result = collapseResources([a, b]);
 
     expect(result).toHaveLength(1);
-    expect(result[0]!.assets).toEqual([]);
+    expect(result[0]!.resource.assets).toEqual([]);
   });
 });
