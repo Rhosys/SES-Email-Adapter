@@ -41,6 +41,7 @@
 - [ ] **JMAP push (`/jmap/eventsource`)** — deferred out of the initial JMAP support spec. RFC 8620 §7.3 SSE needs new Lambda response-streaming infrastructure; RFC 8887 "JMAP over WebSocket" would reuse the existing WebSocket infra but is a distinct protocol extension. Revisit once there's a concrete target client or usage data.
 - [ ] **External mail ingestion (Gmail, Outlook/Graph, other JMAP servers)** — pull mail in from third-party services via OAuth-connected sync connectors, normalized into the existing Signal/Thread processing pipeline. Deferred, separate effort from JMAP server support above — needs its own spec (new `ExternalMailConnection` entity, KMS-encrypted OAuth tokens, per-provider sync adapters, polling infrastructure).
 - [ ] **On-demand alias generation** — browser extension or API generates unique aliases per-service.
+- [ ] **Mimestream parity: gap matrix** — audit done in `docs/mimestream-feature-audit.md`. Next: map every row against current backend + UI to produce have/partial/missing, then prioritize (calendar banner with multi-provider agenda + RSVP first).
 - [ ] **Calendar sync** — bidirectional calendar integration (CalDAV, Google Calendar, Outlook).
 - [ ] **Webhook outbound** — user configures a URL; signals POST as JSON.
 - [ ] **Become FedCM identity provider** — meaning other apps log in via our app. Register as a FedCM provider so other apps can use our identity.
