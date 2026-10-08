@@ -6,7 +6,7 @@ import {
   resolveContentType,
   ensureFilenameExtension,
   buildContentDisposition,
-} from "./mime.js";
+} from "../../src/isolated/mime.js";
 
 function bytes(...vals: number[]): Uint8Array {
   return new Uint8Array(vals);
@@ -221,9 +221,9 @@ describe("buildContentDisposition", () => {
     expect(buildContentDisposition("application/pdf", "invoice.pdf")).toBe('inline; filename="invoice.pdf"');
   });
 
-  it("sanitizes quotes and control chars in the ASCII fallback", () => {
+  it("sanitizes the ASCII fallback and keeps the raw name in the RFC 5987 form when control chars are present", () => {
     const result = buildContentDisposition("application/zip", 'a"b\r\n.zip');
-    expect(result).toBe('attachment; filename="a_b__.zip"');
+    expect(result).toBe(`attachment; filename="a_b__.zip"; filename*=UTF-8''${encodeURIComponent('a"b\r\n.zip')}`);
   });
 
   it("adds an RFC 5987 encoded form for non-ASCII filenames", () => {
