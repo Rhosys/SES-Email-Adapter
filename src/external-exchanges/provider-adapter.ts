@@ -12,7 +12,8 @@ export const POLL_INTERVAL_MINUTES = 60;
 // ---------------------------------------------------------------------------
 
 export type ProviderActivationError = { kind: "provider_activation_failed"; cause: unknown }
-export type ProviderRenewalError = { kind: "provider_renewal_failed"; cause: unknown }
+// transient: the provider was unreachable (e.g. ECONNREFUSED) after in-call retries — the next sweep retries it.
+export type ProviderRenewalError = { kind: "provider_renewal_failed"; cause: unknown; transient?: boolean }
 export type ProviderDeactivationError = { kind: "provider_deactivation_failed"; cause: unknown }
 export type ProviderFetchError =
   | { kind: "provider_fetch_failed"; cause: unknown }
