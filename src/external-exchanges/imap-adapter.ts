@@ -359,7 +359,7 @@ export class ImapAdapter implements ProviderAdapter {
       }
     }
     if (!conn) {
-      return this.handleRenewalFailure(emx, lastConnectError!.reason);
+      return this.handleRenewalFailure(emx, lastConnectError!.reason, lastConnectError!.kind === "transient" ? "provider_renewal_unreachable" : "provider_renewal_failed");
     }
 
     const stateResult = await conn.getInboxState();
@@ -615,8 +615,13 @@ export class ImapAdapter implements ProviderAdapter {
   // Private: handle renewal failure with consecutive failure tracking
   // ---------------------------------------------------------------------------
 
-  private async handleRenewalFailure(emx: ExternalMailExchange, cause: string): Promise<Result<void, ProviderRenewalError>> {
-    this.logger.error(`IMAP renewal failed: ${cause}`, { code: "imap.renew.failed", emxId: emx.id, cause });
+  private async handleRenewalFailure(emx: ExternalMailExchange, cause: string, kind: ProviderRenewalError["kind"] = "provider_renewal_failed"): Promise<Result<void, ProviderRenewalError>> {
+    // Unreachable server after retries is outside our control and retried by the next sweep — warn, not error.
+    if (kind === "provider_renewal_unreachable") {
+      this.logger.warn(`IMAP renewal failed: ${cause}`, { code: "imap.renew.failed", emxId: emx.id, cause });
+    } else {
+      this.logger.error(`IMAP renewal failed: ${cause}`, { code: "imap.renew.failed", emxId: emx.id, cause });
+    }
     const failures = (emx.consecutiveFailures ?? 0) + 1;
     if (failures >= 3) {
       const deactivateResult = await this.db.updateExternalExchange(emx.accountId, emx.id, "activation_failed", emx.nextSyncTime!, {
@@ -629,6 +634,6 @@ export class ImapAdapter implements ProviderAdapter {
       const failureResult = await this.db.updateExternalExchange(emx.accountId, emx.id, emx.status, emx.nextSyncTime!, { consecutiveFailures: failures });
       if (failureResult.isErr()) { this.logger.warn("Failed to update IMAP consecutive failures", { code: "imap.renew.failure_write_failed", emxId: emx.id, error: failureResult.error }); }
     }
-    return err({ kind: "provider_renewal_failed", cause });
+    return err({ kind, cause });
   }
 }
