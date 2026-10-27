@@ -40,9 +40,33 @@ function stripExternalCssUrls(css: string): string {
 // Hidden element removal
 // ---------------------------------------------------------------------------
 
+// Below this computed opacity an element is treated as hidden-from-human: the
+// text is there for a machine/attacker (hide-from-human, show-to-LLM; or
+// near-invisible exfil scaffolding) but a reader cannot perceive it. A literal
+// `opacity:0` substring check misses every form that renders invisible without
+// being exactly "0" (e.g. `opacity:.00000001`, `opacity:0.01`), so the value is
+// parsed and compared numerically instead. 0.25 is the floor for legible text.
+const MIN_VISIBLE_OPACITY = 0.25;
+
+/**
+ * Pulls the opacity value out of a whitespace-stripped inline style and returns it
+ * as a number, or null when the property is absent or unparseable. Matches the
+ * numeric token after the last `opacity:` (integer, decimal with or without a
+ * leading zero, or scientific notation) so that `opacity:.00000001` and
+ * `opacity:1e-7` are caught the same as `opacity:0`. The `!important` suffix and a
+ * trailing `;` are tolerated by stopping the capture at the first non-numeric char.
+ */
+function parseOpacity(strippedStyle: string): number | null {
+  const match = /opacity:(-?(?:\d+\.?\d*|\.\d+)(?:e-?\d+)?)/i.exec(strippedStyle);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isNaN(value) ? null : value;
+}
+
 /**
  * Removes elements that are visually hidden via inline styles.
- * Targets: display:none, visibility:hidden, opacity:0, font-size:0 (leaf only), height:0/width:0
+ * Targets: display:none, visibility:hidden, opacity below MIN_VISIBLE_OPACITY,
+ * font-size:0 (leaf only), height:0/width:0.
  *
  * font-size:0 is only treated as hidden when the element has no child elements.
  * MJML-based emails use font-size:0 on container elements (td, div) to prevent
@@ -56,10 +80,11 @@ function removeHiddenElements(doc: any): void {
   for (const el of allElements as Iterable<any>) {
     const style: string = el.getAttribute("style") ?? "";
     const lower = style.toLowerCase().replace(/\s/g, "");
+    const opacity = parseOpacity(lower);
     if (
       lower.includes("display:none") ||
       lower.includes("visibility:hidden") ||
-      lower.includes("opacity:0") ||
+      (opacity !== null && opacity < MIN_VISIBLE_OPACITY) ||
       (lower.includes("font-size:0") && el.children.length === 0) ||
       (lower.includes("height:0") && lower.includes("overflow:hidden")) ||
       (lower.includes("width:0") && lower.includes("overflow:hidden"))

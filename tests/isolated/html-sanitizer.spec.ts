@@ -101,6 +101,55 @@ describe("html-sanitizer", () => {
       expect(result.html).toContain("Visible");
     });
 
+    it("removes near-invisible opacity with a leading-dot value (opacity:.00000001)", () => {
+      const input = `<p>Visible</p><span style="opacity:.00000001">Hidden from human shown to LLM</span>`;
+      const result = sanitizeHtml(input);
+      expect(result.html).not.toContain("Hidden from human shown to LLM");
+      expect(result.html).toContain("Visible");
+    });
+
+    it("removes scientific-notation opacity (opacity:1e-7)", () => {
+      const input = `<p>Visible</p><span style="opacity:1e-7">Exfil scaffolding</span>`;
+      const result = sanitizeHtml(input);
+      expect(result.html).not.toContain("Exfil scaffolding");
+      expect(result.html).toContain("Visible");
+    });
+
+    it("removes low but non-zero opacity below the 0.25 legibility floor (opacity:0.1)", () => {
+      const input = `<p>Visible</p><span style="opacity:0.1">Barely visible</span>`;
+      const result = sanitizeHtml(input);
+      expect(result.html).not.toContain("Barely visible");
+      expect(result.html).toContain("Visible");
+    });
+
+    it("removes opacity just under the threshold (opacity:0.24)", () => {
+      const input = `<p>Visible</p><span style="opacity:0.24">Just under</span>`;
+      const result = sanitizeHtml(input);
+      expect(result.html).not.toContain("Just under");
+      expect(result.html).toContain("Visible");
+    });
+
+    it("preserves opacity at the threshold (opacity:0.25)", () => {
+      const input = `<p>Visible</p><span style="opacity:0.25">At the floor</span>`;
+      const result = sanitizeHtml(input);
+      expect(result.html).toContain("At the floor");
+      expect(result.html).toContain("Visible");
+    });
+
+    it("preserves legible reduced opacity (opacity:0.6)", () => {
+      const input = `<p>Visible</p><span style="opacity:0.6">Dimmed caption</span>`;
+      const result = sanitizeHtml(input);
+      expect(result.html).toContain("Dimmed caption");
+      expect(result.html).toContain("Visible");
+    });
+
+    it("removes low opacity carrying !important", () => {
+      const input = `<p>Visible</p><span style="opacity:0.01 !important">Important hidden</span>`;
+      const result = sanitizeHtml(input);
+      expect(result.html).not.toContain("Important hidden");
+      expect(result.html).toContain("Visible");
+    });
+
     it("removes leaf elements with font-size:0", () => {
       const input = `<p>Visible</p><span style="font-size:0">Zero size text</span>`;
       const result = sanitizeHtml(input);
