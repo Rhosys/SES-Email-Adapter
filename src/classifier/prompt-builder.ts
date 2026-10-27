@@ -9,6 +9,27 @@ export const RELEVANT_HEADERS = new Set<string>(["content-language"]);
 
 const MAX_BODY_LENGTH = 4000;
 
+// The classifier prompt fences untrusted sender content inside these tags so the
+// model can tell data from instructions. A sender who writes the closing tag into
+// their own body/subject/headers would otherwise appear to "end" the data region
+// and have whatever follows read as trusted prompt text — a delimiter-breakout
+// prompt injection. This is reachable without any CSS/rendering trick: the plain
+// text/plain path reaches the prompt without HTML stripping at all.
+const CONTENT_DELIMITER_TAG = "email_content";
+
+/**
+ * Defangs any occurrence of the content-fence delimiter inside attacker-controlled
+ * text so it can't be used to break out of the <email_content> region. Matches the
+ * opening or closing tag case-insensitively and tolerant of the internal whitespace
+ * a browser/LLM would still read as the same tag (e.g. `< / email_content >`), and
+ * replaces the angle brackets with lookalikes so the surrounding words survive for
+ * classification while the structural token does not.
+ */
+function neutralizeDelimiter(text: string): string {
+  const delimiterPattern = new RegExp(`<\\s*/?\\s*${CONTENT_DELIMITER_TAG}\\s*>`, "gi");
+  return text.replace(delimiterPattern, (match) => match.replace(/</g, "﹤").replace(/>/g, "﹥"));
+}
+
 export interface LinkIndex {
   placeholder: string;
   url: string;
@@ -194,7 +215,7 @@ export function buildUserMessage(input: ClassificationInput): string {
     .map(([k, v]) => `${k}: ${v}`)
     .join("\n");
 
-  const emailContent = [
+  const emailContent = neutralizeDelimiter([
     `From: ${input.from}`,
     `To: ${input.to.join(", ")}`,
     `Subject: ${input.subject}`,
@@ -203,7 +224,7 @@ export function buildUserMessage(input: ClassificationInput): string {
     "",
     "Body:",
     truncatedBody,
-  ].filter(Boolean).join("\n");
+  ].filter(Boolean).join("\n"));
 
   const labels = JSON.stringify(input.allowedLabels);
 
