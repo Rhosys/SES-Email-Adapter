@@ -25,7 +25,7 @@ export class EnumValue {
 // `Workflow`, so every registry entry below is compile-time checked against this list;
 // adding/removing a workflow here is the only place the set changes.
 export const WORKFLOWS = [
-  "auth", "conversation", "crm", "package", "travel", "payments", "alert", "content",
+  "auth", "conversation", "crm", "package", "travel", "payments", "content",
   "onboarding", "notice", "healthcare", "job", "support", "events", "healthcheck", "test", "unspecified",
 ] as const;
 
@@ -172,41 +172,6 @@ export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
     ],
   },
   {
-    name: "alert",
-    description: "Events requiring the user to act — security (suspicious login, fraud, breach), infrastructure (CI failures, error spikes, cert/domain expiry), or account enforcement (frozen, suspended, compliance takedown, content removal deadline). If inaction leads to consequences, this is an alert.",
-    fields: [
-      { name: "alertType", type: "enum", required: true, enumValues: [
-        e("suspicious_login", "unrecognised login attempt from an unusual location or device"),
-        e("new_device", "first sign-in from a new device or browser"),
-        e("password_changed", "password was recently changed — verify it was intentional"),
-        e("breach_notice", "data breach affecting the user's account or credentials"),
-        e("api_key_exposed", "API key or secret found in a public repository or log"),
-        e("account_locked", "account locked due to failed login attempts or policy violation"),
-        e("fraud_alert", "suspicious transaction or fraudulent activity detected"),
-        e("ci_failure", "CI/CD pipeline build or test failure"),
-        e("deployment_failed", "production or staging deployment did not succeed"),
-        e("error_spike", "sudden increase in application errors or exceptions"),
-        e("domain_expiry", "domain name approaching or past its expiration date"),
-        e("cert_expiry", "TLS/SSL certificate approaching or past its expiration date"),
-        e("security_scan", "results from an automated security or vulnerability scan"),
-        e("other", "alert that does not fit the above categories — use a descriptive snake_case value if none fit"),
-      ], notes: "Common values listed — use a descriptive snake_case value if none fit" },
-      { name: "service", type: "string", required: true, identity: true },
-      { name: "severity", type: "enum", required: false, enumValues: [
-        e("info", "informational — no immediate risk"),
-        e("warning", "potential issue that may need attention soon"),
-        e("critical", "immediate action required to prevent damage or loss"),
-      ] },
-      { name: "requiresAction", type: "boolean", required: true },
-      { name: "actionUrl", type: "string", required: false, notes: "The primary link the user should click to investigate or resolve the alert (e.g. \"Review activity\", \"Secure your account\", \"View build logs\")" },
-      { name: "ipAddress", type: "string", required: false },
-      { name: "location", type: "string", required: false },
-      { name: "deviceName", type: "string", required: false },
-      { name: "repository", type: "string", required: false, identity: true },
-      { name: "errorMessage", type: "string", required: false },
-    ],
-  },
-  {
     name: "content",
     description: "Newsletters, promotions, social digests — read or unsubscribe. Use for general marketing and editorial content with no single dated event at its center. If the email is primarily about one specific dated event (a summit, webinar, launch, meetup — even a save-the-date or invitation), classify it as 'events' instead, not here.",
     fields: [
@@ -240,7 +205,7 @@ export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
   },
   {
     name: "notice",
-    description: "ToS updates, service notices, government notices, security awareness campaigns — passive informational where no user action is required and no consequence occurs from inaction. If the email requires the user to act (remove content, respond, pay, unlock) or warns of consequences for inaction (account frozen, service terminated), use 'alert' instead. Use security_awareness for mass-sent phishing warnings, 'think before you click' emails, and generic credential-safety reminders from banks or service providers.",
+    description: "ToS updates, service notices, government notices, account and security notifications (suspicious login, new device, password changed, account locked, fraud warnings, breach notices), infrastructure notifications (CI/deploy failures, error spikes, certificate/domain expiry, security scans), and account enforcement (frozen, suspended, compliance takedown) — any automated informational notice from a service about the user's account or systems. Use security_awareness for mass-sent phishing warnings, 'think before you click' emails, and generic credential-safety reminders from banks or service providers.",
     fields: [
       { name: "noticeType", type: "enum", required: true, enumValues: [
         e("terms_update", "terms of service or user agreement change"),
@@ -250,7 +215,7 @@ export const CLASSIFIER_WORKFLOW_REGISTRY: WorkflowDefinition[] = [
         e("compliance", "regulatory or compliance notification"),
         e("service_notice", "planned maintenance, outage, or service status update"),
         e("government", "government or municipal official notice"),
-        e("account_notification", "informational account change — no action needed"),
+        e("account_notification", "account change or security event on the user's account"),
         e("security_awareness", "mass-sent phishing warning or credential-safety reminder"),
         e("bounce", "delivery status notification (DSN) reporting that a message could not be delivered"),
         e("other", "passive informational notice that does not fit the above categories"),

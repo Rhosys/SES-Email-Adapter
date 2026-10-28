@@ -6,7 +6,7 @@ import { AMBIGUOUS_DATE_FORMATS } from "../types/index.js";
 // ---------------------------------------------------------------------------
 
 export const Workflow = z.enum([
-  "auth", "conversation", "crm", "package", "travel", "payments", "alert",
+  "auth", "conversation", "crm", "package", "travel", "payments",
   "content", "onboarding", "notice", "healthcare", "job", "support", "test",
   "events", "healthcheck", "unspecified",
 ]);
@@ -210,19 +210,6 @@ export const PaymentsData = z.object({
   managementUrl: z.string().optional(),
 }).openapi("PaymentsData");
 
-export const AlertData = z.object({
-  workflow: z.literal("alert"),
-  alertType: z.string(),
-  service: z.string(),
-  severity: z.enum(["info", "warning", "critical"]).optional(),
-  requiresAction: z.boolean(),
-  ipAddress: z.string().optional(),
-  location: z.string().optional(),
-  deviceName: z.string().optional(),
-  repository: z.string().optional(),
-  errorMessage: z.string().optional(),
-}).openapi("AlertData");
-
 export const ContentData = z.object({
   workflow: z.literal("content"),
   contentType: z.enum(["newsletter", "promotion", "social_digest", "product_update", "announcement"]),
@@ -315,7 +302,7 @@ export const UnspecifiedData = z.object({
 
 export const WorkflowData = z.discriminatedUnion("workflow", [
   AuthData, ConversationData, CrmData, PackageData, TravelData,
-  PaymentsData, AlertData, ContentData, NoticeData,
+  PaymentsData, ContentData, NoticeData,
   HealthcareData, JobData, SupportData, EventsData,
   OnboardingData, HealthcheckData, TestData, UnspecifiedData,
 ]).openapi("WorkflowData");

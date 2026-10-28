@@ -5,10 +5,6 @@ export function baseUrgency(workflow: Workflow, data: WorkflowData): ThreadUrgen
     case "auth":
       return "critical";
 
-    // alerts: critical when action is required, high otherwise
-    case "alert":
-      return (data as { requiresAction?: boolean }).requiresAction ? "critical" : "high";
-
     // payments: payment_failed demands immediate action
     case "payments":
       return (data as { paymentType?: string }).paymentType === "payment_failed" ? "critical" : "normal";

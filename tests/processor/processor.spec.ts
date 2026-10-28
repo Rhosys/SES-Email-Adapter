@@ -1106,11 +1106,6 @@ describe("IncomingEmailProcessor", () => {
         .toBe("me@example.com:content:tldr.tech");
     });
 
-    it("uses senderETLD1 grouping for alert workflow", () => {
-      expect(deriveGroupingKey("alert", { workflow: "alert", alertType: "suspicious_login", service: "GitHub", requiresAction: true }, "me@example.com", "github.com"))
-        .toBe("me@example.com:alert:github.com");
-    });
-
     it("uses orderNumber as key for package workflow when present", () => {
       expect(deriveGroupingKey("package", { workflow: "package", packageType: "shipping", retailer: "Amazon", orderNumber: "112-999" }, "me@example.com", "amazon.com"))
         .toBe("me@example.com:package:112-999");
@@ -1140,17 +1135,6 @@ describe("IncomingEmailProcessor", () => {
   describe("baseUrgency", () => {
     it("auth is always critical", () => {
       expect(baseUrgency("auth", { workflow: "auth", authType: "verification", service: "GitHub" })).toBe("critical");
-    });
-
-    it("alert is critical when requiresAction=true", () => {
-      expect(baseUrgency("alert", { workflow: "alert", alertType: "suspicious_login", service: "GitHub", requiresAction: true })).toBe("critical");
-      expect(baseUrgency("alert", { workflow: "alert", alertType: "fraud_alert", service: "Chase", requiresAction: true })).toBe("critical");
-      expect(baseUrgency("alert", { workflow: "alert", alertType: "ci_failure", service: "GitHub Actions", requiresAction: true })).toBe("critical");
-    });
-
-    it("alert is high when requiresAction=false", () => {
-      expect(baseUrgency("alert", { workflow: "alert", alertType: "new_device", service: "GitHub", requiresAction: false })).toBe("high");
-      expect(baseUrgency("alert", { workflow: "alert", alertType: "domain_expiry", service: "Cloudflare", requiresAction: false })).toBe("high");
     });
 
     it("payments is critical on payment_failed", () => {

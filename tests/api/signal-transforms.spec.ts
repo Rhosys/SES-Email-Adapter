@@ -106,7 +106,6 @@ describe("toApiSignal — unsubscribe stripping by workflow", () => {
     { workflow: "healthcare" as const, reason: "appointments" },
     { workflow: "job" as const, reason: "applications" },
     { workflow: "support" as const, reason: "helpdesk" },
-    { workflow: "alert" as const, reason: "account enforcement" },
     { workflow: "crm" as const, reason: "sales outreach" },
   ])("strips unsubscribe for workflow=$workflow ($reason)", ({ workflow }) => {
     const signal = makeInboundSignal({ data: { workflow, unsubscribe } });

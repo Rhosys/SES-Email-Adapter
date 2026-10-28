@@ -208,9 +208,9 @@ describe("coerceWorkflowData", () => {
       expect(result.requiresReply).toBe(true);
     });
 
-    it("preserves native boolean false — alert.requiresAction", () => {
-      const data: Record<string, unknown> = { workflow: "alert", alertType: "ci_failure", service: "GitLab", requiresAction: false };
-      const result = coerceWorkflowData(data, "alert", logger, { ...ctx, workflow: "alert" }, receivedAt);
+    it("preserves native boolean false — healthcare.requiresAction", () => {
+      const data: Record<string, unknown> = { workflow: "healthcare", eventType: "appointment_reminder", requiresAction: false, provider: "Dr. Smith" };
+      const result = coerceWorkflowData(data, "healthcare", logger, { ...ctx, workflow: "healthcare" }, receivedAt);
       expect(result.requiresAction).toBe(false);
     });
 
@@ -226,9 +226,9 @@ describe("coerceWorkflowData", () => {
       expect(result.requiresAction).toBe(true);
     });
 
-    it("coerces number 1 to boolean true — alert.requiresAction", () => {
-      const data: Record<string, unknown> = { workflow: "alert", alertType: "fraud_alert", service: "Bank", requiresAction: 1 };
-      const result = coerceWorkflowData(data, "alert", logger, { ...ctx, workflow: "alert" }, receivedAt);
+    it("coerces number 1 to boolean true — healthcare.requiresAction", () => {
+      const data: Record<string, unknown> = { workflow: "healthcare", eventType: "appointment_reminder", requiresAction: 1, provider: "Dr. Smith" };
+      const result = coerceWorkflowData(data, "healthcare", logger, { ...ctx, workflow: "healthcare" }, receivedAt);
       expect(result.requiresAction).toBe(true);
     });
 

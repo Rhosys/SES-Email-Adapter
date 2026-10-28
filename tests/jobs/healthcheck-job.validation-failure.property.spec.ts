@@ -127,7 +127,7 @@ const failureScenarios: ValidationScenario[] = [
   },
   {
     label: "wrong workflow + missing embedding",
-    workflow: "alert",
+    workflow: "notice",
     hasEmbedding: false,
     expectedChecks: { hasThreadId: true, workflowIsHealthcheck: false, hasEmbedding: false },
   },

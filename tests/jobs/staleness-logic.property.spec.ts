@@ -45,7 +45,7 @@ describe("Outstanding thread classification", () => {
   it("workflow has no effect on the result", () => {
     const thread1 = buildThread("active", "normal", "conversation", BEFORE_CUTOFF);
     const thread2 = buildThread("active", "normal", "payments", BEFORE_CUTOFF);
-    const thread3 = buildThread("active", "normal", "alert", BEFORE_CUTOFF);
+    const thread3 = buildThread("active", "normal", "notice", BEFORE_CUTOFF);
     expect(isOutstandingThread(thread1, CUTOFF)).toBe(isOutstandingThread(thread2, CUTOFF));
     expect(isOutstandingThread(thread2, CUTOFF)).toBe(isOutstandingThread(thread3, CUTOFF));
   });

@@ -186,7 +186,7 @@ describe("Signal Classifier — LLM integration tests", () => {
       assertCommonOutput(output);
     });
 
-    it("alert — suspicious login", async () => {
+    it("notice — suspicious login", async () => {
       const input = makeInput({
         from: "security@accounts.google.com",
         subject: "Security alert: New sign-in from Windows",
@@ -196,10 +196,9 @@ describe("Signal Classifier — LLM integration tests", () => {
       const result = await classifier.classify(input);
       expect(result.isOk()).toBe(true);
       const output = result._unsafeUnwrap();
-      expect(output.workflow).toBe("alert");
-      expect(output.workflowData).toHaveProperty("alertType");
-      expect(output.workflowData).toHaveProperty("service");
-      expect(output.workflowData).toHaveProperty("requiresAction");
+      expect(output.workflow).toBe("notice");
+      expect(output.workflowData).toHaveProperty("noticeType");
+      expect(output.workflowData).toHaveProperty("provider");
       assertCommonOutput(output);
     });
 
