@@ -5,7 +5,8 @@ import { sanitizeHtml } from "./html-sanitizer.js";
 import { extractAssets, type ExtractedAsset } from "./asset-extractor.js";
 import { buildDisplayRawEmail } from "./raw-email-display.js";
 import type { Logger } from "../logger.js";
-import { S3ObjectStorage, type PresignedPost, type UploadField } from "../s3-object-storage.js";
+import { S3ObjectStorage, type PresignedPost, type UploadField, type S3UploadError } from "../s3-object-storage.js";
+import { type Result } from "neverthrow";
 import { resolveContentType, ensureFilenameExtension, buildContentDisposition } from "./mime.js";
 
 // Lambda timeout is 60s (see deploy/compute.tf). Emitting a TRACK log past this
@@ -291,18 +292,17 @@ function parseAddressList(addr: unknown): EmailAddress[] {
 
 // Thin adapter over the shared S3ObjectStorage.upload primitive. The isolate holds no AWS
 // credentials, so it only ever POSTs to a ticket it was handed — S3ObjectStorage.upload is
-// static and touches no S3 client. Keeps the local { ok, detail } shape the callsites below
-// branch on; all S3 field-name/policy handling lives in S3ObjectStorage.
+// static and touches no S3 client. Returns the Result unchanged so callers keep the typed
+// S3UploadError (kind + reason) rather than a stringified boolean; all S3 field-name/policy
+// handling lives in S3ObjectStorage.
 async function uploadViaPresignedPost(
   presignedPost: PresignedPost<UploadField>,
   s3Key: string,
   content: Buffer | Uint8Array,
   contentType: string,
   contentDisposition?: string,
-): Promise<{ ok: true } | { ok: false; detail: string }> {
-  const result = await S3ObjectStorage.upload(presignedPost, s3Key, content, contentType, contentDisposition);
-  if (result.isErr()) return { ok: false, detail: result.error.reason };
-  return { ok: true };
+): Promise<Result<void, S3UploadError>> {
+  return S3ObjectStorage.upload(presignedPost, s3Key, content, contentType, contentDisposition);
 }
 
 
@@ -324,16 +324,21 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
     logger = requestLogger;
   }
 
+  // Holds the raw MIME (full headers + body) once the fetch completes, so the slow
+  // timer below can dump the exact message that is parsing slowly into CloudWatch —
+  // the timer fires from its own closure and has no other way to reach the fetched bytes.
+  const diagnostics: { rawMime?: string } = {};
+
   // Fires on its own clock at the 50s mark regardless of whether processEmail ever
   // settles — a stuck fetch/parse would never reach a `finally` after `await`, since
   // the await itself never returns. This is a plain timer, not a Promise.race, precisely
   // so it still fires even if the awaited work hangs all the way to the Lambda timeout.
   const slowInvocationTimer = setTimeout(() => {
-    logger?.track("Content sanitizer invocation exceeded 50s — at risk of Lambda timeout.", { code: "content_sanitizer.slow_invocation", elapsedMs: Date.now() - start, accountId: event.accountId });
+    logger?.track("Content sanitizer invocation exceeded 50s — at risk of Lambda timeout.", { code: "content_sanitizer.slow_invocation", elapsedMs: Date.now() - start, accountId: event.accountId, rawMime: diagnostics.rawMime });
   }, SLOW_INVOCATION_THRESHOLD_MS);
 
   try {
-    return await processEmail(event, logger);
+    return await processEmail(event, logger, diagnostics);
   } catch (e) {
     return {
       success: false,
@@ -344,7 +349,7 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
   }
 }
 
-async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Promise<ContentSanitizeResponse | ContentSanitizeError> {
+async function processEmail(event: ContentSanitizeRequest, logger?: Logger, diagnostics?: { rawMime?: string }): Promise<ContentSanitizeResponse | ContentSanitizeError> {
   // 1. Fetch raw MIME via presignedGetUrl
   logger?.trackPoint("fetch_mime_start");
   let rawMime: Buffer;
@@ -359,6 +364,9 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
       };
     }
     rawMime = Buffer.from(await response.arrayBuffer());
+    // Hand the fetched bytes to the slow-invocation timer so a near-timeout logs the
+    // exact message. latin1 is byte-faithful for arbitrary MIME, unlike utf8.
+    if (diagnostics) diagnostics.rawMime = rawMime.toString("latin1");
     logger?.trackPoint("fetch_mime_complete", { sizeBytes: rawMime.length });
   } catch (e) {
     return {
@@ -375,9 +383,17 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
   logger?.trackPoint("display_raw_build_start");
   try {
     const displayRaw = buildDisplayRawEmail(rawMime.toString("latin1"));
-    const key = `${event.keyPrefix}raw-display.eml`;
-    const uploadResult = await uploadViaPresignedPost(event.presignedPost, key, Buffer.from(displayRaw, "latin1"), "message/rfc822");
-    logger?.trackPoint("display_raw_build_complete", { uploaded: uploadResult.ok, ...(uploadResult.ok ? {} : { detail: uploadResult.detail }) });
+    if (!displayRaw) {
+      logger?.error("Display-raw build produced an empty body — nothing valid to upload.", { code: "content_sanitizer.display_raw_empty", accountId: event.accountId, keyPrefix: event.keyPrefix, sizeBytes: rawMime.length });
+      logger?.trackPoint("display_raw_build_complete", { uploaded: false, detail: "empty display body" });
+    } else {
+      const key = `${event.keyPrefix}raw-display.eml`;
+      const uploadResult = await uploadViaPresignedPost(event.presignedPost, key, Buffer.from(displayRaw, "latin1"), "message/rfc822", buildContentDisposition("message/rfc822", "original.eml"));
+      uploadResult.match(
+        () => logger?.trackPoint("display_raw_build_complete", { uploaded: true }),
+        error => logger?.trackPoint("display_raw_build_complete", { uploaded: false, detail: error.reason }),
+      );
+    }
   } catch (e) {
     logger?.trackPoint("display_raw_build_failed", { detail: e instanceof Error ? e.message : "unknown" });
   }
@@ -395,7 +411,7 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
     const parseElapsedMs = Date.now() - parseStart;
     logger?.trackPoint("mime_parse_complete");
     if (parseElapsedMs > SLOW_PARSE_THRESHOLD_MS) {
-      logger?.track("MIME parse exceeded 10s.", { code: "content_sanitizer.slow_parse", elapsedMs: parseElapsedMs, sizeBytes: rawMime.length, accountId: event.accountId });
+      logger?.track("MIME parse exceeded 10s.", { code: "content_sanitizer.slow_parse", elapsedMs: parseElapsedMs, sizeBytes: rawMime.length, accountId: event.accountId, rawMime: rawMime.toString("latin1") });
     }
   } catch (e) {
     return {
@@ -505,7 +521,7 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
           buildContentDisposition(contentType, filename),
         );
 
-        if (uploadResult.ok) {
+        if (uploadResult.isOk()) {
           inlineImageRefs.push({ contentId: cid, mimeType: contentType, sizeBytes: attachment.size, s3Key, filename });
           inlineImageBytes.set(cid, attachment.content);
           // Still eligible for QR scanning via the attachment-image path in extractAssets
@@ -513,7 +529,7 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
             attachmentsWithBytes.push({ filename, mimeType: contentType, content: attachment.content, s3Key });
           }
         } else {
-          droppedAttachments.push({ filename, mimeType: contentType, sizeBytes: attachment.size, reason: "upload_failed", detail: uploadResult.detail });
+          droppedAttachments.push({ filename, mimeType: contentType, sizeBytes: attachment.size, reason: "upload_failed", detail: uploadResult.error.reason });
         }
         uploadIndex++;
       }
@@ -530,11 +546,11 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger): Pro
       buildContentDisposition(contentType, filename),
     );
 
-    if (uploadResult.ok) {
+    if (uploadResult.isOk()) {
       attachmentRefs.push({ filename, mimeType: contentType, sizeBytes: attachment.size, s3Key });
       attachmentsWithBytes.push({ filename, mimeType: contentType, content: attachment.content, s3Key });
     } else {
-      droppedAttachments.push({ filename, mimeType: contentType, sizeBytes: attachment.size, reason: "upload_failed", detail: uploadResult.detail });
+      droppedAttachments.push({ filename, mimeType: contentType, sizeBytes: attachment.size, reason: "upload_failed", detail: uploadResult.error.reason });
     }
 
     uploadIndex++;
