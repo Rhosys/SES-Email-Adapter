@@ -92,6 +92,7 @@ export interface ImapConnectionConfig {
 export type ImapError =
   | { kind: "transient"; reason: string; cause: unknown }
   | { kind: "connection_refused"; reason: string; cause: unknown }
+  | { kind: "dns_terminal_failure"; reason: string; cause: unknown }
   | { kind: "auth_failed"; reason: string; cause: unknown }
   | { kind: "tls_error"; reason: string; cause: unknown }
   | { kind: "mailbox_error"; reason: string; cause: unknown }
@@ -104,7 +105,10 @@ function imapErr(e: unknown): ImapError {
   if (code === "ECONNREFUSED") {
     return { kind: "connection_refused", reason, cause: e };
   }
-  if (code === "ETIMEDOUT" || code === "ECONNRESET" || code === "EHOSTUNREACH" || code === "ENOTFOUND" || code === "CONNECT_TIMEOUT") {
+  if (code === "ENOTFOUND" || code === "EHOSTUNREACH") {
+    return { kind: "dns_terminal_failure", reason, cause: e };
+  }
+  if (code === "ETIMEDOUT" || code === "ECONNRESET" || code === "CONNECT_TIMEOUT") {
     return { kind: "transient", reason, cause: e };
   }
   if (e instanceof Error) {
@@ -115,7 +119,10 @@ function imapErr(e: unknown): ImapError {
     if (msg.includes("econnrefused")) {
       return { kind: "connection_refused", reason, cause: e };
     }
-    if (msg.includes("timeout") || msg.includes("enotfound") || msg.includes("ehostunreach")) {
+    if (msg.includes("enotfound") || msg.includes("ehostunreach")) {
+      return { kind: "dns_terminal_failure", reason, cause: e };
+    }
+    if (msg.includes("timeout")) {
       return { kind: "transient", reason, cause: e };
     }
     if (msg.includes("certificate") || msg.includes("cert") || msg.includes("ssl") || msg.includes("tls") || msg.includes("self.signed") || msg.includes("self-signed")) {
