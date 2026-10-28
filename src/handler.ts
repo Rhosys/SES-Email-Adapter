@@ -324,7 +324,7 @@ async function processSqsRecord(
     dmarcVerdict: ses.receipt.dmarcVerdict.status,
   };
 
-  // A message to {threadId}@{accountId}.{mailDomain} is a calendar RSVP coming back
+  // A message to {aliasLocalPart}@{accountId}.{mailDomain} is a calendar RSVP coming back
   // from an invite we forwarded, not an inbound email — a different lifecycle with a
   // different owner. Route it before the email processor's account resolution, which
   // would otherwise drop it as belonging to no alias.

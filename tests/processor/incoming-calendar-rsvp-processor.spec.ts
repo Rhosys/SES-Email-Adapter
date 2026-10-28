@@ -136,10 +136,11 @@ function rawMultiRsvpEmail(opts: { proxyUidA: string; proxyUidB: string }): Uint
 }
 
 /** A message with no calendar part at all. */
-function rawPlainEmail(): Uint8Array {
+function rawPlainEmail(opts: { inReplyTo?: string } = {}): Uint8Array {
   const message = [
     `From: ${ORGANIZER}`,
     `To: ${RECIPIENT}`,
+    ...(opts.inReplyTo ? [`In-Reply-To: ${opts.inReplyTo}`] : []),
     "Subject: Just a note",
     "MIME-Version: 1.0",
     "Content-Type: text/plain; charset=UTF-8",
@@ -378,7 +379,18 @@ describe("IncomingCalendarRsvpProcessor — drop paths (ok, no signal, WARN)", (
     expect(result.isOk()).toBe(true);
     expect(threadStore.getThread).not.toHaveBeenCalled();
     expect(threadStore.setCalendarEventRsvp).not.toHaveBeenCalled();
-    expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "processor.calendar_response.no_ics")).toBe(true);
+    const tracked = logger.calls.find(c => c.method === "track" && c.context?.code === "processor.calendar_response.no_ics");
+    expect(tracked?.context?.inReplyToOurMessage).toBe(false);
+  });
+
+  it("tracks a plain reply to an invite we forwarded (In-Reply-To one of our SES messages)", async () => {
+    const { processor, logger } = makeProcessor({ raw: rawPlainEmail({ inReplyTo: "<0102abc@eu-central-1.amazonses.com>" }) });
+
+    const result = await processor.process(makeMessage());
+
+    expect(result.isOk()).toBe(true);
+    const tracked = logger.calls.find(c => c.method === "track" && c.context?.code === "processor.calendar_response.no_ics");
+    expect(tracked?.context?.inReplyToOurMessage).toBe(true);
   });
 
   it("drops a forged proxy UID (HMAC mismatch) before any I/O", async () => {

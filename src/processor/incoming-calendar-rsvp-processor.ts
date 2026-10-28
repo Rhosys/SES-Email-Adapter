@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // IncomingCalendarRsvpProcessor — the lifecycle half of the inbound calendar loop.
 //
-// A message addressed to {threadId}@{accountId}.{serviceDomain} is NOT a normal
+// A message addressed to {aliasLocalPart}@{accountId}.{serviceDomain} is NOT a normal
 // inbound email: it is an RSVP to an invite WE forwarded, coming back from the
 // attendee's calendar app. It creates no email signal, has no classification, no
 // thread-matching. Its job is narrow: fetch the raw message, pull every .ics part
@@ -35,6 +35,7 @@ import { collapseCalendarSignals } from "../api/calendar-collapse.js";
 import { isCalendarEventSignal } from "../types/calendar.js";
 import type { Logger } from "../logger.js";
 import { isEmailSignal } from "../types/index.js";
+import { extractFirstInReplyTo } from "./message-id.js";
 import type { Thread, AnySignal, CalendarRsvpResponse } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -82,12 +83,16 @@ export class IncomingCalendarRsvpProcessor {
     // single message (e.g. an assistant relaying several attendees' replies together, or
     // a client that restates the invite alongside the reply) — process each independently
     // so none are silently dropped.
-    const icsAttachments = await this.extractIcsAttachments(msg.s3Key);
+    const { attachments: icsAttachments, inReplyTo } = await this.extractIcsAttachments(msg.s3Key);
     if (icsAttachments.length === 0) {
-      this.logger.warn("Calendar RSVP: no calendar attachment on message — dropping.", {
+      // Most likely the user hit "reply" on a forwarded invite instead of RSVPing. Tracked so
+      // we can see how often that happens and decide whether such replies need handling.
+      const inReplyToMsgId = inReplyTo ? extractFirstInReplyTo(inReplyTo) : null;
+      this.logger.track("Calendar RSVP: no calendar attachment on message — dropping.", {
         code: "processor.calendar_response.no_ics",
         recipient,
         compositeMailMessageId: msg.compositeMailMessageId,
+        inReplyToOurMessage: inReplyToMsgId?.toLowerCase().endsWith(".amazonses.com") ?? false,
       });
       return ok(undefined);
     }
@@ -241,7 +246,7 @@ export class IncomingCalendarRsvpProcessor {
    * text/calendar (or .ics) part present. MIME parsing lives in
    * MailparserMimeParser (outside src/processor/) per ADR 011.
    */
-  private async extractIcsAttachments(s3Key: string): Promise<Uint8Array[]> {
+  private async extractIcsAttachments(s3Key: string): Promise<{ attachments: Uint8Array[]; inReplyTo?: string }> {
     const rawMime = await this.emailContentStore.getRawEmail(s3Key);
     return this.mimeParser.extractCalendarAttachments(Buffer.from(rawMime));
   }
