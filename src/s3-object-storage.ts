@@ -47,10 +47,11 @@ export interface UploadTicketSpec {
 }
 
 /**
- * The form fields the uploader injects itself at upload time. Content-Disposition is
- * optional per upload but always sanctioned by the policy (a permissive `starts-with ""`
- * condition), so callers that set it get the browser's inline/attachment behavior while
- * callers that omit it are still valid.
+ * The form fields the uploader injects itself at upload time. Content-Disposition is always
+ * written (empty string when a caller passes none): the policy conditions the field with a
+ * permissive `starts-with ""`, and S3 rejects a POST that omits a conditioned field, so the
+ * field must be present on every upload. A real value gives the browser's inline/attachment
+ * behavior; an empty one simply satisfies the condition.
  */
 type UploaderInjectedField = "key" | "Content-Type" | "Content-Disposition" | "file";
 
@@ -103,16 +104,20 @@ export class S3ObjectStorage {
         // this condition S3 rejects the form with "Extra input fields: content-type", since a
         // POST policy sanctions only the fields it explicitly lists.
         ["starts-with", "$Content-Type", ""],
-        // The uploader optionally sets Content-Disposition per object (e.g.
-        // `inline; filename="invoice.pdf"`) so the browser renders PDFs/images in the
-        // dashboard's preview iframe and downloads land with a real filename. A permissive
-        // starts-with sanctions the field without requiring it — uploads that omit it are
-        // still valid.
+        // The uploader sets Content-Disposition per object (e.g. `inline; filename="invoice.pdf"`)
+        // so the browser renders PDFs/images in the dashboard's preview iframe and downloads land
+        // with a real filename.
         ["starts-with", "$Content-Disposition", ""],
         ["content-length-range", 0, spec.maxBytes],
         ...(spec.retentionTag ? [{ "x-amz-tagging": `retention=${spec.retentionTag}` } as const] : []),
       ],
+      // createPresignedPost does NOT auto-populate Fields from Conditions: per the SDK docs,
+      // a conditioned field must ALSO be given a value in Fields or S3 rejects any POST that
+      // omits that form field with "Policy Condition failed". These empty-string defaults sign
+      // the fields so an upload is valid even before the uploader overrides them per object.
       Fields: {
+        "Content-Type": "",
+        "Content-Disposition": "",
         ...(spec.retentionTag ? { "x-amz-tagging": `retention=${spec.retentionTag}` } : {}),
       },
       Expires: 30,
@@ -130,20 +135,22 @@ export class S3ObjectStorage {
    * Upload a single object to a signed ticket. SDK-free — a plain multipart POST that
    * touches no S3 client, so it is `static`: the content-sanitizer isolate (which holds
    * no AWS credentials) calls it with only the ticket it was handed. The ticket's field
-   * union must cover every field this method injects (key, Content-Type, file), so a
-   * ticket that never signed those is a compile error.
+   * union must cover every field this method injects (key, Content-Type, Content-Disposition,
+   * file), so a ticket that never signed those is a compile error.
    *
-   * `contentDisposition`, when provided, is stored on the object and returned by the CDN
-   * as the `Content-Disposition` header — this is what makes the browser render a PDF/image
-   * inline (in the dashboard preview iframe) rather than force a download, and gives
-   * downloads a real filename.
+   * `contentDisposition` is stored on the object and returned by the CDN as the
+   * `Content-Disposition` header — this is what makes the browser render a PDF/image inline
+   * (in the dashboard preview iframe) rather than force a download, and gives downloads a real
+   * filename. It is always written to the form (empty string when the caller passes none):
+   * the signed policy conditions this field, and S3 rejects a POST that omits a conditioned
+   * field, so the field must be present on every upload.
    */
   static async upload(
     ticket: PresignedPost<UploadField>,
     key: string,
     content: Uint8Array | Buffer,
     contentType: string,
-    contentDisposition?: string,
+    contentDisposition = "",
   ): Promise<Result<void, S3UploadError>> {
     const form = new FormData();
 
@@ -155,7 +162,7 @@ export class S3ObjectStorage {
     }
     setField(form, "key", key);
     setField(form, "Content-Type", contentType);
-    if (contentDisposition) setField(form, "Content-Disposition", contentDisposition);
+    setField(form, "Content-Disposition", contentDisposition);
     // The file must be the last field.
     setField(form, "file", new Blob([Buffer.from(content)], { type: contentType }));
 
