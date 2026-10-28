@@ -288,7 +288,6 @@ Drill-in from inbox. Shows all signals in the thread as a chronological thread.
   - `payments` → amount, due date, invoice number, download link, payment type
   - `travel` → flight number, departure/arrival, confirmation code, boarding pass link
   - `auth` → OTP/magic link action button (copy code, open link), expiry countdown
-  - `alert` → service, severity, requiresAction flag, error message snippet
   - `job` → company, role, stage (applied / interview / offer), action required flag
   - `healthcare` → appointment date, provider, action required flag
   - `crm` → sender company, role, deal value, urgency, requiresReply flag

@@ -42,8 +42,8 @@ interface ParsedField {
 /**
  * Collapse multi-line field definitions into single logical lines.
  * Handles cases like:
- *   alertType:
- *     | "suspicious_login" | "new_device"
+ *   authType:
+ *     | "verification" | "password_reset"
  *     | "other";
  */
 function collapseMultilineFields(body: string): string[] {
@@ -196,16 +196,9 @@ describe("workflow registry ↔ TypeScript type alignment", () => {
       });
 
       it("field types match", () => {
-        // Fields intentionally widened to string in TypeScript while keeping enum guidance in the registry prompt
-        const FLEXIBLE_ENUM_FIELDS = new Set(["alertType"]);
-
         for (const registryField of entry.fields) {
           const tsField = tsFieldMap.get(registryField.name);
           if (!tsField) continue;
-
-          if (FLEXIBLE_ENUM_FIELDS.has(registryField.name) && registryField.type === "enum" && tsField.type === "string") {
-            continue; // Intentionally widened — registry enums are LLM guidance only
-          }
 
           // Number fields in the registry are stored as string in TypeScript —
           // the LLM is asked for numbers to encourage numeric output, but coercion
@@ -228,12 +221,8 @@ describe("workflow registry ↔ TypeScript type alignment", () => {
       });
 
       it("enum values match exactly", () => {
-        // Fields intentionally widened to string in TypeScript while keeping enum guidance in the registry prompt
-        const FLEXIBLE_ENUM_FIELDS = new Set(["alertType"]);
-
         for (const registryField of entry.fields) {
           if (registryField.type !== "enum") continue;
-          if (FLEXIBLE_ENUM_FIELDS.has(registryField.name)) continue;
 
           const tsField = tsFieldMap.get(registryField.name);
           if (!tsField || tsField.type !== "enum") continue;

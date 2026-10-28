@@ -24,7 +24,6 @@ export type WorkflowData =
   | PackageData
   | TravelData
   | PaymentsData
-  | AlertData
   | ContentData
   | NoticeData
   | HealthcareData
@@ -119,20 +118,6 @@ export interface PaymentsData {
   downloadUrl?: string;
   managementUrl?: string;
   paymentUrl?: string;
-}
-
-export interface AlertData {
-  workflow: "alert";
-  alertType: string;
-  service: string;
-  severity?: "info" | "warning" | "critical";
-  requiresAction: boolean;
-  actionUrl?: string;
-  ipAddress?: string;
-  location?: string;
-  deviceName?: string;
-  repository?: string;
-  errorMessage?: string;
 }
 
 export interface ContentData {

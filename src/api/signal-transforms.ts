@@ -93,7 +93,7 @@ function toApiSource(source: DbSignal["source"]): "system" | "user" {
 // Workflows where an unsubscribe link is meaningful to surface. Bulk/marketing-style mail
 // (content) and low-stakes relationship mail (conversation, notice, onboarding) legitimately
 // carry a manage-preferences/unsubscribe link; unspecified is kept because we can't rule it
-// out. Every other workflow (auth, payments, package, travel, healthcare, job, support, alert,
+// out. Every other workflow (auth, payments, package, travel, healthcare, job, support,
 // crm, events, healthcheck, test) is transactional/operational — an unsubscribe there is noise
 // or actively misleading, so it is stripped from the DTO at read time (the stored signal keeps
 // it for the one-click unsubscribe action).

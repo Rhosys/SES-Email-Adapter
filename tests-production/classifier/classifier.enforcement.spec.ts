@@ -2,8 +2,8 @@
  * Classifier enforcement integration tests.
  *
  * These tests invoke the REAL Bedrock model and assert correct classification
- * of emails that require user action — ensuring they route to workflow:alert
- * instead of workflow:notice.
+ * of account enforcement emails (takedowns, frozen accounts) — ensuring they
+ * route to workflow:notice.
  *
  * Run: npm run test:integration
  *
@@ -31,7 +31,7 @@ function makeInput(overrides: Partial<ClassificationInput>): ClassificationInput
   };
 }
 
-describe("Classifier enforcement — action-required emails → alert", () => {
+describe("Classifier enforcement — account enforcement → notice", () => {
   let classifier: SignalClassifier;
 
   beforeAll(() => {
@@ -39,7 +39,7 @@ describe("Classifier enforcement — action-required emails → alert", () => {
     classifier = new SignalClassifier(client, createConsoleLogger());
   });
 
-  it("copyright takedown with removal deadline → workflow:alert, requiresAction:true", async () => {
+  it("copyright takedown with removal deadline → workflow:notice", async () => {
     const result = await classifier.classify(makeInput({
       from: "site@acmehosting.example",
       to: ["user@acmehosting.example"],
@@ -50,12 +50,10 @@ describe("Classifier enforcement — action-required emails → alert", () => {
 
     expect(result.isOk()).toBe(true);
     const output = result._unsafeUnwrap();
-    expect(output.workflow).toBe("alert");
-    const wd = output.workflowData as unknown as Record<string, unknown>;
-    expect(wd.requiresAction).toBe(true);
+    expect(output.workflow).toBe("notice");
   }, 30_000);
 
-  it("account frozen requiring unlock → workflow:alert, requiresAction:true", async () => {
+  it("account frozen requiring unlock → workflow:notice", async () => {
     const result = await classifier.classify(makeInput({
       from: "site@acmehosting.example",
       to: ["user@acmehosting.example"],
@@ -66,8 +64,6 @@ describe("Classifier enforcement — action-required emails → alert", () => {
 
     expect(result.isOk()).toBe(true);
     const output = result._unsafeUnwrap();
-    expect(output.workflow).toBe("alert");
-    const wd = output.workflowData as unknown as Record<string, unknown>;
-    expect(wd.requiresAction).toBe(true);
+    expect(output.workflow).toBe("notice");
   }, 30_000);
 });

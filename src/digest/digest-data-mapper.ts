@@ -275,28 +275,6 @@ function buildWorkflowDetail(workflow: Workflow, data: WorkflowData): string {
       return parts.join(" · ");
     }
 
-    case "alert": {
-      if (data.workflow !== "alert") return "";
-      const typeLabel: Record<string, string> = {
-        suspicious_login: "Suspicious login",
-        new_device: "New device",
-        password_changed: "Password changed",
-        breach_notice: "Breach notice",
-        api_key_exposed: "API key exposed",
-        account_locked: "Account locked",
-        fraud_alert: "Fraud alert",
-        ci_failure: "CI failed",
-        deployment_failed: "Deploy failed",
-        error_spike: "Error spike",
-        domain_expiry: "Domain expiring",
-        cert_expiry: "Cert expiring",
-        security_scan: "Security scan",
-      };
-      const parts = [data.service, typeLabel[data.alertType] ?? data.alertType];
-      if (data.severity) parts.push(data.severity.toUpperCase());
-      return parts.join(" · ");
-    }
-
     case "content": {
       if (data.workflow !== "content") return "";
       const typeLabel: Record<string, string> = {

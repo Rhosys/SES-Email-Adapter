@@ -514,17 +514,14 @@ describe("SignalClassifier", () => {
   // classify — additional workflow coverage
   // -------------------------------------------------------------------------
 
-  describe("alert emails — fraud", () => {
-    it("extracts service, amount, and alertType from a fraud alert", async () => {
+  describe("notice emails — fraud warning", () => {
+    it("extracts provider and noticeType from a fraud warning", async () => {
       mockClassifyResponse({
-        workflow: "alert",
+        workflow: "notice",
         workflowData: {
-          workflow: "alert",
-          alertType: "fraud_alert",
-          service: "Chase Bank",
-          severity: "critical",
-          requiresAction: true,
-          accountLastFour: "4242",
+          workflow: "notice",
+          noticeType: "account_notification",
+          provider: "Chase Bank",
         },
         tags: [],
         summary: "Fraud alert from Chase Bank — unusual $2,499.99 charge.",
@@ -544,8 +541,8 @@ describe("SignalClassifier", () => {
 
       expect(result.isOk()).toBe(true);
       const output = result._unsafeUnwrap();
-      expect(output.workflow).toBe("alert");
-      expect(output.workflowData).toMatchObject({ alertType: "fraud_alert", requiresAction: true });
+      expect(output.workflow).toBe("notice");
+      expect(output.workflowData).toMatchObject({ noticeType: "account_notification", provider: "Chase Bank" });
       expect(output.labels).toContain("urgent");
     });
   });
@@ -596,18 +593,13 @@ describe("SignalClassifier", () => {
   });
 
   describe("security emails", () => {
-    it("extracts alertType and requiresAction from a suspicious login alert", async () => {
+    it("classifies a suspicious login notification as a notice", async () => {
       mockClassifyResponse({
-        workflow: "alert",
+        workflow: "notice",
         workflowData: {
-          workflow: "alert",
-          alertType: "suspicious_login",
-          service: "GitHub",
-          ipAddress: "203.0.113.42",
-          location: "Moscow, Russia",
-          deviceName: null,
-          requiresAction: true,
-          actionUrl: "https://github.com/settings/security",
+          workflow: "notice",
+          noticeType: "account_notification",
+          provider: "GitHub",
         },
         tags: [],
         summary: "GitHub detected a suspicious login from Moscow, Russia. Action required.",
@@ -627,9 +619,9 @@ describe("SignalClassifier", () => {
 
       expect(result.isOk()).toBe(true);
       const output = result._unsafeUnwrap();
-      expect(output.workflow).toBe("alert");
-      expect(output.workflowData).toMatchObject({ alertType: "suspicious_login", requiresAction: true });
-      expect(output.tags).toEqual([]); // legitimate alert from github.com
+      expect(output.workflow).toBe("notice");
+      expect(output.workflowData).toMatchObject({ noticeType: "account_notification", provider: "GitHub" });
+      expect(output.tags).toEqual([]); // legitimate notice from github.com
     });
   });
 

@@ -268,7 +268,7 @@ describe("deriveResourceInfo", () => {
   });
 
   describe("non-resource workflows", () => {
-    it.each(["auth", "conversation", "crm", "alert", "content", "onboarding", "notice", "support", "healthcheck", "test", "unspecified"] as const)(
+    it.each(["auth", "conversation", "crm", "content", "onboarding", "notice", "support", "healthcheck", "test", "unspecified"] as const)(
       "returns null for workflow %s",
       (workflow) => {
         expect(deriveResourceInfo(workflow, { workflow } as unknown as WorkflowData)).toBeNull();

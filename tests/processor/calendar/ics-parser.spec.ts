@@ -25,7 +25,7 @@ describe("findCalendarAttachments — MIME/extension detection", () => {
     { mime: "text/calendar", filename: "meeting.dat", workflow: "healthcare", detected: true, reason: "text/calendar MIME alone (no .ics extension)" },
     { mime: "application/pdf", filename: "invite.ics", workflow: "crm", detected: true, reason: ".ics extension alone (non-calendar MIME)" },
     { mime: "application/pdf", filename: "document.pdf", workflow: "conversation", detected: false, reason: "neither calendar MIME nor .ics extension" },
-    { mime: "text/calendar", filename: "invite.ics", workflow: "alert", detected: true, reason: "detection is workflow-independent" },
+    { mime: "text/calendar", filename: "invite.ics", workflow: "notice", detected: true, reason: "detection is workflow-independent" },
   ])("$reason → detected=$detected", ({ mime, filename, detected }) => {
     const logger = createMockLogger();
     const attachment = makeAttachment({ mimeType: mime, filename });

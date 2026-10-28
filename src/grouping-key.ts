@@ -14,7 +14,6 @@ export function deriveGroupingKey(
     case "onboarding":
     case "notice":
     case "payments":
-    case "alert":
     case "test":
       return `${base}:${senderETLD1}`;
 

@@ -86,7 +86,7 @@ describe("Classifier multilingual integration", () => {
     expect(output.workflowData).toMatchObject({ paymentType: "receipt" });
   }, 30_000);
 
-  it("Korean security alert → workflow:alert, alertType:suspicious_login", async () => {
+  it("Korean security alert → workflow:notice", async () => {
     const result = await classifier.classify(makeInput({
       from: "security@naver.com",
       subject: "비정상적인 로그인 시도가 감지되었습니다",
@@ -94,8 +94,7 @@ describe("Classifier multilingual integration", () => {
     }));
     expect(result.isOk()).toBe(true);
     const output = result._unsafeUnwrap();
-    expect(output.workflow).toBe("alert");
-    expect((output.workflowData as unknown as Record<string, unknown>).alertType).toBe("suspicious_login");
+    expect(output.workflow).toBe("notice");
   }, 30_000);
 
   it("German onboarding verification with action URL extracts the URL into actions array", async () => {
