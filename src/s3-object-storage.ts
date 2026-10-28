@@ -20,11 +20,13 @@ import { ok, err, type Result } from "./errors.js";
 // ---------------------------------------------------------------------------
 
 /**
- * A signed browser-POST upload ticket. `TField` is the exact union of form-field
- * names the policy signed — the phantom carried statically so the uploader can
- * only set fields the policy sanctioned. S3 rejects any form field its policy did
- * not list ("Extra input fields: <name>"), so the union is the compile-time guard
- * against that class of failure.
+ * A signed browser-POST upload ticket. `TField` is the exact union of form-field names the
+ * policy conditions allow — a phantom carried statically so the uploader can only set fields
+ * the policy sanctioned. S3 rejects any form field its policy did not condition ("Extra input
+ * fields: <name>"), so the union is the compile-time guard against that class of failure.
+ * `fields` holds the SDK's default form values (policy, signature, credentials, plus our
+ * per-field defaults) — these are submitted with the form but are NOT part of the signature;
+ * only the policy is signed.
  */
 export interface PresignedPost<TField extends string> {
   url: string;
@@ -34,8 +36,8 @@ export interface PresignedPost<TField extends string> {
 /**
  * Domain-level description of an upload ticket to sign. No S3 vocabulary — the
  * caller states intent (where keys may land, how big, how to tag) and this class
- * translates it into policy Conditions and Fields. Both the Conditions array and
- * the signed field union are derived from this one spec, so they cannot drift.
+ * translates it into policy Conditions and default Fields. Both the Conditions array and
+ * the allowed field-name union are derived from this one spec, so they cannot drift.
  */
 export interface UploadTicketSpec {
   /** All uploaded object keys must start with this prefix. */
@@ -90,9 +92,12 @@ export class S3ObjectStorage {
   }
 
   /**
-   * Sign a browser-POST upload ticket from a domain spec. Derives both the policy
-   * Conditions and the signed field union here, in one place, so a field cannot be
-   * signed without a matching condition or vice versa.
+   * Sign a browser-POST upload ticket from a domain spec. Only the policy (expiration +
+   * Conditions) is cryptographically signed; `Fields` is NOT signed — it is just a dict of
+   * default form values the SDK echoes back in the response for the uploader to submit. We
+   * derive the Conditions and the default Fields together here, in one place, so every
+   * conditioned field also has a default form value (S3 rejects a POST that omits a
+   * conditioned field) and the two cannot drift.
    */
   async generatePresignedPost(spec: UploadTicketSpec): Promise<PresignedPost<UploadField>> {
     const post = await createPresignedPost(this.s3Client, {
@@ -111,10 +116,14 @@ export class S3ObjectStorage {
         ["content-length-range", 0, spec.maxBytes],
         ...(spec.retentionTag ? [{ "x-amz-tagging": `retention=${spec.retentionTag}` } as const] : []),
       ],
-      // createPresignedPost does NOT auto-populate Fields from Conditions: per the SDK docs,
-      // a conditioned field must ALSO be given a value in Fields or S3 rejects any POST that
-      // omits that form field with "Policy Condition failed". These empty-string defaults sign
-      // the fields so an upload is valid even before the uploader overrides them per object.
+      // Fields is NOT signed — it is the set of default form values the SDK returns for the
+      // uploader to submit. createPresignedPost does NOT derive it from Conditions: per the SDK
+      // docs, a conditioned field must ALSO appear here or S3 rejects any POST that omits that
+      // form field with "Policy Condition failed". These empty-string defaults guarantee the
+      // returned ticket carries both fields; `upload` overwrites them with the real per-object
+      // value (see its always-set writes). Belt-and-suspenders with `upload`: the ticket carries
+      // the fields AND every upload re-sets them, so neither path can produce a POST that omits
+      // a conditioned field.
       Fields: {
         "Content-Type": "",
         "Content-Disposition": "",
@@ -134,16 +143,19 @@ export class S3ObjectStorage {
   /**
    * Upload a single object to a signed ticket. SDK-free — a plain multipart POST that
    * touches no S3 client, so it is `static`: the content-sanitizer isolate (which holds
-   * no AWS credentials) calls it with only the ticket it was handed. The ticket's field
-   * union must cover every field this method injects (key, Content-Type, Content-Disposition,
-   * file), so a ticket that never signed those is a compile error.
+   * no AWS credentials) calls it with only the ticket it was handed. The ticket's allowed
+   * field-name union must cover every field this method injects (key, Content-Type,
+   * Content-Disposition, file), so a ticket whose policy did not condition those is a compile
+   * error.
    *
    * `contentDisposition` is stored on the object and returned by the CDN as the
    * `Content-Disposition` header — this is what makes the browser render a PDF/image inline
    * (in the dashboard preview iframe) rather than force a download, and gives downloads a real
    * filename. It is always written to the form (empty string when the caller passes none):
-   * the signed policy conditions this field, and S3 rejects a POST that omits a conditioned
-   * field, so the field must be present on every upload.
+   * the policy conditions this field, and S3 rejects a POST that omits a conditioned field, so
+   * it must be present on every upload. generatePresignedPost also seeds an empty default for
+   * it in the ticket's Fields; the always-write here is the authoritative guarantee and
+   * overwrites that default per object.
    */
   static async upload(
     ticket: PresignedPost<UploadField>,
@@ -154,9 +166,11 @@ export class S3ObjectStorage {
   ): Promise<Result<void, S3UploadError>> {
     const form = new FormData();
 
-    // Every write goes through setField so the field name is checked against the
-    // signed union. set() (not append()): S3's exact-match conditions reject a field
-    // that appears twice, so a later same-named field must replace an earlier one.
+    // Seed the form with the ticket's default field values (policy, signature, credentials,
+    // and the empty Content-Type/Content-Disposition defaults from generatePresignedPost).
+    // Every write goes through setField so the field name is checked against the allowed
+    // field-name union. set() (not append()): S3's exact-match conditions reject a field that
+    // appears twice, so the real per-object writes below replace these defaults in place.
     for (const [field, value] of Object.entries(ticket.fields)) {
       setField(form, field as UploadField, value as string);
     }
@@ -187,8 +201,9 @@ export class S3ObjectStorage {
 
 /**
  * The only path that writes a field onto an upload form. `name` is constrained to the
- * signed field union, so a stray or mistyped field name (e.g. lowercase "content-type")
- * is a compile error instead of a runtime S3 "Extra input fields" rejection.
+ * allowed field-name union (the names the policy conditions permit), so a stray or mistyped
+ * field name (e.g. lowercase "content-type") is a compile error instead of a runtime S3
+ * "Extra input fields" rejection.
  */
 function setField(form: FormData, name: UploadField, value: string | Blob): void {
   form.set(name, value);
