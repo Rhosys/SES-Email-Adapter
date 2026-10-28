@@ -91,6 +91,7 @@ export interface ImapConnectionConfig {
 
 export type ImapError =
   | { kind: "transient"; reason: string; cause: unknown }
+  | { kind: "connection_refused"; reason: string; cause: unknown }
   | { kind: "auth_failed"; reason: string; cause: unknown }
   | { kind: "tls_error"; reason: string; cause: unknown }
   | { kind: "mailbox_error"; reason: string; cause: unknown }
@@ -100,7 +101,10 @@ function imapErr(e: unknown): ImapError {
   const reason = e instanceof Error ? e.message.slice(0, 256) : String(e).slice(0, 256);
   const code = e instanceof Error ? (e as NodeJS.ErrnoException).code : undefined;
 
-  if (code === "ETIMEDOUT" || code === "ECONNREFUSED" || code === "ECONNRESET" || code === "EHOSTUNREACH" || code === "ENOTFOUND" || code === "CONNECT_TIMEOUT") {
+  if (code === "ECONNREFUSED") {
+    return { kind: "connection_refused", reason, cause: e };
+  }
+  if (code === "ETIMEDOUT" || code === "ECONNRESET" || code === "EHOSTUNREACH" || code === "ENOTFOUND" || code === "CONNECT_TIMEOUT") {
     return { kind: "transient", reason, cause: e };
   }
   if (e instanceof Error) {
@@ -108,7 +112,10 @@ function imapErr(e: unknown): ImapError {
       return { kind: "auth_failed", reason, cause: e };
     }
     const msg = e.message.toLowerCase();
-    if (msg.includes("timeout") || msg.includes("econnrefused") || msg.includes("enotfound") || msg.includes("ehostunreach")) {
+    if (msg.includes("econnrefused")) {
+      return { kind: "connection_refused", reason, cause: e };
+    }
+    if (msg.includes("timeout") || msg.includes("enotfound") || msg.includes("ehostunreach")) {
       return { kind: "transient", reason, cause: e };
     }
     if (msg.includes("certificate") || msg.includes("cert") || msg.includes("ssl") || msg.includes("tls") || msg.includes("self.signed") || msg.includes("self-signed")) {
@@ -354,18 +361,18 @@ export class ImapAdapter implements ProviderAdapter {
         break;
       }
       lastConnectError = connectResult.error;
-      if (connectResult.error.kind !== "transient") {
-        return this.handleRenewalFailure(emx, connectResult.error.reason);
+      if (connectResult.error.kind !== "transient" && connectResult.error.kind !== "connection_refused") {
+        return this.handleRenewalFailure(emx, connectResult.error);
       }
     }
     if (!conn) {
-      return this.handleRenewalFailure(emx, lastConnectError!.reason, lastConnectError!.kind === "transient" ? "provider_renewal_unreachable" : "provider_renewal_failed");
+      return this.handleRenewalFailure(emx, lastConnectError!);
     }
 
     const stateResult = await conn.getInboxState();
     if (stateResult.isErr()) {
       await conn.logout();
-      return this.handleRenewalFailure(emx, stateResult.error.reason);
+      return this.handleRenewalFailure(emx, stateResult.error);
     }
 
     const { uidvalidity: currentUidvalidity } = stateResult.value;
@@ -389,7 +396,7 @@ export class ImapAdapter implements ProviderAdapter {
     await conn.logout();
 
     if (searchResult.isErr()) {
-      return this.handleRenewalFailure(emx, searchResult.error.reason);
+      return this.handleRenewalFailure(emx, searchResult.error);
     }
 
     const newUids = searchResult.value;
@@ -615,9 +622,11 @@ export class ImapAdapter implements ProviderAdapter {
   // Private: handle renewal failure with consecutive failure tracking
   // ---------------------------------------------------------------------------
 
-  private async handleRenewalFailure(emx: ExternalMailExchange, cause: string, kind: ProviderRenewalError["kind"] = "provider_renewal_failed"): Promise<Result<void, ProviderRenewalError>> {
-    // Unreachable server after retries is outside our control and retried by the next sweep — warn, not error.
-    if (kind === "provider_renewal_unreachable") {
+  private async handleRenewalFailure(emx: ExternalMailExchange, failure: string | ImapError): Promise<Result<void, ProviderRenewalError>> {
+    const cause = typeof failure === "string" ? failure : failure.reason;
+    const kind = typeof failure !== "string" && failure.kind === "connection_refused" ? "provider_connection_refused" : "provider_renewal_failed";
+    // A refused connection after retries is outside our control and retried by the next sweep — warn, not error.
+    if (kind === "provider_connection_refused") {
       this.logger.warn(`IMAP renewal failed: ${cause}`, { code: "imap.renew.failed", emxId: emx.id, cause });
     } else {
       this.logger.error(`IMAP renewal failed: ${cause}`, { code: "imap.renew.failed", emxId: emx.id, cause });

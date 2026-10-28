@@ -78,8 +78,8 @@ export class EmxDispatchWorker {
     // failure below, same as any other renewal problem, rather than a separate check here.
     const renewResult = await adapter.renew(emx, includeOverlap !== undefined ? { includeOverlap } : {});
     if (renewResult.isErr()) {
-      // Unreachable-provider failures are retried by the next sweep — warn, not error.
-      const log = renewResult.error.kind === "provider_renewal_unreachable" ? this.logger.warn.bind(this.logger) : this.logger.error.bind(this.logger);
+      // Refused connections are retried by the next sweep — warn, not error.
+      const log = renewResult.error.kind === "provider_connection_refused" ? this.logger.warn.bind(this.logger) : this.logger.error.bind(this.logger);
       log(`emx_dispatch: renewal failed: ${renewResult.error.cause}`, { code: "emx.dispatch.renewal_failed", emxId: emx.id, platform: emx.platform, error: renewResult.error });
       return;
     }

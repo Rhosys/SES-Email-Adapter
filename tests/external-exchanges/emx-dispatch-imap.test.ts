@@ -127,11 +127,11 @@ describe("dispatch worker logs adapter errors", () => {
     );
   });
 
-  it("logs warn (not error) when the IMAP server is unreachable", async () => {
+  it("logs warn (not error) when the IMAP server refuses the connection", async () => {
     const emx = makeImapEmx();
     mockDb.listExchangesDue.mockResolvedValue(ok([emx]));
     vi.mocked(mockImapAdapter.renew).mockResolvedValue(
-      err({ kind: "provider_renewal_unreachable", cause: "connect ECONNREFUSED 127.0.0.1:143" }),
+      err({ kind: "provider_connection_refused", cause: "connect ECONNREFUSED 127.0.0.1:143" }),
     );
 
     const worker = createWorker();
