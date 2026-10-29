@@ -20,7 +20,7 @@ import { CalendarExtractor } from "../../../src/processor/calendar/calendar-even
 import { buildProxyUid as buildProxyUidRaw } from "../../../src/processor/calendar/proxy-uid.js";
 import { buildCalendarSignalLookupId } from "../../../src/processor/calendar/signal-lookup.js";
 import type { CalendarEventData } from "../../../src/types/calendar.js";
-import type { Signal, Thread, Attachment } from "../../../src/types/index.js";
+import type { Signal, Thread, Attachment, AnySignal } from "../../../src/types/index.js";
 import type { InboundSignalMessage } from "../../../src/processor/incoming-email-processor.js";
 import type { EmailContentStore } from "../../../src/content-store.js";
 import type { EmailService } from "../../../src/email/email-service.js";
@@ -190,6 +190,7 @@ function makeRsvpThreadStore(): RsvpThreadStore {
     })),
     setCalendarEventRsvp: vi.fn().mockResolvedValue(ok(true)),
     listSignals: vi.fn().mockResolvedValue(ok({ items: [makeStoredInvite()] })),
+    getSignalById: vi.fn().mockResolvedValue(ok({ id: "sgn-email-001", type: "email", data: { recipientAddress: ALIAS_ADDRESS } } as unknown as AnySignal)),
   };
 }
 

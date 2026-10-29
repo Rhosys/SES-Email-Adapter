@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // IncomingCalendarRsvpProcessor — the lifecycle half of the inbound calendar loop.
 //
-// A message addressed to {threadId}@{accountId}.{serviceDomain} is NOT a normal
+// A message addressed to {aliasLocalPart}@{accountId}.{serviceDomain} is NOT a normal
 // inbound email: it is an RSVP to an invite WE forwarded, coming back from the
 // attendee's calendar app. It creates no email signal, has no classification, no
 // thread-matching. Its job is narrow: fetch the raw message, pull every .ics part
@@ -10,7 +10,8 @@
 // single message, e.g. an assistant relaying several attendees' replies together),
 // and process each independently: ask CalendarForwarder to validate it (stateless:
 // METHOD:REPLY + PARTSTAT + proxy-UID HMAC), then — only on success — look up the
-// thread, relay the RSVP back to the organizer under the alias, and record the
+// thread, relay the RSVP back to the organizer from the alias that originally received
+// the invite (never the proxy address it arrived at), and record the
 // RSVP on the event's calendar_event signal.
 //
 // Every failure short of that resolves to ok(undefined) with a WARN: a message
@@ -33,6 +34,8 @@ import { parseIcs } from "./calendar/ics-parser.js";
 import { collapseCalendarSignals } from "../api/calendar-collapse.js";
 import { isCalendarEventSignal } from "../types/calendar.js";
 import type { Logger } from "../logger.js";
+import { isEmailSignal } from "../types/index.js";
+import { extractFirstInReplyTo } from "./message-id.js";
 import type { Thread, AnySignal, CalendarRsvpResponse } from "../types/index.js";
 
 // ---------------------------------------------------------------------------
@@ -47,6 +50,8 @@ export interface RsvpThreadStore {
   // RSVP's event and collapse the group to its latest state. The inbound REPLY tells us the
   // event identity (via the HMAC proxy UID); the stored invite is what we actually relay.
   listSignals(accountId: string, threadId: string, params: { limit?: number }): Promise<Result<{ items: AnySignal[] }, DbError>>;
+  // Load the email that carried the invite, whose envelope recipient is the alias we reply FROM.
+  getSignalById(accountId: string, signalId: string, threadId: string): Promise<Result<AnySignal | null, DbError>>;
 }
 
 export interface IncomingCalendarRsvpProcessorDeps {
@@ -78,12 +83,16 @@ export class IncomingCalendarRsvpProcessor {
     // single message (e.g. an assistant relaying several attendees' replies together, or
     // a client that restates the invite alongside the reply) — process each independently
     // so none are silently dropped.
-    const icsAttachments = await this.extractIcsAttachments(msg.s3Key);
+    const { attachments: icsAttachments, inReplyTo } = await this.extractIcsAttachments(msg.s3Key);
     if (icsAttachments.length === 0) {
-      this.logger.warn("Calendar RSVP: no calendar attachment on message — dropping.", {
+      // Most likely the user hit "reply" on a forwarded invite instead of RSVPing. Tracked so
+      // we can see how often that happens and decide whether such replies need handling.
+      const inReplyToMsgId = inReplyTo ? extractFirstInReplyTo(inReplyTo) : null;
+      this.logger.track("Calendar RSVP: no calendar attachment on message — dropping.", {
         code: "processor.calendar_response.no_ics",
         recipient,
         compositeMailMessageId: msg.compositeMailMessageId,
+        inReplyToOurMessage: inReplyToMsgId?.toLowerCase().endsWith(".amazonses.com") ?? false,
       });
       return ok(undefined);
     }
@@ -177,9 +186,21 @@ export class IncomingCalendarRsvpProcessor {
     const originalCalendarMeetingInvite = winnerSignal.data;
     const inviteCancelled = enrichment.cancelledAt !== undefined;
 
-    // The reply address that received this RSVP is also the alias we send FROM,
-    // masking the user's real mailbox back to the organizer.
-    const aliasAddress = recipient;
+    // Reply FROM the alias that originally received the invite — the envelope recipient of the
+    // email that carried it — never the proxy address this RSVP arrived at. Mirrors the API path.
+    const emailSignalResult = await this.threadStore.getSignalById(accountId, originalCalendarMeetingInvite.linkedSignalId, threadId);
+    if (emailSignalResult.isErr()) return err(emailSignalResult.error);
+    const emailSignal = emailSignalResult.value;
+    const aliasAddress = emailSignal && isEmailSignal(emailSignal) && "recipientAddress" in emailSignal.data ? emailSignal.data.recipientAddress : "";
+    if (!aliasAddress) {
+      this.logger.warn("Calendar RSVP: alias address for the original invite not found — dropping.", {
+        code: "processor.calendar_response.alias_not_found",
+        accountId,
+        threadId,
+        linkedSignalId: originalCalendarMeetingInvite.linkedSignalId,
+      });
+      return ok(undefined);
+    }
 
     // --- 6. Relay the RSVP back to the organizer (send-first, record-second) ---
     const replyResult = await this.calendarForwarder.sendRsvpToOrganizer(
@@ -225,7 +246,7 @@ export class IncomingCalendarRsvpProcessor {
    * text/calendar (or .ics) part present. MIME parsing lives in
    * MailparserMimeParser (outside src/processor/) per ADR 011.
    */
-  private async extractIcsAttachments(s3Key: string): Promise<Uint8Array[]> {
+  private async extractIcsAttachments(s3Key: string): Promise<{ attachments: Uint8Array[]; inReplyTo?: string }> {
     const rawMime = await this.emailContentStore.getRawEmail(s3Key);
     return this.mimeParser.extractCalendarAttachments(Buffer.from(rawMime));
   }

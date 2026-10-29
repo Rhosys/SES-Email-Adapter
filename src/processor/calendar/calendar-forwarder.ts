@@ -3,8 +3,8 @@
 //
 // Two operations, one send mechanism:
 //   - forwardInvite: relays an inbound invite to the user's real calendar. Sent
-//     under the PLATFORM tenant from the platform domain, behind a proxy UID and
-//     proxy ORGANIZER so the user's real calendar identity is never exposed. The
+//     under the PLATFORM tenant from the proxy ORGANIZER address (a platform
+//     subdomain), behind a proxy UID so the user's real calendar identity is never exposed. The
 //     iCalendar METHOD is passed through unchanged (REQUEST, CANCEL, COUNTER, …).
 //   - sendReply: relays the user's RSVP back to the organizer. Sent under the
 //     CUSTOMER tenant from the alias address, carrying the ORIGINAL event UID so
@@ -26,6 +26,7 @@ import type { Logger } from "../../logger.js";
 import { buildProxyUid, validateProxyUid } from "./proxy-uid.js";
 import { buildForwardIcs, buildReplyIcs } from "./ics-builder.js";
 import { buildMimeMessage } from "../../email/mime-builder.js";
+import { formatAddress } from "../../email/address.js";
 import { buildOutboundMsgId } from "../message-id.js";
 import { TAG_SIGNAL_ID, TAG_THREAD_ID, TAG_ACCOUNT_ID } from "../../email/ses-tags.js";
 import type { HmacSecretGenerator } from "./hmac-secret-generator.js";
@@ -96,7 +97,7 @@ const PARTSTAT_TO_DECISION: Record<string, "accepted" | "declined" | "tentative"
 // Given a parsed inbound .ics, decide whether it is a genuine RSVP to an invite
 // WE forwarded. Every check is pure computation over the .ics plus the HMAC
 // secret — no I/O, no database. The only trust anchor is the proxy UID's HMAC:
-// an attacker can address a message to the public {threadId}@{accountId}.domain
+// an attacker can address a message to the public {aliasLocalPart}@{accountId}.domain
 // reply address, but cannot forge a UID that validates without the secret, so
 // the accountId/threadId/originalVeventUid returned here are authoritative and
 // the untrusted recipient address is never consulted for identity.
@@ -166,7 +167,7 @@ export class CalendarForwarder {
    * swallowed (logged WARN, returns ok) so a bad invite is never retried.
    */
   async forwardInvite(opts: ForwardInviteOpts, logger: Logger): Promise<Result<void, DbError | EmailServiceError>> {
-    const { calendarSignal, calendarForwardingAddress, accountId, threadId } = opts;
+    const { calendarSignal, calendarForwardingAddress, accountId, threadId, aliasAddress } = opts;
     const calendarData = calendarSignal.data;
 
     if (!calendarForwardingAddress) {
@@ -186,21 +187,27 @@ export class CalendarForwarder {
       hmac: this.hmac,
     });
 
-    // Proxy ORGANIZER: mailto:{threadId}@{accountId}.{serviceDomain} — masks the real organizer.
-    const proxyOrganizer = `mailto:${threadId}@${accountId}.${this.serviceDomain}`;
+    // Proxy organizer: {aliasLocalPart}@{accountId}.{serviceDomain} — masks the real organizer.
+    // Identity rides the HMAC proxy UID, so the local part is free to be readable; RSVPs route
+    // back on the account subdomain alone (a calendar may lowercase the address).
+    const aliasLocalPart = aliasAddress.slice(0, aliasAddress.lastIndexOf("@"));
+    const proxyAddress = `${aliasLocalPart}@${accountId}.${this.serviceDomain}`;
+    const proxyOrganizer = `mailto:${proxyAddress}`;
+    // Shown as the sender in both the mail and calendar UIs.
+    const organizerName = calendarData.organizerCn ?? calendarData.organizer;
 
     const icsContent = buildForwardIcs({
       calendarData,
       proxyUid,
       proxyOrganizer,
-      organizerCn: calendarData.organizerCn ?? calendarData.organizer,
+      organizerCn: organizerName,
       attendeeAddress: calendarForwardingAddress,
     });
 
     const sendResult = await this.sendCalendarMessage({
-      // Sent under the platform tenant from the platform domain — NOT the customer tenant.
-      // Forwarded invites originate from the service, not the customer's own domain.
-      from: this.emailService.platformFrom,
+      // Sent under the platform tenant from the proxy organizer address (a subdomain of the
+      // platform domain) — NOT the customer tenant, so mail and calendar show one sender.
+      from: formatAddress({ address: proxyAddress, name: organizerName }),
       to: calendarForwardingAddress,
       subject: calendarData.title,
       icsContent,

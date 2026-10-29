@@ -10,7 +10,7 @@ import { generateId, generateAccountId } from "../../src/utils/id.js";
 import { makeHmacGeneratorFake } from "../helpers/hmac-generator-fake.js";
 import { createMockLogger } from "../helpers/mock-logger.js";
 import { ok, err, dbError } from "../../src/errors.js";
-import type { Signal } from "../../src/types/index.js";
+import type { Signal, AnySignal } from "../../src/types/index.js";
 import type { CalendarEventData } from "../../src/types/calendar.js";
 
 // ---------------------------------------------------------------------------
@@ -29,6 +29,7 @@ const ORIGINAL_UID = "uid-original-123";
 const ORGANIZER = "alice@example.com";
 const RECIPIENT = `${VALID_ARC_ID}@${VALID_ACC_ID}.${SERVICE_DOMAIN}`;
 const S3_KEY = "emails/rsvp.eml";
+const ALIAS_ADDRESS = "me@acme.example.com";
 
 const buildProxyUid = (opts: Omit<Parameters<typeof buildProxyUidRaw>[0], "hmac">) =>
   buildProxyUidRaw({ ...opts, hmac });
@@ -135,10 +136,11 @@ function rawMultiRsvpEmail(opts: { proxyUidA: string; proxyUidB: string }): Uint
 }
 
 /** A message with no calendar part at all. */
-function rawPlainEmail(): Uint8Array {
+function rawPlainEmail(opts: { inReplyTo?: string } = {}): Uint8Array {
   const message = [
     `From: ${ORGANIZER}`,
     `To: ${RECIPIENT}`,
+    ...(opts.inReplyTo ? [`In-Reply-To: ${opts.inReplyTo}`] : []),
     "Subject: Just a note",
     "MIME-Version: 1.0",
     "Content-Type: text/plain; charset=UTF-8",
@@ -185,6 +187,11 @@ function storedInvite(overrides: Partial<CalendarEventData> = {}): Signal<Calend
   };
 }
 
+/** The email that carried the invite — its envelope recipient is the alias we reply from. */
+function inviteEmail(): AnySignal {
+  return { id: "sgn-email-001", type: "email", data: { recipientAddress: ALIAS_ADDRESS } } as unknown as AnySignal;
+}
+
 function makeThreadStore(overrides: Partial<RsvpThreadStore> = {}): RsvpThreadStore {
   return {
     getThread: vi.fn().mockResolvedValue(ok({
@@ -199,6 +206,7 @@ function makeThreadStore(overrides: Partial<RsvpThreadStore> = {}): RsvpThreadSt
     })),
     setCalendarEventRsvp: vi.fn().mockResolvedValue(ok(true)),
     listSignals: vi.fn().mockResolvedValue(ok({ items: [storedInvite()] })),
+    getSignalById: vi.fn().mockResolvedValue(ok(inviteEmail())),
     ...overrides,
   };
 }
@@ -242,10 +250,11 @@ describe("IncomingCalendarRsvpProcessor — happy path", () => {
 
     expect(result.isOk()).toBe(true);
 
-    // Reply was relayed to the organizer, from the alias (recipient) address.
+    // Reply was relayed to the organizer from the alias that received the invite, not the proxy address.
     const sendCall = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(sendCall.to).toEqual([ORGANIZER]);
-    expect(sendCall.fromSender).toBe(RECIPIENT);
+    expect(sendCall.fromSender).toBe(ALIAS_ADDRESS);
+    expect(threadStore.getSignalById).toHaveBeenCalledWith(VALID_ACC_ID, "sgn-email-001", VALID_ARC_ID);
 
     // RSVP recorded on the stored invite row, keyed to the HMAC-authenticated identity.
     const [accountId, signalLookupId, rsvp] = (threadStore.setCalendarEventRsvp as ReturnType<typeof vi.fn>).mock.calls[0]!;
@@ -370,7 +379,18 @@ describe("IncomingCalendarRsvpProcessor — drop paths (ok, no signal, WARN)", (
     expect(result.isOk()).toBe(true);
     expect(threadStore.getThread).not.toHaveBeenCalled();
     expect(threadStore.setCalendarEventRsvp).not.toHaveBeenCalled();
-    expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "processor.calendar_response.no_ics")).toBe(true);
+    const tracked = logger.calls.find(c => c.method === "track" && c.context?.code === "processor.calendar_response.no_ics");
+    expect(tracked?.context?.inReplyToOurMessage).toBe(false);
+  });
+
+  it("tracks a plain reply to an invite we forwarded (In-Reply-To one of our SES messages)", async () => {
+    const { processor, logger } = makeProcessor({ raw: rawPlainEmail({ inReplyTo: "<0102abc@eu-central-1.amazonses.com>" }) });
+
+    const result = await processor.process(makeMessage());
+
+    expect(result.isOk()).toBe(true);
+    const tracked = logger.calls.find(c => c.method === "track" && c.context?.code === "processor.calendar_response.no_ics");
+    expect(tracked?.context?.inReplyToOurMessage).toBe(true);
   });
 
   it("drops a forged proxy UID (HMAC mismatch) before any I/O", async () => {
@@ -409,5 +429,19 @@ describe("IncomingCalendarRsvpProcessor — drop paths (ok, no signal, WARN)", (
     expect(threadStore.getThread).toHaveBeenCalledWith(VALID_ACC_ID, VALID_ARC_ID);
     expect(threadStore.setCalendarEventRsvp).not.toHaveBeenCalled();
     expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "processor.calendar_response.thread_not_found")).toBe(true);
+  });
+
+  it("drops (WARN) without replying when the email that carried the invite cannot be found", async () => {
+    const proxyUid = await buildProxyUid({ accountId: VALID_ACC_ID, threadId: VALID_ARC_ID, originalVeventUid: ORIGINAL_UID, serviceDomain: SERVICE_DOMAIN });
+    const emailService = { sendRaw: vi.fn() } as unknown as EmailService;
+    const threadStore = makeThreadStore({ getSignalById: vi.fn().mockResolvedValue(ok(null)) });
+    const { processor, logger } = makeProcessor({ raw: rawRsvpEmail({ proxyUid }), threadStore, forwarder: makeForwarder(emailService) });
+
+    const result = await processor.process(makeMessage());
+
+    expect(result.isOk()).toBe(true);
+    expect(emailService.sendRaw).not.toHaveBeenCalled();
+    expect(threadStore.setCalendarEventRsvp).not.toHaveBeenCalled();
+    expect(logger.calls.some(c => c.method === "warn" && c.context?.code === "processor.calendar_response.alias_not_found")).toBe(true);
   });
 });

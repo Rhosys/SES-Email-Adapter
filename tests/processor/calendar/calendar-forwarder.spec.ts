@@ -185,7 +185,7 @@ describe("CalendarForwarder.forwardInvite — no-op when calendarForwardingAddre
 // ---------------------------------------------------------------------------
 
 describe("CalendarForwarder.forwardInvite — sends under the platform tenant", () => {
-  it("sends under the platform tenant, not the customer account, so every forwarded invite visibly originates from the service — recipients know who is sending (the service, on the customer's behalf) rather than having to filter by sender on the receiving side, and concentrating all sends on the platform domain builds our sending-domain reputation instead of fragmenting it across unverified customer domains", async () => {
+  it("sends under the platform tenant, not the customer account, so concentrating all sends on the platform domain builds our sending-domain reputation instead of fragmenting it across unverified customer domains", async () => {
     const emailService = makeEmailService();
     const forwarder = makeForwarder(emailService);
     // Customer account on the opts — the send must NOT use this as the SES tenant.
@@ -198,10 +198,41 @@ describe("CalendarForwarder.forwardInvite — sends under the platform tenant", 
     const sendCall = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(sendCall.accountId).toBe(PLATFORM_TENANT);
     expect(sendCall.accountId).not.toBe("acc-abc123");
-    // The From is the platform address — set as fromSender and baked into the MIME From header.
-    expect(sendCall.fromSender).toBe(PLATFORM_FROM);
-    const { headerBlock } = parseRawSend(emailService);
-    expect(headerBlock).toContain(`From: ${PLATFORM_FROM}`);
+    // The From is the proxy organizer address (a platform subdomain), not the platform sender.
+    expect(sendCall.fromSender).not.toBe(PLATFORM_FROM);
+  });
+});
+
+describe("CalendarForwarder.forwardInvite — proxy organizer address", () => {
+  // WHY: identity rides the HMAC proxy UID, so the address only routes. The alias local part
+  // keeps it readable, and using it as both ORGANIZER and From shows one sender everywhere.
+  const PROXY = "alias@acc-abc123.platform.email.rhosys.cloud";
+
+  it("uses {aliasLocalPart}@{accountId}.{serviceDomain} as ORGANIZER and From, named after the organizer", async () => {
+    const emailService = makeEmailService();
+    const forwarder = makeForwarder(emailService);
+
+    await forwarder.forwardInvite(makeOpts(), makeLogger());
+
+    const sendCall = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(sendCall.fromSender).toBe(`Alice Smith <${PROXY}>`);
+    const { headerBlock, icsContent } = parseRawSend(emailService);
+    expect(headerBlock).toContain(`From: Alice Smith <${PROXY}>`);
+    const organizerLine = icsContent.replace(/\r\n[ \t]/g, "").split("\r\n").find(l => l.startsWith("ORGANIZER"));
+    expect(organizerLine).toMatch(/CN="?Alice Smith"?/);
+    expect(organizerLine).toContain(`:mailto:${PROXY}`);
+  });
+
+  it("falls back to the organizer's email address as the display name when it has no name", async () => {
+    const emailService = makeEmailService();
+    const forwarder = makeForwarder(emailService);
+    const signal = makeCalendarSignal("REQUEST");
+    delete signal.data.organizerCn;
+
+    await forwarder.forwardInvite(makeOpts({ calendarSignal: signal }), makeLogger());
+
+    const sendCall = (emailService.sendRaw as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(sendCall.fromSender).toBe(`"alice@example.com" <${PROXY}>`);
   });
 });
 

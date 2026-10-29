@@ -68,7 +68,7 @@ export class MailparserMimeParser {
    * keeps the attachment content (parse() deliberately discards it).
    */
   async extractCalendarAttachment(rawEmail: Buffer | string): Promise<Uint8Array | null> {
-    const attachments = await this.extractCalendarAttachments(rawEmail);
+    const { attachments } = await this.extractCalendarAttachments(rawEmail);
     return attachments[0] ?? null;
   }
 
@@ -78,9 +78,11 @@ export class MailparserMimeParser {
    * attendees' RSVPs, or a client that bundles the reply alongside a restated
    * invite) can deliver more than one calendar part on a single message — the
    * single-attachment extractCalendarAttachment() would silently process only the
-   * first and drop the rest. Order matches attachment order in the message.
+   * first and drop the rest. Order matches attachment order in the message. The
+   * In-Reply-To header is returned alongside so a caller can tell a plain reply
+   * (no calendar part) to a message we sent from unsolicited mail.
    */
-  async extractCalendarAttachments(rawEmail: Buffer | string): Promise<Uint8Array[]> {
+  async extractCalendarAttachments(rawEmail: Buffer | string): Promise<{ attachments: Uint8Array[]; inReplyTo?: string }> {
     const parsed = await simpleParser(rawEmail);
     const calendarAttachments: Uint8Array[] = [];
     for (const attachment of parsed.attachments) {
@@ -89,6 +91,6 @@ export class MailparserMimeParser {
         (attachment.filename?.toLowerCase().endsWith(".ics") ?? false);
       if (isCalendar) calendarAttachments.push(new Uint8Array(attachment.content));
     }
-    return calendarAttachments;
+    return { attachments: calendarAttachments, ...(parsed.inReplyTo ? { inReplyTo: parsed.inReplyTo } : {}) };
   }
 }

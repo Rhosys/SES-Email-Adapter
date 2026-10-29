@@ -11,11 +11,33 @@ const DROPPED_ACCOUNT_ID = "acc-t8cmlkkck3vtm";
 const DROPPED_THREAD_LOCALPART = "thr-1cep7zzquucqssmfubci5525d";
 
 describe("isRsvpReplyAddress — production-dropped address (REGRESSION)", () => {
-  // BUG: this address SHOULD route to the RSVP processor. It does not, because the
-  // thread id predates the base58 alphabet migration (d342cda). This test pins the
-  // current (broken) behavior; flip to `true` once pre-migration ids are handled.
-  it("currently fails to route the exact address that was dropped in production", () => {
-    expect(isRsvpReplyAddress(DROPPED_ADDRESS, SERVICE_DOMAIN)).toBe(false);
+  // This address was dropped because routing validated the thread id in the local part, and
+  // this one predates the base58 alphabet migration (d342cda). Routing now ignores the local part.
+  it("routes the exact address that was dropped in production", () => {
+    expect(isRsvpReplyAddress(DROPPED_ADDRESS, SERVICE_DOMAIN)).toBe(true);
+  });
+});
+
+describe("isRsvpReplyAddress — routes on the account subdomain alone", () => {
+  it("routes an alias local part at the account subdomain", () => {
+    expect(isRsvpReplyAddress(`me@${DROPPED_ACCOUNT_ID}.${SERVICE_DOMAIN}`, SERVICE_DOMAIN)).toBe(true);
+  });
+
+  it("routes regardless of case (calendars may change it)", () => {
+    expect(isRsvpReplyAddress(`Me@${DROPPED_ACCOUNT_ID.toUpperCase()}.${SERVICE_DOMAIN.toUpperCase()}`, SERVICE_DOMAIN)).toBe(true);
+  });
+
+  it("does not route an account id that fails its checksum", () => {
+    expect(isRsvpReplyAddress(`me@acc-aaaaaaaaaaaaa.${SERVICE_DOMAIN}`, SERVICE_DOMAIN)).toBe(false);
+  });
+
+  it("does not route the bare service domain or an unrelated domain", () => {
+    expect(isRsvpReplyAddress(`me@${SERVICE_DOMAIN}`, SERVICE_DOMAIN)).toBe(false);
+    expect(isRsvpReplyAddress(`me@${DROPPED_ACCOUNT_ID}.example.com`, SERVICE_DOMAIN)).toBe(false);
+  });
+
+  it("does not route an address with an empty local part", () => {
+    expect(isRsvpReplyAddress(`@${DROPPED_ACCOUNT_ID}.${SERVICE_DOMAIN}`, SERVICE_DOMAIN)).toBe(false);
   });
 });
 
