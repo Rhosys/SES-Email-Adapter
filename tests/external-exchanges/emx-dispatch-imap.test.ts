@@ -127,6 +127,24 @@ describe("dispatch worker logs adapter errors", () => {
     );
   });
 
+  it("logs warn (not error) when the IMAP server refuses the connection", async () => {
+    const emx = makeImapEmx();
+    mockDb.listExchangesDue.mockResolvedValue(ok([emx]));
+    vi.mocked(mockImapAdapter.renew).mockResolvedValue(
+      err({ kind: "provider_connection_refused", cause: "connect ECONNREFUSED 127.0.0.1:143" }),
+    );
+
+    const worker = createWorker();
+    const result = await worker.dispatch();
+
+    expect(result.isOk()).toBe(true);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      "emx_dispatch: renewal failed: connect ECONNREFUSED 127.0.0.1:143",
+      expect.objectContaining({ code: "emx.dispatch.renewal_failed", emxId: "emx_testABC123", platform: "imap" }),
+    );
+    expect(mockLogger.error).not.toHaveBeenCalled();
+  });
+
   it("logs success when IMAP renewal succeeds", async () => {
     const emx = makeImapEmx();
     mockDb.listExchangesDue.mockResolvedValue(ok([emx]));
