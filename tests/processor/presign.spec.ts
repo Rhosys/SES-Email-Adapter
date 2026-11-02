@@ -61,15 +61,14 @@ describe("S3ObjectStorage.generatePresignedPost", () => {
         ["starts-with", "$Content-Disposition", ""],
         ["content-length-range", 0, 10 * 1024 * 1024],
       ],
-      Fields: {
-        "Content-Type": "",
-        "Content-Disposition": "",
-      },
       Expires: 30,
     });
 
     expect(result.url).toBe("https://s3.post/content-bucket");
     expect(result.fields).not.toHaveProperty("x-amz-tagging");
+    expect(result.fields).not.toHaveProperty("key");
+    expect(result.fields["Content-Type"]).toBe("application/octet-stream");
+    expect(result.fields["Content-Disposition"]).toBe("");
   });
 
   it("includes tagging condition and field when retentionTag is '365'", async () => {
@@ -91,8 +90,6 @@ describe("S3ObjectStorage.generatePresignedPost", () => {
         { "x-amz-tagging": "retention=365" },
       ],
       Fields: {
-        "Content-Type": "",
-        "Content-Disposition": "",
         "x-amz-tagging": "retention=365",
       },
       Expires: 30,
@@ -118,8 +115,6 @@ describe("S3ObjectStorage.generatePresignedPost", () => {
         { "x-amz-tagging": "retention=3650" },
       ],
       Fields: {
-        "Content-Type": "",
-        "Content-Disposition": "",
         "x-amz-tagging": "retention=3650",
       },
       Expires: 30,

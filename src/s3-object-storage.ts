@@ -24,9 +24,9 @@ import { ok, err, type Result } from "./errors.js";
  * policy conditions allow — a phantom carried statically so the uploader can only set fields
  * the policy sanctioned. S3 rejects any form field its policy did not condition ("Extra input
  * fields: <name>"), so the union is the compile-time guard against that class of failure.
- * `fields` holds the SDK's default form values (policy, signature, credentials, plus our
- * per-field defaults) — these are submitted with the form but are NOT part of the signature;
- * only the policy is signed.
+ * `fields` holds the form values to submit: the SDK's policy, signature and credentials, any
+ * value signed as an exact match (e.g. x-amz-tagging), plus unsigned per-field defaults
+ * (Content-Type, Content-Disposition) that the uploader overwrites per object.
  */
 export interface PresignedPost<TField extends string> {
   url: string;
@@ -116,19 +116,12 @@ export class S3ObjectStorage {
         ["content-length-range", 0, spec.maxBytes],
         ...(spec.retentionTag ? [{ "x-amz-tagging": `retention=${spec.retentionTag}` } as const] : []),
       ],
-      // Fields is NOT signed — it is the set of default form values the SDK returns for the
-      // uploader to submit. createPresignedPost does NOT derive it from Conditions: per the SDK
-      // docs, a conditioned field must ALSO appear here or S3 rejects any POST that omits that
-      // form field with "Policy Condition failed". These empty-string defaults guarantee the
-      // returned ticket carries both fields; `upload` overwrites them with the real per-object
-      // value (see its always-set writes). Belt-and-suspenders with `upload`: the ticket carries
-      // the fields AND every upload re-sets them, so neither path can produce a POST that omits
-      // a conditioned field.
-      Fields: {
-        "Content-Type": "",
-        "Content-Disposition": "",
-        ...(spec.retentionTag ? { "x-amz-tagging": `retention=${spec.retentionTag}` } : {}),
-      },
+      // Every Fields entry is SIGNED: createPresignedPost adds each one to the policy as an
+      // exact-match condition ({ field: value }). So only values known at signing time belong
+      // here. Content-Type/Content-Disposition are per-object and unknown now — putting them
+      // here would sign `["eq", "$Content-Type", ""]` and S3 would reject every real upload.
+      // Their defaults are added to the returned ticket after signing (below) instead.
+      ...(spec.retentionTag ? { Fields: { "x-amz-tagging": `retention=${spec.retentionTag}` } } : {}),
       Expires: 30,
     });
 
@@ -136,8 +129,15 @@ export class S3ObjectStorage {
     // but the uploader sets the actual per-object key on each upload — a duplicate `key`
     // field in the FormData makes S3 reject with "POST only supports one key parameter per
     // request". Strip it here; the starts-with policy condition still constrains keys.
+    //
+    // Unsigned defaults for the per-object fields the policy conditions with `starts-with ""`:
+    // S3 rejects a POST that omits a conditioned field, so the ticket always carries a value.
+    // Listed first so any signed value the SDK returned for the same field wins.
     const { key: _templateKey, ...fields } = post.fields;
-    return { url: post.url, fields };
+    return {
+      url: post.url,
+      fields: { "Content-Type": "application/octet-stream", "Content-Disposition": "", ...fields },
+    };
   }
 
   /**
@@ -153,8 +153,8 @@ export class S3ObjectStorage {
    * (in the dashboard preview iframe) rather than force a download, and gives downloads a real
    * filename. It is always written to the form (empty string when the caller passes none):
    * the policy conditions this field, and S3 rejects a POST that omits a conditioned field, so
-   * it must be present on every upload. generatePresignedPost also seeds an empty default for
-   * it in the ticket's Fields; the always-write here is the authoritative guarantee and
+   * it must be present on every upload. generatePresignedPost also seeds an unsigned default for
+   * it in the ticket's fields; the always-write here is the authoritative guarantee and
    * overwrites that default per object.
    */
   static async upload(
@@ -167,7 +167,7 @@ export class S3ObjectStorage {
     const form = new FormData();
 
     // Seed the form with the ticket's default field values (policy, signature, credentials,
-    // and the empty Content-Type/Content-Disposition defaults from generatePresignedPost).
+    // and the unsigned Content-Type/Content-Disposition defaults from generatePresignedPost).
     // Every write goes through setField so the field name is checked against the allowed
     // field-name union. set() (not append()): S3's exact-match conditions reject a field that
     // appears twice, so the real per-object writes below replace these defaults in place.
