@@ -71,6 +71,11 @@ const REMOVE_RESOURCES: Record<string, "*" | string[]> = {
   aws_sesv2_tenant_resource_association: "*",
   // TICKET 2 — Bedrock Marketplace agreement
   terraform_data: ["bedrock_model_subscription"],
+  // Not a MiniStack gap — the opposite: MiniStack runs ESM pollers, so the real
+  // SQS→Lambda mapping would consume the harness's message off the signals queue
+  // before processor-harness.ts consumeAndProcess() can receive it. The harness
+  // is the signals queue's only consumer.
+  aws_lambda_event_source_mapping: ["signals"],
 };
 
 /** Remove named (or all) instances of a resource type from a parsed file. */
