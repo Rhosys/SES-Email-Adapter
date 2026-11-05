@@ -221,15 +221,30 @@ describe("buildContentDisposition", () => {
     expect(buildContentDisposition("application/pdf", "invoice.pdf")).toBe('inline; filename="invoice.pdf"');
   });
 
-  it("sanitizes the ASCII fallback and keeps the raw name in the RFC 5987 form when control chars are present", () => {
+  it("strips control chars from both forms — a quote/control-only name gets no filename* at all", () => {
+    // CR/LF are stripped from the quoted form AND must not survive percent-encoded in filename*
+    // (clients prefer filename*, so leaking them there defeats the sanitization). With only
+    // ASCII left after stripping, there is no non-ASCII to preserve, so filename* is omitted.
     const result = buildContentDisposition("application/zip", 'a"b\r\n.zip');
-    expect(result).toBe(`attachment; filename="a_b__.zip"; filename*=UTF-8''${encodeURIComponent('a"b\r\n.zip')}`);
+    expect(result).toBe('attachment; filename="a_b__.zip"');
+    expect(result).not.toContain("filename*=");
+    expect(result).not.toContain("%0D");
+    expect(result).not.toContain("%0A");
   });
 
   it("adds an RFC 5987 encoded form for non-ASCII filenames", () => {
     const result = buildContentDisposition("application/pdf", "rechnung-März.pdf");
     expect(result).toContain("filename*=UTF-8''");
     expect(result).toContain(encodeURIComponent("rechnung-März.pdf"));
+  });
+
+  it("strips control chars even when the name also has legitimate non-ASCII to preserve", () => {
+    // Mixed: real non-ASCII (ä) keeps the filename* form, but embedded CR/LF must still be
+    // gone from the percent-encoded value — never round-tripped as %0D%0A.
+    const result = buildContentDisposition("application/pdf", "feb\r\nMärz.pdf");
+    expect(result).toContain(`filename*=UTF-8''${encodeURIComponent("feb__März.pdf")}`);
+    expect(result).not.toContain("%0D");
+    expect(result).not.toContain("%0A");
   });
 
   it("omits the RFC 5987 form for pure-ASCII filenames", () => {

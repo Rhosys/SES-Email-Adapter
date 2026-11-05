@@ -241,13 +241,21 @@ export function buildContentDisposition(mimeType: string, filename: string): str
   const base = mimeType.split(";")[0]?.trim().toLowerCase() ?? "";
   const kind = INLINE_RENDERABLE_TYPES.has(base) ? "inline" : "attachment";
 
-  // ASCII fallback: strip characters that would break the quoted-string form.
-  const asciiName = filename.replace(/["\\\r\n]/g, "_").replace(/[^\x20-\x7e]/g, "_");
+  // A filename never legitimately contains control characters, so strip them once up front
+  // and derive BOTH header forms from the result. Clients prefer filename* over filename
+  // (RFC 6266 §4.3); feeding filename* the raw name while only sanitizing filename let a
+  // control char the fallback stripped survive, percent-encoded, in the form clients actually use.
+  const safe = filename.replace(/[\x00-\x1f\x7f]/g, "_");
+
+  // ASCII fallback: a quoted-string additionally cannot carry a raw quote/backslash and has
+  // no charset, so collapse those and any remaining non-ASCII.
+  const asciiName = safe.replace(/["\\]/g, "_").replace(/[^\x20-\x7e]/g, "_");
   let disposition = `${kind}; filename="${asciiName}"`;
 
-  // Add the RFC 5987 encoded form only when the name has non-ASCII characters.
-  if (/[^\x20-\x7e]/.test(filename)) {
-    disposition += `; filename*=UTF-8''${encodeURIComponent(filename)}`;
+  // RFC 5987 extended form carries the real name for clients that honour it — emitted only
+  // when there is genuine non-ASCII to preserve.
+  if (/[^\x20-\x7e]/.test(safe)) {
+    disposition += `; filename*=UTF-8''${encodeURIComponent(safe)}`;
   }
   return disposition;
 }
