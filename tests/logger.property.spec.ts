@@ -5,8 +5,8 @@ import type { LogLevel } from "../src/logger.js";
 const ALL_LEVELS: LogLevel[] = ["info", "track", "warn", "error", "critical"];
 const TRACK_POINT_LEVELS: LogLevel[] = ["track", "error", "critical"];
 const NO_TRACK_POINT_LEVELS: LogLevel[] = ["info", "warn"];
-const STACK_LEVELS: LogLevel[] = ["error", "critical"];
-const NO_STACK_LEVELS: LogLevel[] = ["info", "track", "warn"];
+const STACK_LEVELS: LogLevel[] = ["warn", "track", "error", "critical"];
+const NO_STACK_LEVELS: LogLevel[] = ["info"];
 
 function callLevel(logger: RequestLogger, level: LogLevel, message: string, context?: Record<string, unknown>): void {
   logger[level](message, context);
@@ -156,7 +156,7 @@ describe("Track points included for track/error/critical levels", () => {
   );
 });
 
-describe("Error and critical include stack trace", () => {
+describe("Every level except info includes a stack trace", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
   let warnSpy: ReturnType<typeof vi.spyOn>;
   let errorSpy: ReturnType<typeof vi.spyOn>;

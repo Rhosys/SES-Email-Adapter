@@ -248,7 +248,9 @@ export class RequestLogger implements Logger {
 
   private emit(level: LogLevel, title: string, context?: Record<string, unknown>, error?: unknown): void {
     const includeTrackPoints = level === "track" || level === "error" || level === "critical";
-    const includeStack = level === "error" || level === "critical";
+    // Every WARN/TRACK/ERROR/CRITICAL carries the emit-site stack so the exact origin is
+    // recoverable from the log alone. INFO is routine and high-volume, so it is exempt.
+    const includeStack = level !== "info";
 
     // When the caller supplies an error (raw Error, one of our error kinds, or a neverthrow
     // Result), derive the pieces a log needs from it exactly once — so no call site has to
