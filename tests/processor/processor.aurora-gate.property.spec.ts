@@ -154,7 +154,7 @@ describe("Feature: signal-processor-retry-resilience, Property 4: Arc saved befo
       compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
-      destination: ["user@example.com"],
+      primaryRecipient: "user@example.com",
       dkimVerdict: "PASS",
       dmarcVerdict: "PASS",
     };
@@ -388,7 +388,7 @@ describe("Feature: signal-processor-retry-resilience, Property 6: Aurora failure
       compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
-      destination: ["user@example.com"],
+      primaryRecipient: "user@example.com",
       dkimVerdict: "PASS",
       dmarcVerdict: "PASS",
     };
@@ -668,7 +668,7 @@ describe("Feature: signal-processor-retry-resilience, Property 5: Side-effects d
       compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
-      destination: ["user@example.com"],
+      primaryRecipient: "user@example.com",
       dkimVerdict: "PASS",
       dmarcVerdict: "PASS",
     };
@@ -953,7 +953,7 @@ describe("Feature: signal-processor-retry-resilience, Property 7: Partial Aurora
       compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
-      destination: ["user@example.com"],
+      primaryRecipient: "user@example.com",
       dkimVerdict: "PASS",
       dmarcVerdict: "PASS",
     };

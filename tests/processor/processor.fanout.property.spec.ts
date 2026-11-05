@@ -142,7 +142,7 @@ describe("Multi-cluster fanout writes vectors to every active target", () => {
       compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
-      destination: ["user@example.com"],
+      primaryRecipient: "user@example.com",
       dkimVerdict: "PASS",
       dmarcVerdict: "PASS",
     };

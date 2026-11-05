@@ -128,7 +128,7 @@ function makeMessage(): InboundSignalMessage {
     compositeMailMessageId: "ses-msg-healthcheck",
     idempotencyKey: "hc-idempotency-key",
     timestamp: "2025-07-01T06:01:00Z",
-    destination: ["healthcheck@platform.email.rhosys.cloud"],
+    primaryRecipient: "healthcheck@platform.email.rhosys.cloud",
     dkimVerdict: "PASS",
     dmarcVerdict: "PASS",
   };

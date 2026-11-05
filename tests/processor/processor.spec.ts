@@ -176,7 +176,7 @@ function makeMessage(opts: {
   s3Key?: string;
   messageId?: string;
   timestamp?: string;
-  destination?: string[];
+  primaryRecipient?: string;
   dkimVerdict?: "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
   dmarcVerdict?: "PASS" | "FAIL" | "GRAY" | "PROCESSING_FAILED";
 } = {}): InboundSignalMessage {
@@ -186,7 +186,7 @@ function makeMessage(opts: {
     compositeMailMessageId: `ses-${messageId}`,
     idempotencyKey: "test-idempotency-key",
     timestamp: opts.timestamp ?? "2024-01-15T10:00:00Z",
-    destination: opts.destination ?? ["user@example.com"],
+    primaryRecipient: opts.primaryRecipient ?? "user@example.com",
     dkimVerdict: opts.dkimVerdict ?? "PASS",
     dmarcVerdict: opts.dmarcVerdict ?? "PASS",
   };
@@ -352,7 +352,7 @@ describe("IncomingEmailProcessor", () => {
     });
 
     it("sets recipientAddress from the SQS destination field", async () => {
-      await processor.processInbound(makeMessage({ destination: ["inbox@customer.com"] }), 1);
+      await processor.processInbound(makeMessage({ primaryRecipient: "inbox@customer.com" }), 1);
 
       const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.data.recipientAddress).toBe("inbox@customer.com");
@@ -1033,7 +1033,7 @@ describe("IncomingEmailProcessor", () => {
     });
 
     it("scopes vector search by recipientAddress for workflows without a grouping key", async () => {
-      await processor.processInbound(makeMessage({ destination: ["inbox@work.com"] }), 1);
+      await processor.processInbound(makeMessage({ primaryRecipient: "inbox@work.com" }), 1);
 
       expect(threadMatcher.findMatch).toHaveBeenCalledWith(
         TEST_ACCOUNT_ID,
@@ -1643,7 +1643,7 @@ describe("IncomingEmailProcessor", () => {
     it("dispatches side-effect with signal.recipientAddress containing the domain for lookup", async () => {
       vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok(testClassification));
 
-      await processor.processInbound(makeMessage({ destination: ["me@custom-domain.com"] }), 1);
+      await processor.processInbound(makeMessage({ primaryRecipient: "me@custom-domain.com" }), 1);
 
       const payload = vi.mocked(sqsDispatcher.sendMessage).mock.calls[0]![0];
       expect(payload.signal.data.recipientAddress).toBe("me@custom-domain.com");

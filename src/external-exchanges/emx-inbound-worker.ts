@@ -92,7 +92,7 @@ export class EmxInboundWorker {
       compositeMailMessageId,
       idempotencyKey: sqsMessageId,
       timestamp: fetchResult.value.receivedAt,
-      destination: [emx.emailAddress],
+      primaryRecipient: emx.emailAddress,
       dkimVerdict: "PASS",
       dmarcVerdict: "PASS",
     };

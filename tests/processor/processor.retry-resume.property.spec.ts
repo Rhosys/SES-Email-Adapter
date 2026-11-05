@@ -237,7 +237,7 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
       compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
-      destination: ["user@example.com"],
+      primaryRecipient: "user@example.com",
       dkimVerdict: "PASS",
       dmarcVerdict: "PASS",
     };
@@ -571,7 +571,7 @@ describe("Feature: signal-processor-retry-resilience, Property 3: DDB read failu
       compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
-      destination: ["user@example.com"],
+      primaryRecipient: "user@example.com",
       dkimVerdict: "PASS",
       dmarcVerdict: "PASS",
     };
@@ -849,7 +849,7 @@ describe("Feature: signal-processor-retry-resilience, Property 2: Missing signal
       compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
-      destination: ["user@example.com"],
+      primaryRecipient: "user@example.com",
       dkimVerdict: "PASS",
       dmarcVerdict: "PASS",
     };
@@ -1118,7 +1118,7 @@ describe("Feature: signal-processor-retry-resilience, Property 8: Outcome re-der
       compositeMailMessageId: "ses-msg-prop8",
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
-      destination: ["user@example.com"],
+      primaryRecipient: "user@example.com",
       dkimVerdict: "PASS",
       dmarcVerdict: "PASS",
     };

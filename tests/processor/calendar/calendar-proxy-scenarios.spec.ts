@@ -214,7 +214,7 @@ function makeRsvpMessage(): InboundSignalMessage {
     compositeMailMessageId: "ses-native-001",
     idempotencyKey: "idem-001",
     timestamp: "2025-03-15T15:30:00Z",
-    destination: [`${VALID_ARC_ID}@${VALID_ACC_ID}.${SERVICE_DOMAIN}`],
+    primaryRecipient: `${VALID_ARC_ID}@${VALID_ACC_ID}.${SERVICE_DOMAIN}`,
     dkimVerdict: "PASS",
     dmarcVerdict: "PASS",
   };

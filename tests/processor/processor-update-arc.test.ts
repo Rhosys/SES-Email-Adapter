@@ -135,7 +135,7 @@ function makeMessage(opts: Partial<InboundSignalMessage> = {}): InboundSignalMes
     compositeMailMessageId: "ses-msg-123",
     idempotencyKey: "test-idempotency-key",
     timestamp: "2024-01-15T10:00:00Z",
-    destination: ["user@example.com"],
+    primaryRecipient: "user@example.com",
     dkimVerdict: "PASS",
     dmarcVerdict: "PASS",
     ...opts,

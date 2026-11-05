@@ -314,12 +314,34 @@ async function processSqsRecord(
   const ses = inner as SESMessage;
   const s3Action = ses.receipt.action as SESReceiptS3Action;
 
+  // Route on receipt.recipients (the envelope RCPT TO addresses SES's active receipt rule
+  // matched for us) — NOT mail.destination (the To/Cc from the message headers, which is
+  // sender-controlled and may list addresses that are not ours or in a different order).
+  // https://docs.aws.amazon.com/ses/latest/dg/receiving-email-notifications-contents.html
+  const matchedRecipients = ses.receipt.recipients;
+  const primaryRecipient = matchedRecipients[0] ?? "";
+
+  // SES matched more than one of our receipt-rule recipients on a single envelope: two
+  // different customers' alias addresses (or a customer alias and a proxy RSVP address)
+  // both appeared on the same To/Cc. Ownership is ambiguous — there is no single account
+  // the message belongs to — and processing only primaryRecipient silently drops the rest.
+  if (matchedRecipients.length > 1) {
+    logger.error("Inbound message matched more than one of our recipients on a single SES envelope — ambiguous ownership, cannot attribute it to a single account, so only the first is processed and the others are dropped. This occurs when two customers' addresses (or a customer alias and a proxy RSVP address) are both on the same To/Cc.", {
+      code: "handler.sqs.multiple_matched_recipients",
+      matchedRecipients,
+      primaryRecipient,
+      compositeMailMessageId: `ses-${ses.mail.messageId}`,
+      receiveCount,
+      ses,
+    });
+  }
+
   const message: InboundSignalMessage = {
     s3Key: s3Action.objectKey,
     compositeMailMessageId: `ses-${ses.mail.messageId}`,
     idempotencyKey: sqsMessageId,
     timestamp: ses.mail.timestamp,
-    destination: ses.mail.destination,
+    primaryRecipient,
     dkimVerdict: ses.receipt.dkimVerdict.status,
     dmarcVerdict: ses.receipt.dmarcVerdict.status,
   };
@@ -328,7 +350,7 @@ async function processSqsRecord(
   // from an invite we forwarded, not an inbound email — a different lifecycle with a
   // different owner. Route it before the email processor's account resolution, which
   // would otherwise drop it as belonging to no alias.
-  if (isRsvpReplyAddress(ses.mail.destination[0] ?? "", mailDomain)) {
+  if (isRsvpReplyAddress(primaryRecipient, mailDomain)) {
     const rsvpResult = await rsvpProcessor.process(message);
     if (rsvpResult.isErr()) return err(processorError(rsvpResult.error));
     return ok(undefined);

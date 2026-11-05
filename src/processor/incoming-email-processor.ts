@@ -176,7 +176,13 @@ export interface InboundSignalMessage {
   compositeMailMessageId: string;
   idempotencyKey: string;
   timestamp: string;
-  destination: string[];
+  /**
+   * The single owning recipient — resolved once at the inbound boundary from the SES
+   * envelope recipients SES matched for us (receipt.recipients[0]), never the sender's
+   * header To/Cc. The array→single coercion happens exactly once at the boundary; every
+   * consumer reads this value directly and never re-derives it from a list.
+   */
+  primaryRecipient: string;
   dkimVerdict: SESReceiptStatus["status"];
   dmarcVerdict: SESReceiptStatus["status"];
 }
@@ -1041,16 +1047,16 @@ export class IncomingEmailProcessor {
   }
 
   private async _processInboundUnsafe(msg: InboundSignalMessage, receiveCount: number, opts?: ProcessInboundOptions): Promise<Result<void, DbError | InvalidResponseError | NoAccountError | ThreadIdCollisionError>> {
-    const { s3Key, idempotencyKey, timestamp, destination } = msg;
-    const recipientAddress = destination[0] ?? "";
+    const { s3Key, idempotencyKey, timestamp, primaryRecipient } = msg;
+    const recipientAddress = primaryRecipient;
 
     // 0. Resolve the owning account + alias from the recipient address. Single source of
     // truth for accountId — always re-derived, never trusted from the message.
     const resolved = await this.resolveAccountIdAndAlias(recipientAddress);
     if (resolved.isErr()) return err(resolved.error);
     if (!resolved.value) {
-      this.logger.track(`No account owns the recipient address ${recipientAddress || destination.join(", ") || "(none)"} — dropping message.`, { code: "processor.no_account_for_recipient", recipientAddress, compositeMailMessageId: msg.compositeMailMessageId, destination, msg, receiveCount, opts });
-      return err(noAccountError(recipientAddress, destination, msg.compositeMailMessageId, msg.expectedAccountId));
+      this.logger.track(`No account owns the recipient address ${recipientAddress || "(none)"} — dropping message.`, { code: "processor.no_account_for_recipient", recipientAddress, compositeMailMessageId: msg.compositeMailMessageId, msg, receiveCount, opts });
+      return err(noAccountError(recipientAddress, msg.compositeMailMessageId, msg.expectedAccountId));
     }
     const { accountId, aliasConfig } = resolved.value;
     if (msg.expectedAccountId !== undefined && msg.expectedAccountId !== accountId) {
@@ -1125,7 +1131,7 @@ export class IncomingEmailProcessor {
         retentionDuration: SPAM_QUARANTINE_RETENTION,
         data: {
           s3Key,
-          recipientAddress: destination[0] ?? "",
+          recipientAddress,
           receivedAt: timestamp,
           from: { address: "" },
           to: [],
@@ -2186,7 +2192,7 @@ export class IncomingEmailProcessor {
       compositeMailMessageId,
       idempotencyKey: existing.id,
       timestamp,
-      destination: [recipientAddress],
+      primaryRecipient: recipientAddress,
       dkimVerdict: "PASS",
       dmarcVerdict: "PASS",
     };

@@ -76,7 +76,7 @@ export class IncomingCalendarRsvpProcessor {
   }
 
   async process(msg: InboundSignalMessage): Promise<Result<void, DbError | EmailServiceError>> {
-    const recipient = msg.destination[0] ?? "";
+    const recipient = msg.primaryRecipient;
 
     // --- 1. Fetch raw MIME + extract every .ics part ---
     // A forwarding calendar client can bundle more than one calendar attachment onto a

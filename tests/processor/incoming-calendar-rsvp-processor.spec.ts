@@ -221,7 +221,7 @@ function makeMessage(): InboundSignalMessage {
     compositeMailMessageId: "ses-rsvp-001",
     idempotencyKey: "idem-001",
     timestamp: "2025-03-15T11:00:00Z",
-    destination: [RECIPIENT],
+    primaryRecipient: RECIPIENT,
     dkimVerdict: "PASS",
     dmarcVerdict: "PASS",
   };

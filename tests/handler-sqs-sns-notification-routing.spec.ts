@@ -258,6 +258,7 @@ describe("Handler: SQS/SNS envelope routing", () => {
       notificationType: "Received",
       mail: { messageId: "ses-msg-3", timestamp: "2026-07-11T00:00:00Z", destination: ["dest@example.com"] },
       receipt: {
+        recipients: ["dest@example.com"],
         dkimVerdict: { status: "PASS" },
         dmarcVerdict: { status: "PASS" },
         action: { objectKey: "inbound/ses-msg-3" },
@@ -269,6 +270,55 @@ describe("Handler: SQS/SNS envelope routing", () => {
     expect(mockProcessRecord).toHaveBeenCalledTimes(1);
     expect(mockProcessNotification).not.toHaveBeenCalled();
     expect(result).toEqual({ batchItemFailures: [] });
+  });
+
+  it("routes on receipt.recipients (envelope) not mail.destination (headers) — picks the matched address even when headers list a different To", async () => {
+    const event = makeSqsEvent({
+      notificationType: "Received",
+      // Header To is some unrelated address; the envelope recipient SES matched for us is ours.
+      mail: { messageId: "ses-msg-4", timestamp: "2026-07-11T00:00:00Z", destination: ["someone-else@other.com"] },
+      receipt: {
+        recipients: ["alias@customer.com"],
+        dkimVerdict: { status: "PASS" },
+        dmarcVerdict: { status: "PASS" },
+        action: { objectKey: "inbound/ses-msg-4" },
+      },
+    });
+
+    await handler(event, dummyContext);
+
+    expect(mockProcessRecord).toHaveBeenCalledTimes(1);
+    expect(mockProcessRecord.mock.calls[0]![0]).toMatchObject({ primaryRecipient: "alias@customer.com" });
+    expect(mockLogger.error).not.toHaveBeenCalled();
+  });
+
+  it("more than one matched recipient on one envelope → logs ERROR naming the ambiguity, still processes the first", async () => {
+    const event = makeSqsEvent({
+      notificationType: "Received",
+      mail: { messageId: "ses-msg-5", timestamp: "2026-07-11T00:00:00Z", destination: ["a@cust-one.com", "b@cust-two.com"] },
+      receipt: {
+        recipients: ["a@cust-one.com", "b@cust-two.com"],
+        dkimVerdict: { status: "PASS" },
+        dmarcVerdict: { status: "PASS" },
+        action: { objectKey: "inbound/ses-msg-5" },
+      },
+    });
+
+    await handler(event, dummyContext);
+
+    expect(mockLogger.error).toHaveBeenCalledTimes(1);
+    const [, context] = mockLogger.error.mock.calls[0]!;
+    expect(context).toMatchObject({
+      code: "handler.sqs.multiple_matched_recipients",
+      matchedRecipients: ["a@cust-one.com", "b@cust-two.com"],
+      primaryRecipient: "a@cust-one.com",
+    });
+    // Full SES payload attached per logging discipline, not cherry-picked scalars.
+    expect(context.ses).toBeDefined();
+
+    // Ambiguous, but we still process the first rather than dropping everything.
+    expect(mockProcessRecord).toHaveBeenCalledTimes(1);
+    expect(mockProcessRecord.mock.calls[0]![0]).toMatchObject({ primaryRecipient: "a@cust-one.com" });
   });
 
   it("Received notification missing receipt.action → delegated to sesFeedbackProcessor (structural routing)", async () => {

@@ -50,7 +50,7 @@ describe("Single createThread call with complete mutations", () => {
       compositeMailMessageId: `ses-${messageId}`,
       idempotencyKey: "test-idempotency-key",
       timestamp: "2024-01-15T10:00:00Z",
-      destination: [recipientEmail],
+      primaryRecipient: recipientEmail,
       dkimVerdict: "PASS",
       dmarcVerdict: "PASS",
     };
