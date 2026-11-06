@@ -1092,7 +1092,7 @@ describe("IncomingEmailProcessor", () => {
     });
 
     it("uses senderETLD1 grouping for notice workflow (threads all notices from same sender)", () => {
-      expect(deriveGroupingKey("notice", { workflow: "notice", noticeType: "privacy_policy", provider: "Google" }, "me@example.com", "google.com"))
+      expect(deriveGroupingKey("notice", { workflow: "notice", noticeType: "privacy_policy", provider: "Google", requiresAction: false }, "me@example.com", "google.com"))
         .toBe("me@example.com:notice:google.com");
     });
 
@@ -1162,9 +1162,13 @@ describe("IncomingEmailProcessor", () => {
       expect(baseUrgency("content", { workflow: "content", contentType: "promotion", publisher: "Nike" })).toBe("low");
     });
 
-    it("notice is always silent", () => {
-      expect(baseUrgency("notice", { workflow: "notice", noticeType: "privacy_policy", provider: "Google" })).toBe("silent");
-      expect(baseUrgency("notice", { workflow: "notice", noticeType: "service_notice", provider: "Stripe" })).toBe("silent");
+    it("notice is silent unless action is required", () => {
+      expect(baseUrgency("notice", { workflow: "notice", noticeType: "privacy_policy", provider: "Google", requiresAction: false })).toBe("silent");
+      expect(baseUrgency("notice", { workflow: "notice", noticeType: "service_notice", provider: "Stripe", requiresAction: false })).toBe("silent");
+    });
+
+    it("notice is high when action is required", () => {
+      expect(baseUrgency("notice", { workflow: "notice", noticeType: "enforcement_action", provider: "Whatbox", requiresAction: true })).toBe("high");
     });
 
     it("onboarding is always silent", () => {
@@ -1510,7 +1514,7 @@ describe("IncomingEmailProcessor", () => {
 
   const noticeClassification: ClassificationOutput = {
     workflow: "notice",
-    workflowData: { workflow: "notice", noticeType: "privacy_policy", provider: "Google" },
+    workflowData: { workflow: "notice", noticeType: "privacy_policy", provider: "Google", requiresAction: false },
     tags: [],
     summary: "Privacy policy update from Google.",
     labels: [],
@@ -1534,6 +1538,19 @@ describe("IncomingEmailProcessor", () => {
       const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
       expect(signal.status).toBe("block_hidden");
       expect((signal.data as InboundEmailSignalData).workflow).toBe("notice");
+    });
+
+    it("does not block a notice that requires action — SR-04 only hides passive notices", async () => {
+      vi.mocked(classifier.classify as ReturnType<typeof vi.fn>).mockResolvedValueOnce(ok({
+        ...noticeClassification,
+        workflowData: { workflow: "notice", noticeType: "enforcement_action", provider: "Whatbox", requiresAction: true, actionDeadline: "2026-11-06T05:30", actionUrl: "https://whatbox.ca/complaints" },
+      }));
+
+      await processor.processInbound(makeMessage(), 1);
+
+      const signal = vi.mocked(threadDb.saveSignal).mock.calls[0]![0] as Signal;
+      expect(signal.status).not.toBe("block_hidden");
+      expect(threadDb.createThread).toHaveBeenCalled();
     });
 
     it("does not call notifier for a blocked notice email", async () => {
