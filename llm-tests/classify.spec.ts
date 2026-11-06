@@ -202,6 +202,42 @@ describe("Signal Classifier — LLM integration tests", () => {
       assertCommonOutput(output);
     });
 
+    it("notice — copyright complaint with a removal deadline requires action", async () => {
+      const input = makeInput({
+        from: "site@whatbox.ca",
+        subject: "Copyright complaint",
+        receivedAt: "2026-11-05T05:30:12Z",
+        body: "Hello jolraen,\n\nWe received a copyright complaint for a file on your slot.\n\nYou can view complaints at whatbox.ca/complaints: https://whatbox.ca/complaints\n\nTo prevent your slot from being frozen, please remove the reported content within the next 24 hours.\n\nIf your slot is already frozen:\n- Use the Delete button: https://whatbox.ca/complaints#autoresolve to have us remove the files for you.\n- Use the Unlock button: https://whatbox.ca/complaints#unlock and remove the files yourself.\n\nIf the unlock button is disabled due to overuse, you can create a support ticket: https://whatbox.ca/support/create?subject=Complaint+unlock and let us know you are ready to remove the content.\n\nPlease refer to our Terms of Service: https://whatbox.ca/policies/terms for more information on using our services.\n\nBest regards,\nWhatbox Staff",
+        headers: { "authentication-results": "spf=pass dkim=pass dmarc=pass" },
+      });
+      const result = await classifier.classify(input);
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("notice");
+      const data = output.workflowData as Record<string, unknown>;
+      expect(data.requiresAction).toBe(true);
+      expect(data.actionDeadline).toBeTruthy();
+      // "within the next 24 hours" resolved against receivedAt
+      expect(String(data.actionDeadlineInstant)).toMatch(/^2026-11-06/);
+      expect(String(data.actionUrl)).toContain("whatbox.ca/complaints");
+      assertCommonOutput(output);
+    });
+
+    it("notice — privacy policy update requires no action", async () => {
+      const input = makeInput({
+        from: "no-reply@accounts.google.com",
+        subject: "Updates to our Privacy Policy",
+        body: "We're updating our Privacy Policy to make it clearer how we handle your information. The changes take effect on March 1, 2025. You don't need to take any action. Read the updated policy at https://policies.google.com/privacy",
+        headers: { "authentication-results": "spf=pass dkim=pass dmarc=pass" },
+      });
+      const result = await classifier.classify(input);
+      expect(result.isOk()).toBe(true);
+      const output = result._unsafeUnwrap();
+      expect(output.workflow).toBe("notice");
+      expect((output.workflowData as Record<string, unknown>).requiresAction).not.toBe(true);
+      assertCommonOutput(output);
+    });
+
     it("content — newsletter", async () => {
       const input = makeInput({
         from: "hello@tldr.tech",

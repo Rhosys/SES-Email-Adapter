@@ -121,7 +121,7 @@ describe("Feature: in-reply-to-arc-threading, Parallel arc matching tier selecti
   function makeNoticeClassifier(): Pick<SignalClassifier, "classify"> {
     const output: ClassificationOutput = {
       workflow: "notice",
-      workflowData: { workflow: "notice", noticeType: "service_notice", provider: "google.com" },
+      workflowData: { workflow: "notice", noticeType: "service_notice", provider: "google.com", requiresAction: false },
       tags: [],
       summary: "Auth code notice",
       labels: [],

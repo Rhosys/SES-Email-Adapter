@@ -222,11 +222,14 @@ export const ContentData = z.object({
 
 export const NoticeData = z.object({
   workflow: z.literal("notice"),
-  noticeType: z.enum(["terms_update", "privacy_policy", "data_processor", "cookie_policy", "compliance", "service_notice", "government", "account_notification", "security_awareness", "bounce", "other"]),
+  noticeType: z.enum(["terms_update", "privacy_policy", "data_processor", "cookie_policy", "compliance", "service_notice", "government", "account_notification", "security_awareness", "bounce", "enforcement_action", "other"]),
   provider: z.string(),
   effectiveDate: z.string().optional(),
   referenceNumber: z.string().optional(),
   documentUrl: z.string().optional(),
+  requiresAction: z.boolean().optional(),
+  actionDeadline: z.string().optional(),
+  actionUrl: z.string().optional(),
   failedAddress: z.string().optional(),
   bounceReason: z.string().optional(),
 }).openapi("NoticeData");
