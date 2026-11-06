@@ -3,5 +3,6 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "include": ["src/**/*", "tests/**/*"]
+  "include": ["src/**/*", "tests/**/*", "tests-integration/**/*", "tests-exploratory/**/*", "tests-production/**/*"],
+  "exclude": ["tests-integration/infrastructure/**"]
 }
