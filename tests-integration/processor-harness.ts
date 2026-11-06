@@ -29,7 +29,7 @@ import { AuthressAuthService } from '../src/api/authress-auth.js';
 import { startMockAuthressServer } from './mock-authress.js';
 import type { MockAuthressServer } from './mock-authress.js';
 import { InProcessContentSanitizer } from './in-process-content-sanitizer.js';
-import { createConsoleLogger } from './logger.js';
+import { createConsoleLogger } from '../tests/helpers/console-logger.js';
 import { ok } from '../src/errors.js';
 import type { AccessService } from '../src/api/app.js';
 import type { EmailService } from '../src/email/email-service.js';
@@ -288,7 +288,7 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
       compositeMailMessageId: `ses-${inner.mail.messageId}`,
       idempotencyKey: inner.mail.messageId,
       timestamp: inner.mail.timestamp,
-      destination: inner.mail.destination,
+      primaryRecipient: inner.mail.destination[0] ?? "",
       dkimVerdict: inner.receipt.dkimVerdict.status,
       dmarcVerdict: inner.receipt.dmarcVerdict.status,
     };
