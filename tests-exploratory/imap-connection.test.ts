@@ -23,8 +23,8 @@ describe("IMAP connection (exploratory)", () => {
     const conn = createConnection();
 
     try {
-      await conn.connect();
-      const state = await conn.getInboxState();
+      (await conn.connect())._unsafeUnwrap();
+      const state = (await conn.getInboxState())._unsafeUnwrap();
 
       expect(state.uidvalidity).toBeGreaterThan(0);
       expect(state.uidNext).toBeGreaterThan(0);
@@ -44,8 +44,8 @@ describe("IMAP connection (exploratory)", () => {
     const conn = createConnection();
 
     try {
-      await conn.connect();
-      const mailboxes = await conn.listMailboxes();
+      (await conn.connect())._unsafeUnwrap();
+      const mailboxes = (await conn.listMailboxes())._unsafeUnwrap();
 
       console.log("--- Available Mailboxes ---");
       for (const mb of mailboxes) {
@@ -61,13 +61,13 @@ describe("IMAP connection (exploratory)", () => {
     const conn = createConnection();
 
     try {
-      await conn.connect();
-      const state = await conn.getInboxState();
+      (await conn.connect())._unsafeUnwrap();
+      const state = (await conn.getInboxState())._unsafeUnwrap();
 
       if (state.uidNext > 1) {
         // Search for the last known UID to confirm UID search works
         const lastUid = state.uidNext - 2;
-        const newUids = await conn.searchNewUids(lastUid);
+        const newUids = (await conn.searchNewUids(lastUid))._unsafeUnwrap();
         console.log("--- UID Search ---");
         console.log("After UID:", lastUid);
         console.log("Found UIDs:", newUids.length > 10 ? `${newUids.length} UIDs (first 10: ${newUids.slice(0, 10).join(", ")})` : newUids);
@@ -83,8 +83,8 @@ describe("IMAP connection (exploratory)", () => {
     const conn = createConnection();
 
     try {
-      await conn.connect();
-      const envelopes = await conn.fetchEnvelopes(1, 10);
+      (await conn.connect())._unsafeUnwrap();
+      const envelopes = (await conn.fetchEnvelopes(1, 10))._unsafeUnwrap();
 
       console.log("--- First 10 Emails ---");
       for (const msg of envelopes) {

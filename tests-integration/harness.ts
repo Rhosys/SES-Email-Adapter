@@ -21,7 +21,7 @@ import { AuditDatabase } from '../src/database/audit-database.js';
 import { AuthressAuthService } from '../src/api/authress-auth.js';
 import { createApp } from '../src/api/app.js';
 import { makeAppDeps } from '../tests/helpers/app-deps.js';
-import { createConsoleLogger } from './logger.js';
+import { createConsoleLogger } from '../tests/helpers/console-logger.js';
 import { ok } from '../src/errors.js';
 import type { AccessService } from '../src/api/app.js';
 import type { EmailService } from '../src/email/email-service.js';
