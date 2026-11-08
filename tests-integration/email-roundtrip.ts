@@ -3,7 +3,6 @@
 // Run from the repo root:
 //   ACCOUNTS_TABLE=... SIGNALS_TABLE=... PROCESSING_TABLE=... AUDIT_TABLE=... \
 //   EMAIL_BUCKET=ses-it-email CONTENT_BUCKET=ses-it-content \
-//   SIGNAL_QUEUE_URL=http://localhost:4566/000000000000/ses-it-signals \
 //   CONTENT_CDN_BASE_URL=http://localhost:4566/ses-it-content \
 //   AWS_ENDPOINT_URL=http://localhost:4566 \
 //   AUTHRESS_API_URL=http://localhost:4500 \
@@ -98,8 +97,7 @@ async function getSignals(accountId: string, threadId: string): Promise<Signal[]
   const sesId = `ses-attach-${Date.now()}`;
   const mime = buildEmailWithAttachments(TINY_PDF, TINY_PNG, { messageId: sesId });
 
-  await h.sendEmail(sesId, mime);
-  await h.consumeAndProcess();
+  await h.receiveEmail(sesId, mime);
 
   const thread = await getThread(h.accountId);
   assert(typeof thread.threadId === 'string', `thread created (threadId=${thread.threadId})`);
@@ -136,8 +134,7 @@ async function getSignals(accountId: string, threadId: string): Promise<Signal[]
   const sesId = `ses-cid-${Date.now()}`;
   const mime = buildEmailWithCidImages(TINY_PNG, { messageId: sesId });
 
-  await h.sendEmail(sesId, mime);
-  await h.consumeAndProcess();
+  await h.receiveEmail(sesId, mime);
 
   const threadsRes = await apiReq('GET', `/accounts/${h.accountId}/threads`);
   const threadsJson = await threadsRes.json() as { threads: Thread[] };
@@ -167,8 +164,7 @@ async function getSignals(accountId: string, threadId: string): Promise<Signal[]
   const sesId = `ses-img-${Date.now()}`;
   const mime = buildEmailWithRegularImages({ messageId: sesId });
 
-  await h.sendEmail(sesId, mime);
-  await h.consumeAndProcess();
+  await h.receiveEmail(sesId, mime);
 
   const threadsRes = await apiReq('GET', `/accounts/${h.accountId}/threads`);
   const threadsJson = await threadsRes.json() as { threads: Thread[] };
@@ -202,8 +198,7 @@ async function getSignals(accountId: string, threadId: string): Promise<Signal[]
     messageId: sesId,
   });
 
-  await h.sendEmail(sesId, mime);
-  await h.consumeAndProcess();
+  await h.receiveEmail(sesId, mime);
 
   const threadsRes = await apiReq('GET', `/accounts/${h.accountId}/threads`);
   const threadsJson = await threadsRes.json() as { threads: Thread[] };
