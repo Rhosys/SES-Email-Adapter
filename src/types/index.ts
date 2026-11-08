@@ -142,13 +142,20 @@ export interface NoticeData {
   workflow: "notice";
   noticeType:
     | "terms_update" | "privacy_policy" | "data_processor" | "cookie_policy" | "compliance"
-    | "service_notice" | "government" | "account_notification" | "security_awareness" | "bounce" | "other";
+    | "service_notice" | "government" | "account_notification" | "security_awareness" | "bounce" | "enforcement_action" | "other";
   provider: string;
   effectiveDate?: string;
   /** UTC instant derived from effectiveDate at classification time (internal; not in API schema). */
   effectiveDateInstant?: string;
   referenceNumber?: string;
   documentUrl?: string;
+  /** True when the user must act to avoid a consequence. Signals stored before this field existed lack it — treat missing as false. */
+  requiresAction: boolean;
+  /** Deadline for the required action — populated only when requiresAction is true. */
+  actionDeadline?: string;
+  /** UTC instant derived from actionDeadline at classification time (internal; not in API schema). */
+  actionDeadlineInstant?: string;
+  actionUrl?: string;
   /** Populated only when noticeType is "bounce" — the address the bounce reports as undeliverable. */
   failedAddress?: string;
   /** Populated only when noticeType is "bounce" — the DSN's raw failure reason (diagnostic code or status). */
@@ -686,7 +693,7 @@ export type ResourceStatus = (typeof RESOURCE_STATUSES)[number];
 
 // The only workflows whose WorkflowData carries a forward-looking date field.
 // The other WORKFLOWS values never produce a Resource.
-export const RESOURCE_WORKFLOWS = ["package", "travel", "payments", "healthcare", "job", "events"] as const;
+export const RESOURCE_WORKFLOWS = ["package", "travel", "payments", "healthcare", "job", "events", "notice"] as const;
 export type ResourceWorkflow = (typeof RESOURCE_WORKFLOWS)[number];
 
 export const RESOURCE_ASSET_TYPES = ["qr_code", "barcode", "pkpass"] as const;

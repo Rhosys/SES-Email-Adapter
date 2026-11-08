@@ -1,6 +1,6 @@
 import type {
   Workflow, WorkflowData, ResourceAsset,
-  PackageData, TravelData, PaymentsData, HealthcareData, JobData, EventsData,
+  PackageData, TravelData, PaymentsData, HealthcareData, JobData, EventsData, NoticeData,
 } from "../types/index.js";
 
 export interface ResourceInfo {
@@ -91,6 +91,15 @@ export function deriveResourceInfo(
         title: d.eventName,
         ...(d.description ? { description: d.description } : {}),
       };
+    }
+
+    case "notice": {
+      // A required action with a deadline. Notice threads group by sender domain, so the
+      // deadline itself is the key — each new demand is its own resource, while a
+      // redelivery of the same one updates in place.
+      const d = workflowData as NoticeData;
+      if (d.requiresAction !== true || !d.actionDeadline || !d.actionDeadlineInstant) return null;
+      return { expectedResolutionDate: d.actionDeadlineInstant, displayDate: d.actionDeadline, resourceKey: d.actionDeadlineInstant, assets: [] };
     }
 
     default:

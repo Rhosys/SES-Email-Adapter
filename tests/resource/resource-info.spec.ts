@@ -267,8 +267,31 @@ describe("deriveResourceInfo", () => {
     });
   });
 
+  describe("notice", () => {
+    const base = { workflow: "notice", noticeType: "enforcement_action", provider: "Whatbox" } as const;
+
+    it("creates a resource keyed on the action deadline when action is required", () => {
+      const info = deriveResourceInfo("notice", {
+        ...base, requiresAction: true, actionDeadline: "2026-11-06T05:30", actionDeadlineInstant: "2026-11-06T05:30:00.000Z",
+      });
+      expect(info).toEqual({
+        expectedResolutionDate: "2026-11-06T05:30:00.000Z", displayDate: "2026-11-06T05:30",
+        resourceKey: "2026-11-06T05:30:00.000Z", assets: [],
+      });
+    });
+
+    it.each([
+      ["no action required", { requiresAction: false, actionDeadline: "2026-11-06", actionDeadlineInstant: "2026-11-06T00:00:00.000Z" }],
+      ["requiresAction missing", { actionDeadline: "2026-11-06", actionDeadlineInstant: "2026-11-06T00:00:00.000Z" }],
+      ["no deadline", { requiresAction: true }],
+      ["unparseable deadline (no instant)", { requiresAction: true, actionDeadline: "soon" }],
+    ])("returns null when %s", (_label, extra) => {
+      expect(deriveResourceInfo("notice", { ...base, ...extra } as WorkflowData)).toBeNull();
+    });
+  });
+
   describe("non-resource workflows", () => {
-    it.each(["auth", "conversation", "crm", "content", "onboarding", "notice", "support", "healthcheck", "test", "unspecified"] as const)(
+    it.each(["auth", "conversation", "crm", "content", "onboarding", "support", "healthcheck", "test", "unspecified"] as const)(
       "returns null for workflow %s",
       (workflow) => {
         expect(deriveResourceInfo(workflow, { workflow } as unknown as WorkflowData)).toBeNull();
