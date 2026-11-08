@@ -13,12 +13,9 @@ export function baseUrgency(workflow: Workflow, data: WorkflowData): ThreadUrgen
     case "content":
       return "low";
 
-    // notice: passive unless the user must act (e.g. remove content before an account freeze)
-    case "notice":
-      return (data as { requiresAction?: boolean }).requiresAction === true ? "high" : "silent";
-
-    // onboarding emails are silent — passive, never interrupt
+    // onboarding and notice emails are silent — passive, never interrupt
     case "onboarding":
+    case "notice":
       return "silent";
 
     // test emails are high — user is actively waiting for confirmation

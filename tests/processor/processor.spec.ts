@@ -1162,13 +1162,9 @@ describe("IncomingEmailProcessor", () => {
       expect(baseUrgency("content", { workflow: "content", contentType: "promotion", publisher: "Nike" })).toBe("low");
     });
 
-    it("notice is silent unless action is required", () => {
+    it("notice is always silent", () => {
       expect(baseUrgency("notice", { workflow: "notice", noticeType: "privacy_policy", provider: "Google", requiresAction: false })).toBe("silent");
       expect(baseUrgency("notice", { workflow: "notice", noticeType: "service_notice", provider: "Stripe", requiresAction: false })).toBe("silent");
-    });
-
-    it("notice is high when action is required", () => {
-      expect(baseUrgency("notice", { workflow: "notice", noticeType: "enforcement_action", provider: "Whatbox", requiresAction: true })).toBe("high");
     });
 
     it("onboarding is always silent", () => {
