@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemPrompt, buildUserMessage } from "../../src/classifier/prompt-builder.js";
+import { buildSystemPrompt, buildUserMessage, redactUrls } from "../../src/classifier/prompt-builder.js";
 import type { ClassificationInput } from "../../src/classifier/classifier.js";
 import { CLASSIFIER_WORKFLOW_REGISTRY, EnumValue } from "../../src/types/workflow-registry.js";
 
@@ -214,5 +214,61 @@ describe("buildUserMessage — current date and time injection", () => {
     const message = buildUserMessage(input);
     // LA is UTC-8 in January → 19:00 on Jan 14
     expect(message).toContain("Current date and time: Tuesday, 14 January 2025, 19:00");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// redactUrls
+// ---------------------------------------------------------------------------
+
+describe("redactUrls", () => {
+  it("never substitutes a URL inside a longer URL it prefixes", () => {
+    const body = "View: https://x.ca/c\nDelete: https://x.ca/c#delete\nUnlock: https://x.ca/c#unlock";
+    const { redactedBody, linkIndex } = redactUrls(body, []);
+    expect(redactedBody).toBe("View: [link-1]\nDelete: [link-2]\nUnlock: [link-3]");
+    expect(linkIndex.map((l) => l.url)).toEqual(["https://x.ca/c", "https://x.ca/c#delete", "https://x.ca/c#unlock"]);
+  });
+
+  it("gives each occurrence of a repeated URL its own placeholder", () => {
+    const { redactedBody, linkIndex } = redactUrls("a https://x.ca/a b https://x.ca/a", []);
+    expect(redactedBody).toBe("a [link-1] b [link-2]");
+    expect(linkIndex.map((l) => l.url)).toEqual(["https://x.ca/a", "https://x.ca/a"]);
+  });
+
+  it("handles a known short URL that prefixes a longer bare URL", () => {
+    const { redactedBody, linkIndex } = redactUrls(
+      "https://x.ca/c and https://x.ca/c#unlock",
+      [{ url: "https://x.ca/c", text: "View" }],
+    );
+    expect(redactedBody).toBe("[link-1] and [link-2]");
+    expect(linkIndex).toEqual([
+      { placeholder: "[link-1]", url: "https://x.ca/c", text: "View" },
+      { placeholder: "[link-2]", url: "https://x.ca/c#unlock", text: null },
+    ]);
+  });
+
+  it("uses a known URL containing characters the bare pattern stops at", () => {
+    const url = "https://en.wikipedia.org/wiki/Foo_(bar)";
+    const { redactedBody, linkIndex } = redactUrls(`see ${url} now`, [{ url, text: "Foo" }]);
+    expect(redactedBody).toBe("see [link-1] now");
+    expect(linkIndex[0]).toEqual({ placeholder: "[link-1]", url, text: "Foo" });
+  });
+
+  it("excludes trailing sentence punctuation from the URL", () => {
+    const { redactedBody, linkIndex } = redactUrls("Go to https://x.ca/a.", []);
+    expect(redactedBody).toBe("Go to [link-1].");
+    expect(linkIndex[0]?.url).toBe("https://x.ca/a");
+  });
+
+  it("appends extracted links that do not appear in the body", () => {
+    const { redactedBody, linkIndex } = redactUrls("Click here https://x.ca/b", [
+      { url: "https://x.ca/a", text: "Click here" },
+      { url: "https://x.ca/b", text: "B" },
+    ]);
+    expect(redactedBody).toBe("Click here [link-1]");
+    expect(linkIndex).toEqual([
+      { placeholder: "[link-1]", url: "https://x.ca/b", text: "B" },
+      { placeholder: "[link-2]", url: "https://x.ca/a", text: "Click here" },
+    ]);
   });
 });
