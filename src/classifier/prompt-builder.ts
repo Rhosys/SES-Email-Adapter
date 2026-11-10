@@ -36,55 +36,58 @@ export interface LinkIndex {
   text: string | null;
 }
 
+const BARE_URL_PATTERN = /https?:\/\/[^\s<>"')\]]+/g;
+// Sentence punctuation that commonly follows a URL in prose ("visit https://x.com/a.") but is not part of it.
+const TRAILING_URL_PUNCTUATION = /[.,;:!?]+$/;
+
 /**
- * Replaces bare URLs in the body with numbered [link-N] placeholders.
- * Uses the extractedLinks list to build the mapping — URLs not in the
- * extracted list get appended. Returns the redacted body and the ordered
- * link index for correlation.
+ * Replaces every URL occurrence in the body with its own numbered [link-N]
+ * placeholder, in body order — a URL repeated in the body gets a distinct
+ * placeholder at each spot. A single left-to-right pass means a URL that is a
+ * prefix of another (https://x.com/a vs https://x.com/a#b) can never be
+ * substituted inside the longer one.
+ *
+ * extractedLinks (from HTML anchors) supply link text for matching occurrences
+ * and allow URLs the bare pattern can't fully capture (e.g. containing ")").
+ * Extracted links that never appear in the body are appended so they remain
+ * selectable. Returns the redacted body and the ordered link index.
  */
 export function redactUrls(
   body: string,
   extractedLinks: Array<{ url: string; text: string | null }>,
 ): { redactedBody: string; linkIndex: LinkIndex[] } {
-  const linkIndex: LinkIndex[] = extractedLinks.map((l, i) => ({
-    placeholder: `[link-${i + 1}]`,
-    url: l.url,
-    text: l.text,
-  }));
+  const linkIndex: LinkIndex[] = [];
+  const textByUrl = new Map<string, string | null>();
+  for (const link of extractedLinks) {
+    if (!textByUrl.has(link.url)) textByUrl.set(link.url, link.text);
+  }
+  // Longest first so the longest known URL starting at a position wins.
+  const knownUrls = [...textByUrl.keys()].sort((a, b) => b.length - a.length);
+  const seenInBody = new Set<string>();
 
-  // Build URL → placeholder lookup (longest URLs first to avoid partial matches)
-  const urlToPlaceholder = new Map<string, string>();
-  for (const entry of linkIndex) {
-    urlToPlaceholder.set(entry.url, entry.placeholder);
+  let redactedBody = "";
+  let cursor = 0;
+  for (const match of body.matchAll(BARE_URL_PATTERN)) {
+    const start = match.index;
+    if (start < cursor) continue;
+    const bare = match[0].replace(TRAILING_URL_PUNCTUATION, "");
+    // Prefer a known URL at this position when it covers at least the bare match —
+    // never a shorter known URL, which would split a longer URL (the prefix-collision bug).
+    const url = knownUrls.find((k) => k.length >= bare.length && body.startsWith(k, start)) ?? bare;
+    const placeholder = `[link-${linkIndex.length + 1}]`;
+    linkIndex.push({ placeholder, url, text: textByUrl.get(url) ?? null });
+    seenInBody.add(url);
+    redactedBody += body.slice(cursor, start) + placeholder;
+    cursor = start + url.length;
+  }
+  redactedBody += body.slice(cursor);
+
+  for (const [url, text] of textByUrl) {
+    if (seenInBody.has(url)) continue;
+    linkIndex.push({ placeholder: `[link-${linkIndex.length + 1}]`, url, text });
   }
 
-  // Replace all occurrences of known URLs in the body
-  let redacted = body;
-  // Sort by URL length descending so longer URLs are replaced first
-  const sortedUrls = [...urlToPlaceholder.entries()].sort((a, b) => b[0].length - a[0].length);
-  for (const [url, placeholder] of sortedUrls) {
-    redacted = redacted.split(url).join(placeholder);
-  }
-
-  // Catch any remaining bare URLs not in the extracted list
-  const bareUrlRegex = /https?:\/\/[^\s<>"')\]]+/g;
-  let match: RegExpExecArray | null;
-  const extraUrls: string[] = [];
-  while ((match = bareUrlRegex.exec(redacted)) !== null) {
-    const found = match[0];
-    if (!extraUrls.includes(found)) {
-      extraUrls.push(found);
-    }
-  }
-  for (const url of extraUrls) {
-    const idx = linkIndex.length + 1;
-    const placeholder = `[link-${idx}]`;
-    linkIndex.push({ placeholder, url, text: null });
-    urlToPlaceholder.set(url, placeholder);
-    redacted = redacted.split(url).join(placeholder);
-  }
-
-  return { redactedBody: redacted, linkIndex };
+  return { redactedBody, linkIndex };
 }
 
 /**
