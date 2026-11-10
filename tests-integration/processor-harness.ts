@@ -1,195 +1,118 @@
-import type { IForwardingService } from "../src/forwarding/forwarding-service.js";
 // Processor integration harness.
 //
-// Extends the base harness with real S3, SQS, and IncomingEmailProcessor wired to
-// MiniStack. Provides helpers to upload a raw MIME email, send an SNS-wrapped
-// SQS message, poll the queue, and call processInbound().
+// Extends the base harness: seeds an account + receiving domain through the API, and
+// delivers inbound email the way production receives it — the raw MIME lands in the
+// email bucket (SES's S3 receipt action), and the SES "Received" notification, wrapped
+// in its SNS envelope, wrapped in an SQS record, is handed to the real Lambda handler
+// (src/create-handler.ts) built over the IntegrationCompositeRoot. Results are then
+// read back through the API by the suites.
 //
 // Required env vars (in addition to those in harness.ts):
 //   PROCESSING_TABLE      — DynamoDB processing table name
 //   EMAIL_BUCKET          — S3 bucket for raw MIME emails (ses-it-email)
 //   CONTENT_BUCKET        — S3 bucket for extracted content (ses-it-content)
-//   SIGNAL_QUEUE_URL      — SQS queue URL (http://localhost:4566/.../ses-it-signals)
 //   CONTENT_CDN_BASE_URL  — CDN base for attachment URLs
 
-import { S3Client, CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
-import { EmailContentStore, ContentStore } from "../src/content-store.js";
-import { SQSClient, CreateQueueCommand, SendMessageCommand, ReceiveMessageCommand, DeleteMessageCommand } from '@aws-sdk/client-sqs';
-import { AccountDatabase } from '../src/database/account-database.js';
-import { ThreadDatabase } from '../src/database/thread-database.js';
-import { AuditDatabase } from '../src/database/audit-database.js';
-import { ProcessingDatabase } from '../src/database/processing-database.js';
-import { IncomingEmailProcessor } from '../src/processor/incoming-email-processor.js';
-import type { InboundSignalMessage, SideEffectPayload, SesVerdictStatus } from '../src/processor/incoming-email-processor.js';
-import { JsonLogicRuleEvaluator } from '../src/processor/rule-evaluator.js';
-import { createApp } from '../src/api/app.js';
-import { makeAppDeps } from '../tests/helpers/app-deps.js';
-import { makeHmacGeneratorFake } from '../tests/helpers/hmac-generator-fake.js';
-import { AuthressAuthService } from '../src/api/authress-auth.js';
-import { startMockAuthressServer } from './mock-authress.js';
-import type { MockAuthressServer } from './mock-authress.js';
-import { InProcessContentSanitizer } from './in-process-content-sanitizer.js';
-import { createConsoleLogger } from '../tests/helpers/console-logger.js';
-import { ok } from '../src/errors.js';
-import type { AccessService } from '../src/api/app.js';
-import type { EmailService } from '../src/email/email-service.js';
-import { CalendarForwarder } from '../src/processor/calendar/calendar-forwarder.js';
-import type { PostApprovalCalendarHandlerDeps } from '../src/processor/calendar/post-approval-handler.js';
-import type { EmbeddingGenerator } from '../src/embedding/embedding-generator.js';
-import type { MultiClusterAuroraWriter } from '../src/database/thread-matcher.js';
-import type { WorkflowData } from '../src/types/index.js';
-import { BillingHandler } from '../src/billing/billing-handler.js';
-import type { UserCodeExecutorClient } from '../src/processor/user-code-client.js';
-import type { HandlerRegistry } from '../src/workflow/registry.js';
-import type { SchedulerClient } from '../src/scheduler/scheduler-client.js';
+import { randomUUID } from 'node:crypto';
+import { CreateBucketCommand, PutObjectCommand } from '@aws-sdk/client-s3';
+import type { Context, SESMessage, SNSMessage, SQSEvent } from 'aws-lambda';
+import { createHandler } from '../src/create-handler.js';
+import { createHarness } from './harness.js';
+import type { IntegrationHarness } from './harness.js';
+import { EMAIL_BUCKET, CONTENT_BUCKET } from './integration-composite-root.js';
 
-const ENDPOINT = process.env['AWS_ENDPOINT_URL'] ?? 'http://localhost:4566';
-const EMAIL_BUCKET = process.env['EMAIL_BUCKET'] ?? 'ses-it-email';
-const CONTENT_BUCKET = process.env['CONTENT_BUCKET'] ?? 'ses-it-content';
-const QUEUE_URL = process.env['SIGNAL_QUEUE_URL'] ?? `${ENDPOINT}/000000000000/ses-it-signals`;
-const CONTENT_CDN_BASE_URL = process.env['CONTENT_CDN_BASE_URL'] ?? `${ENDPOINT}/ses-it-content`;
+const REGION = process.env['AWS_REGION'] ?? 'eu-central-1';
+const SES_TOPIC_ARN = `arn:aws:sns:${REGION}:000000000000:SES-Email-Adapter-ses-notifications`;
+const SIGNAL_QUEUE_ARN = `arn:aws:sqs:${REGION}:000000000000:SES-Email-Adapter-signals`;
 
 // ---------------------------------------------------------------------------
 // Harness interface
 // ---------------------------------------------------------------------------
 
-export interface ProcessorHarness {
-  app: ReturnType<typeof createApp>;
-  mockAuthress: MockAuthressServer;
+export interface ProcessorHarness extends IntegrationHarness {
   accountId: string;
-  access: AccessService;
-  sideEffects: SideEffectPayload[];
-  sendEmail(messageId: string, rawMime: string | Buffer): Promise<void>;
-  consumeAndProcess(): Promise<void>;
-  teardown(): Promise<void>;
+  /** Deliver a raw MIME email to the seeded account through the real Lambda handler. */
+  receiveEmail(messageId: string, rawMime: string | Buffer): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
-// Stubs
+// Production event shapes: SQS record ⊃ SNS envelope ⊃ SES "Received" notification
 // ---------------------------------------------------------------------------
 
-const stubEmbeddingGenerator: EmbeddingGenerator = {
-  async generateForModel(_text, modelId) {
-    return ok({ modelId, vector: [], dimensions: 0 });
-  },
-  async generateForSecondaryClusters(_text) {
-    return [];
-  },
-};
+function sesReceivedNotification(messageId: string, recipient: string, objectKey: string): SESMessage & { notificationType: 'Received' } {
+  const timestamp = new Date().toISOString();
+  return {
+    notificationType: 'Received',
+    mail: {
+      timestamp,
+      source: 'sender@example.com',
+      messageId,
+      destination: [recipient],
+      headersTruncated: false,
+      headers: [],
+      commonHeaders: { returnPath: 'sender@example.com', date: timestamp, messageId: `<${messageId}>`, to: [recipient] },
+    },
+    receipt: {
+      timestamp,
+      processingTimeMillis: 1,
+      recipients: [recipient],
+      spamVerdict: { status: 'PASS' },
+      virusVerdict: { status: 'PASS' },
+      spfVerdict: { status: 'PASS' },
+      dkimVerdict: { status: 'PASS' },
+      dmarcVerdict: { status: 'PASS' },
+      action: { type: 'S3', topicArn: SES_TOPIC_ARN, bucketName: EMAIL_BUCKET, objectKey },
+    },
+  };
+}
 
-const stubAuroraWriter: MultiClusterAuroraWriter = {
-  async upsertEmbedding(_opts) { return ok(undefined); },
-  async findMatch(_opts) { return ok(null); },
-};
+function snsEnvelope(message: unknown): SNSMessage {
+  return {
+    Type: 'Notification',
+    MessageId: randomUUID(),
+    TopicArn: SES_TOPIC_ARN,
+    Subject: 'Amazon SES Email Receipt Notification',
+    Message: JSON.stringify(message),
+    Timestamp: new Date().toISOString(),
+    SignatureVersion: '1',
+    Signature: 'integration-test',
+    SigningCertUrl: 'https://sns.example.invalid/cert.pem',
+    UnsubscribeUrl: 'https://sns.example.invalid/unsubscribe',
+    MessageAttributes: {},
+  };
+}
+
+function sqsEvent(body: unknown): SQSEvent {
+  const now = String(Date.now());
+  return {
+    Records: [{
+      messageId: randomUUID(),
+      receiptHandle: `integration-${randomUUID()}`,
+      body: JSON.stringify(body),
+      attributes: { ApproximateReceiveCount: '1', SentTimestamp: now, SenderId: 'integration-test', ApproximateFirstReceiveTimestamp: now },
+      messageAttributes: {},
+      md5OfBody: '',
+      eventSource: 'aws:sqs',
+      eventSourceARN: SIGNAL_QUEUE_ARN,
+      awsRegion: REGION,
+    }],
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
 export async function createProcessorHarness(): Promise<ProcessorHarness> {
-  const authressUrl = process.env['AUTHRESS_API_URL'] ?? 'http://localhost:4500';
-  const authressPort = parseInt(new URL(authressUrl).port, 10) || 4500;
-  const mockAuthress = await startMockAuthressServer(authressPort);
+  const base = await createHarness();
+  const { root, app, mockAuthress } = base;
+  const handler = createHandler(root);
 
-  const logger = createConsoleLogger();
-
-  // forcePathStyle is required for MiniStack/LocalStack so presigned URLs use
-  // http://localhost:4566/{bucket}/... rather than http://{bucket}.localhost:4566/...
-  // Explicit test/test credentials are mandatory: a presigned URL embeds the access
-  // key id as a query param that MiniStack validates, and it only recognises test/test
-  // (any other key — including an ambient ~/.aws/SSO key — returns InvalidAccessKeyId
-  // on a presigned GET). Direct SDK calls accept any key, so only the presigned path
-  // (content sanitizer MIME fetch) exposes this.
-  const isLocal = ENDPOINT.includes('localhost') || ENDPOINT.includes('127.0.0.1');
-  const s3 = new S3Client(isLocal
-    ? { forcePathStyle: true, credentials: { accessKeyId: 'test', secretAccessKey: 'test' } }
-    : {});
-  const sqs = new SQSClient({});
-
-  // Provision S3 buckets and SQS queue (idempotent — CreateBucket is a no-op if it exists)
-  const region = process.env['AWS_REGION'] ?? 'eu-central-1';
-  const bucketConfig = region !== 'us-east-1' ? { CreateBucketConfiguration: { LocationConstraint: region as 'eu-central-1' } } : {};
-  await s3.send(new CreateBucketCommand({ Bucket: EMAIL_BUCKET, ...bucketConfig })).catch(() => undefined);
-  await s3.send(new CreateBucketCommand({ Bucket: CONTENT_BUCKET, ...bucketConfig })).catch(() => undefined);
-  await sqs.send(new CreateQueueCommand({ QueueName: 'ses-it-signals' })).catch(() => undefined);
-
-  const accountDb = new AccountDatabase(logger);
-  const threadDb = new ThreadDatabase(logger);
-  const auditDb = new AuditDatabase();
-  const processingDb = new ProcessingDatabase();
-
-  const sideEffects: SideEffectPayload[] = [];
-
-  const processor = new IncomingEmailProcessor({ resourceDb: { saveResource: async () => ok(undefined) } as never,
-    threadDb,
-    accountDb,
-    processingDb,
-    contentSanitizer: new InProcessContentSanitizer(),
-    classifier: {
-      classify: async () => ok({ workflow: 'conversation' as const, workflowData: { workflow: 'conversation', sentiment: 'neutral', requiresReply: false } satisfies WorkflowData, tags: [], summary: '', labels: [] as string[], actions: [] }),
-    },
-    embeddingGenerator: stubEmbeddingGenerator,
-    auroraWriter: stubAuroraWriter,
-    threadMatcher: {
-      findMatch: async () => ok(null),
-      upsertEmbedding: async () => ok(undefined),
-      deleteEmbeddingsForThread: async () => ok(undefined),
-    },
-    ruleEvaluator: new JsonLogicRuleEvaluator(logger, { invoke: async () => ({ success: true, result: undefined }) as never, validateAst: async () => ({ success: true }) as never, validateAstBatch: async () => ({ success: true }) as never } as unknown as UserCodeExecutorClient, { annotateRuleError: async () => ok(undefined) }),
-    notifier: { notifySignal: async () => ok(undefined), notifyThread: async () => ok(undefined), notifyBlocked: async () => ok(undefined) },
-    forwardingService: { forward: async () => ok(undefined), sendVerification: async () => ok(undefined) },
-    retentionService: { applyPlanRetention: async (s3Key, _input) => ({ s3Key }) },
-    replySender: { sendReply: async () => ok({ messageId: 'stub-reply' }) },
-    sqsDispatcher: { sendMessage: async (payload) => { sideEffects.push(payload); return ok(undefined); } },
-    draftSendDispatcher: { dispatch: async () => ok(undefined) },
-    userCodeExecutor: { invoke: async () => ({ success: true, result: undefined }) as never, validateAst: async () => ({ success: true }) as never, validateAstBatch: async () => ({ success: true }) as never } as unknown as UserCodeExecutorClient,
-    billingHandler: new BillingHandler(),
-    handlerRegistry: { dispatch: async () => ok(undefined) } as unknown as HandlerRegistry,
-    schedulerClient: { createFollowup: async () => ok(undefined), deleteFollowup: async () => ok(undefined) } as unknown as SchedulerClient,
-    accessService: { listUsers: async () => ok([]), getUserProfile: async () => ok({}) },
-    platformTenantName: "test-platform",
-    calendarForwarder: new CalendarForwarder({
-      emailService: { send: async () => ok({ messageId: 'stub-cal' }), sendRaw: async () => ok({ messageId: 'stub-cal' }) } as unknown as EmailService,
-      serviceDomain: 'platform.email.rhosys.cloud',
-      hmac: makeHmacGeneratorFake(),
-    }),
-    logger,
-    emailContentStore: new EmailContentStore(s3, EMAIL_BUCKET),
-    contentStore: new ContentStore(s3, CONTENT_BUCKET),
-  });
-
-  const access: AccessService = {
-    listUsers: async () => ok([]),
-    getUserProfile: async () => ok({}),
-    listAccountsForUser: async () => ok([]),
-    addUser: async () => ok(undefined),
-    updateUserRole: async () => ok(undefined),
-    removeUser: async () => ok(undefined),
-    checkAccess: async () => { /* noop */ },
-    createInvite: async () => ok({ inviteId: 'mock-invite' }),
-    getLinkedIdentity: async () => ok({ connectionUserId: "google-sub-12345" }),
-  };
-
-  const app = createApp(makeAppDeps({
-    threadDb,
-    accountDb,
-    auditDb,
-    auth: new AuthressAuthService(),
-    access,
-    logger,
-    forwardingService: { sendVerification: async () => ok(undefined), forward: async () => ok(undefined) },
-    jobDispatcher: { dispatchReindex: async () => {}, dispatchSegment: async () => {} } as never,
-    draftSendDispatcher: { dispatch: async () => ok(undefined) } as never,
-    accountCreationStarter: { start: async () => {} },
-    contentCdnBaseUrl: CONTENT_CDN_BASE_URL,
-    astValidator: { validateAstBatch: async () => ({ success: true, purpose: 'validate_ast_batch', results: [] }) } as never,
-    billingHandler: new BillingHandler(),
-    emailService: { send: async () => ok({ messageId: 'stub' }), sendRaw: async () => {} } as unknown as EmailService,
-    domainIdentityService: { register: async () => ok(undefined), deregister: async () => ok(undefined) },
-    calendarForwarder: { forwardInvite: async () => ok(undefined), sendReply: async () => ok({ messageId: "stub" }) } as unknown as CalendarForwarder,
-    postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: 'platform.email.rhosys.cloud' } as unknown as PostApprovalCalendarHandlerDeps,
-    schedulerClient: { scheduleMessage: async () => ok(undefined), deleteSchedule: async () => ok(undefined) } as never,
-  }));
+  // The email bucket is provisioned by Tofu; the content bucket is integration-only.
+  // CreateBucket is idempotent here — an existing bucket is fine.
+  const bucketConfig = REGION !== 'us-east-1' ? { CreateBucketConfiguration: { LocationConstraint: REGION as 'eu-central-1' } } : {};
+  await root.s3.send(new CreateBucketCommand({ Bucket: EMAIL_BUCKET, ...bucketConfig })).catch(() => undefined);
+  await root.s3.send(new CreateBucketCommand({ Bucket: CONTENT_BUCKET, ...bucketConfig })).catch(() => undefined);
 
   // ---------------------------------------------------------------------------
   // Seed account + domain via the API (never call DB directly in integration tests)
@@ -230,88 +153,24 @@ export async function createProcessorHarness(): Promise<ProcessorHarness> {
   }
 
   // ---------------------------------------------------------------------------
-  // Helpers
+  // Inbound delivery
   // ---------------------------------------------------------------------------
 
-  async function sendEmail(messageId: string, rawMime: string | Buffer): Promise<void> {
-    const s3Key = `emails/${messageId}`;
-    const body = typeof rawMime === 'string' ? Buffer.from(rawMime) : rawMime;
-
-    await s3.send(new PutObjectCommand({
+  async function receiveEmail(messageId: string, rawMime: string | Buffer): Promise<void> {
+    const objectKey = `emails/${messageId}`;
+    await root.s3.send(new PutObjectCommand({
       Bucket: EMAIL_BUCKET,
-      Key: s3Key,
-      Body: body,
+      Key: objectKey,
+      Body: typeof rawMime === 'string' ? Buffer.from(rawMime) : rawMime,
       ContentType: 'message/rfc822',
     }));
 
-    const inner = JSON.stringify({
-      notificationType: 'Received',
-      mail: {
-        messageId,
-        timestamp: new Date().toISOString(),
-        destination: [`recipient@${accountId}.example.com`],
-      },
-      receipt: {
-        dkimVerdict: { status: 'PASS' },
-        dmarcVerdict: { status: 'PASS' },
-        action: { objectKey: s3Key },
-      },
-      accountId,
-    });
-
-    await sqs.send(new SendMessageCommand({
-      QueueUrl: QUEUE_URL,
-      MessageBody: JSON.stringify({ Message: inner }),
-    }));
+    const event = sqsEvent(snsEnvelope(sesReceivedNotification(messageId, `recipient@${recipientDomain}`, objectKey)));
+    const result = await handler(event, { awsRequestId: `integration-${messageId}` } as Context) as { batchItemFailures?: Array<{ itemIdentifier: string }> };
+    if (!result?.batchItemFailures || result.batchItemFailures.length > 0) {
+      throw new Error(`Handler did not process the SQS record cleanly (see logs above): ${JSON.stringify(result)}`);
+    }
   }
 
-  async function consumeAndProcess(): Promise<void> {
-    const { Messages } = await sqs.send(new ReceiveMessageCommand({
-      QueueUrl: QUEUE_URL,
-      MaxNumberOfMessages: 1,
-      WaitTimeSeconds: 5,
-    }));
-
-    if (!Messages?.length) throw new Error('No SQS message received within timeout');
-
-    const record = Messages[0]!;
-    const outer = JSON.parse(record.Body!) as { Message: string };
-    const inner = JSON.parse(outer.Message) as {
-      notificationType: string;
-      mail: { messageId: string; timestamp: string; destination: string[] };
-      receipt: { dkimVerdict: { status: SesVerdictStatus }; dmarcVerdict: { status: SesVerdictStatus }; action: { objectKey: string } };
-      accountId?: string;
-    };
-
-    const message: InboundSignalMessage = {
-      s3Key: inner.receipt.action.objectKey,
-      compositeMailMessageId: `ses-${inner.mail.messageId}`,
-      idempotencyKey: inner.mail.messageId,
-      timestamp: inner.mail.timestamp,
-      primaryRecipient: inner.mail.destination[0] ?? "",
-      dkimVerdict: inner.receipt.dkimVerdict.status,
-      dmarcVerdict: inner.receipt.dmarcVerdict.status,
-    };
-
-    const result = await processor.processInbound(message, 1);
-    if (result.isErr()) throw new Error(`processInbound failed: ${JSON.stringify(result.error, null, 2)}`);
-
-    await sqs.send(new DeleteMessageCommand({
-      QueueUrl: QUEUE_URL,
-      ReceiptHandle: record.ReceiptHandle!,
-    }));
-  }
-
-  return {
-    app,
-    mockAuthress,
-    accountId,
-    access,
-    sideEffects,
-    sendEmail,
-    consumeAndProcess,
-    async teardown() {
-      mockAuthress.close();
-    },
-  };
+  return { ...base, accountId, receiveEmail };
 }

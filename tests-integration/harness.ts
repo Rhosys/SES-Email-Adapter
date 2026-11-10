@@ -1,9 +1,8 @@
 // Reusable integration test harness.
 //
-// Connects to DynamoDB tables pre-provisioned by Tofu (see
-// tests-integration/infrastructure/) and wires a real Hono app against them +
-// a local Ed25519 JWKS server that
-// stands in for Authress.
+// Wires the shared IntegrationCompositeRoot (real Hono app + DynamoDB tables
+// pre-provisioned by Tofu — see tests-integration/infrastructure/) and a local
+// Ed25519 JWKS server that stands in for Authress.
 //
 // Required env vars (CI sets these; defaults shown in parentheses):
 //   AWS_ENDPOINT_URL   — MiniStack endpoint  (http://localhost:4566)
@@ -15,28 +14,18 @@
 //   AUDIT_TABLE
 //   AUTHRESS_API_URL   — mock JWKS server URL (http://localhost:4500)
 
-import { AccountDatabase } from '../src/database/account-database.js';
-import { ThreadDatabase } from '../src/database/thread-database.js';
-import { AuditDatabase } from '../src/database/audit-database.js';
-import { AuthressAuthService } from '../src/api/authress-auth.js';
-import { createApp } from '../src/api/app.js';
-import { makeAppDeps } from '../tests/helpers/app-deps.js';
-import { createConsoleLogger } from '../tests/helpers/console-logger.js';
-import { ok } from '../src/errors.js';
 import type { AccessService } from '../src/api/app.js';
-import type { EmailService } from '../src/email/email-service.js';
-import type { CalendarForwarder } from '../src/processor/calendar/calendar-forwarder.js';
-import type { PostApprovalCalendarHandlerDeps } from '../src/processor/calendar/post-approval-handler.js';
 import { startMockAuthressServer } from './mock-authress.js';
 import type { MockAuthressServer } from './mock-authress.js';
-import { BillingHandler } from '../src/billing/billing-handler.js';
+import { IntegrationCompositeRoot } from './integration-composite-root.js';
 
 // ---------------------------------------------------------------------------
 // Harness interface
 // ---------------------------------------------------------------------------
 
 export interface IntegrationHarness {
-  app: ReturnType<typeof createApp>;
+  root: IntegrationCompositeRoot;
+  app: IntegrationCompositeRoot['app'];
   mockAuthress: MockAuthressServer;
   /** Mutable stub — tests may reassign individual methods between calls. */
   access: AccessService;
@@ -54,52 +43,13 @@ export async function createHarness(): Promise<IntegrationHarness> {
   const authressPort = parseInt(new URL(authressUrl).port, 10) || 4500;
   const mockAuthress = await startMockAuthressServer(authressPort);
 
-  const logger = createConsoleLogger();
-
-  // All three databases connect to MiniStack via AWS_ENDPOINT_URL.
-  // Tables were provisioned by `tofu apply` before the test runs.
-  const accountDb = new AccountDatabase(logger);
-  const threadDb = new ThreadDatabase(logger);
-  const auditDb = new AuditDatabase();
-
-  // Mutable stub — individual tests can override specific methods.
-  const access: AccessService = {
-    listUsers: async () => ok([]),
-    getUserProfile: async () => ok({}),
-    listAccountsForUser: async () => ok([]),
-    addUser: async () => ok(undefined),
-    updateUserRole: async () => ok(undefined),
-    removeUser: async () => ok(undefined),
-    checkAccess: async () => { /* noop */ },
-    createInvite: async () => ok({ inviteId: 'mock-invite' }),
-    getLinkedIdentity: async () => ok({ connectionUserId: "google-sub-12345" }),
-  };
-
-  const app = createApp(makeAppDeps({
-    threadDb,
-    accountDb,
-    auditDb,
-    auth: new AuthressAuthService(),
-    access,
-    logger,
-    forwardingService: { sendVerification: async () => ok(undefined), forward: async () => ok(undefined) },
-    jobDispatcher: { dispatchReindex: async () => {}, dispatchSegment: async () => {} } as never,
-    draftSendDispatcher: { dispatch: async () => ok(undefined) } as never,
-    accountCreationStarter: { start: async () => {} },
-    contentCdnBaseUrl: 'https://cdn.test',
-    astValidator: { validateAstBatch: async () => ({ success: true, purpose: 'validate_ast_batch', results: [] }) } as never,
-    billingHandler: new BillingHandler(),
-    emailService: { send: async () => ok({ messageId: "ses-cal-001" }), sendRaw: async () => {} } as unknown as EmailService,
-    domainIdentityService: { register: async () => ok(undefined), deregister: async () => ok(undefined) },
-    calendarForwarder: { forwardInvite: async () => ok(undefined), sendReply: async () => ok({ messageId: "stub" }) } as unknown as CalendarForwarder,
-    postApprovalCalendarDeps: { accountDb: {} as never, emailService: {} as never, serviceDomain: "platform.email.rhosys.cloud" } as unknown as PostApprovalCalendarHandlerDeps,
-    schedulerClient: { scheduleMessage: async () => ok(undefined), deleteSchedule: async () => ok(undefined) } as never,
-  }));
+  const root = new IntegrationCompositeRoot();
 
   return {
-    app,
+    root,
+    app: root.app,
     mockAuthress,
-    access,
+    access: root.access,
     async teardown() {
       mockAuthress.close();
     },
