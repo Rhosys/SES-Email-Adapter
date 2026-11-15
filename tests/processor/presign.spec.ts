@@ -61,10 +61,7 @@ describe("S3ObjectStorage.generatePresignedPost", () => {
         ["starts-with", "$Content-Disposition", ""],
         ["content-length-range", 0, 10 * 1024 * 1024],
       ],
-      Fields: {
-        "Content-Type": "",
-        "Content-Disposition": "",
-      },
+      Fields: {},
       Expires: 30,
     });
 
@@ -91,8 +88,6 @@ describe("S3ObjectStorage.generatePresignedPost", () => {
         { "x-amz-tagging": "retention=365" },
       ],
       Fields: {
-        "Content-Type": "",
-        "Content-Disposition": "",
         "x-amz-tagging": "retention=365",
       },
       Expires: 30,
@@ -118,8 +113,6 @@ describe("S3ObjectStorage.generatePresignedPost", () => {
         { "x-amz-tagging": "retention=3650" },
       ],
       Fields: {
-        "Content-Type": "",
-        "Content-Disposition": "",
         "x-amz-tagging": "retention=3650",
       },
       Expires: 30,

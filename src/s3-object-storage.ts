@@ -24,9 +24,10 @@ import { ok, err, type Result } from "./errors.js";
  * policy conditions allow — a phantom carried statically so the uploader can only set fields
  * the policy sanctioned. S3 rejects any form field its policy did not condition ("Extra input
  * fields: <name>"), so the union is the compile-time guard against that class of failure.
- * `fields` holds the SDK's default form values (policy, signature, credentials, plus our
- * per-field defaults) — these are submitted with the form but are NOT part of the signature;
- * only the policy is signed.
+ * `fields` holds the form values to submit: the SDK's fixed values (policy, signature,
+ * credentials, tagging), each pinned by an exact-match policy condition, plus a default for
+ * every `starts-with` field (key, Content-Type, Content-Disposition) that the uploader
+ * overwrites per object.
  */
 export interface PresignedPost<TField extends string> {
   url: string;
@@ -92,12 +93,11 @@ export class S3ObjectStorage {
   }
 
   /**
-   * Sign a browser-POST upload ticket from a domain spec. Only the policy (expiration +
-   * Conditions) is cryptographically signed; `Fields` is NOT signed — it is just a dict of
-   * default form values the SDK echoes back in the response for the uploader to submit. We
-   * derive the Conditions and the default Fields together here, in one place, so every
-   * conditioned field also has a default form value (S3 rejects a POST that omits a
-   * conditioned field) and the two cannot drift.
+   * Sign a browser-POST upload ticket from a domain spec. The SDK turns every `Fields`
+   * entry into an exact-match policy condition, so `Fields` holds only values that are fixed
+   * for the whole ticket. Per-object fields get a `starts-with` condition instead, and their
+   * defaults are added to the returned ticket after signing, so every conditioned field has
+   * a form value (S3 rejects a POST that omits a conditioned field).
    */
   async generatePresignedPost(spec: UploadTicketSpec): Promise<PresignedPost<UploadField>> {
     const post = await createPresignedPost(this.s3Client, {
@@ -116,28 +116,17 @@ export class S3ObjectStorage {
         ["content-length-range", 0, spec.maxBytes],
         ...(spec.retentionTag ? [{ "x-amz-tagging": `retention=${spec.retentionTag}` } as const] : []),
       ],
-      // Fields is NOT signed — it is the set of default form values the SDK returns for the
-      // uploader to submit. createPresignedPost does NOT derive it from Conditions: per the SDK
-      // docs, a conditioned field must ALSO appear here or S3 rejects any POST that omits that
-      // form field with "Policy Condition failed". These empty-string defaults guarantee the
-      // returned ticket carries both fields; `upload` overwrites them with the real per-object
-      // value (see its always-set writes). Belt-and-suspenders with `upload`: the ticket carries
-      // the fields AND every upload re-sets them, so neither path can produce a POST that omits
-      // a conditioned field.
+      // Every entry here becomes an exact-match condition in the signed policy — never put
+      // a per-object field (Content-Type, Content-Disposition) in it.
       Fields: {
-        "Content-Type": "",
-        "Content-Disposition": "",
         ...(spec.retentionTag ? { "x-amz-tagging": `retention=${spec.retentionTag}` } : {}),
       },
       Expires: 30,
     });
 
-    // The SDK always bakes `key` into the returned fields (from the `Key` param above),
-    // but the uploader sets the actual per-object key on each upload — a duplicate `key`
-    // field in the FormData makes S3 reject with "POST only supports one key parameter per
-    // request". Strip it here; the starts-with policy condition still constrains keys.
-    const { key: _templateKey, ...fields } = post.fields;
-    return { url: post.url, fields };
+    // Defaults for the starts-with fields, added after signing so they stay out of the
+    // policy. The SDK already supplies the `key` default; `upload` overwrites all three.
+    return { url: post.url, fields: { "Content-Type": "", "Content-Disposition": "", ...post.fields } };
   }
 
   /**
