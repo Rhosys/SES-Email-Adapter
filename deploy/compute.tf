@@ -451,7 +451,7 @@ resource "aws_lambda_function" "content_sanitizer" {
   role          = aws_iam_role.content_sanitizer.arn
   handler       = "content-sanitizer.handler"
   runtime       = "nodejs24.x"
-  memory_size   = 128
+  memory_size   = 256
   timeout       = 60
   publish       = true
 

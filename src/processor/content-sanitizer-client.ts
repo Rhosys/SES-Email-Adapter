@@ -97,6 +97,9 @@ export interface ContentSanitizerClient {
   invoke(request: ContentSanitizeRequest): Promise<Result<ContentSanitizeResponse, DbError>>;
 }
 
+/** Fraction of the sanitizer's configured memory above which a successful invoke still WARNs. */
+const MEMORY_WARN_RATIO = 0.6;
+
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
@@ -124,7 +127,19 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
       const executedVersion = response.ExecutedVersion ?? "unknown";
 
       if (response.FunctionError) {
-        const { detail, lambdaRequestId } = this.extractInvocationErrorDetail(response.Payload);
+        const { detail, lambdaRequestId, errorType } = this.extractInvocationErrorDetail(response.Payload);
+        if (errorType === "Runtime.OutOfMemory") {
+          // No handling exists for this yet: the SQS record is failed and redelivered, and
+          // the same email will run out of memory again on every redelivery. Surface it as an
+          // ERROR on every occurrence rather than waiting for the repeated-failure log.
+          this.logger.error(`Content Sanitizer Lambda ran out of memory (v${executedVersion}) — no handling exists; the message will be redelivered and fail again.`, {
+            code: "content_sanitizer.out_of_memory",
+            executedVersion,
+            accountId: request.accountId,
+            keyPrefix: request.keyPrefix,
+            ...(lambdaRequestId ? { lambdaRequestId } : {}),
+          });
+        }
         return err(dbError(
           `Content Sanitizer Lambda error (v${executedVersion}): ${response.FunctionError}${detail ? ` — ${detail}` : ""}`,
           lambdaRequestId ? { lambdaRequestId } : undefined,
@@ -135,7 +150,19 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
         return err(dbError(`Content Sanitizer Lambda returned empty payload (v${executedVersion})`));
       }
 
-      const wireResult = JSON.parse(new TextDecoder().decode(response.Payload)) as { success: boolean; parsed?: ContentSanitizeResponse["parsed"]; error?: { message: string; type: string } };
+      const wireResult = JSON.parse(new TextDecoder().decode(response.Payload)) as { success: boolean; parsed?: ContentSanitizeResponse["parsed"]; error?: { message: string; type: string }; memory?: { maxRssMb: number; limitMb: number } };
+
+      const memory = wireResult.memory;
+      if (memory && memory.limitMb > 0 && memory.maxRssMb > memory.limitMb * MEMORY_WARN_RATIO) {
+        this.logger.warn(`Content Sanitizer memory usage ${memory.maxRssMb}MB is above ${MEMORY_WARN_RATIO * 100}% of its ${memory.limitMb}MB limit.`, {
+          code: "content_sanitizer.high_memory_usage",
+          executedVersion,
+          accountId: request.accountId,
+          keyPrefix: request.keyPrefix,
+          maxRssMb: memory.maxRssMb,
+          limitMb: memory.limitMb,
+        });
+      }
 
       if (!wireResult.success || !wireResult.parsed) {
         const errorPayload = wireResult.error;
@@ -151,7 +178,7 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
     }
   }
 
-  private extractInvocationErrorDetail(payload: Uint8Array | undefined): { detail?: string; lambdaRequestId?: string } {
+  private extractInvocationErrorDetail(payload: Uint8Array | undefined): { detail?: string; lambdaRequestId?: string; errorType?: string } {
     if (!payload) return {};
     try {
       const decoded = JSON.parse(new TextDecoder().decode(payload)) as { errorType?: string; errorMessage?: string };
@@ -166,6 +193,7 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
       return {
         ...(detail ? { detail } : {}),
         ...(requestIdMatch ? { lambdaRequestId: requestIdMatch[1] } : {}),
+        ...(decoded.errorType ? { errorType: decoded.errorType } : {}),
       };
     } catch {
       return {};

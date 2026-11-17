@@ -27,10 +27,11 @@ interface AttachmentWithBytes {
 function decodePixels(format: string, bytes: Buffer): { data: Uint8ClampedArray; width: number; height: number } | null {
   if (format === "png") {
     const png = PNG.sync.read(bytes);
-    return { data: new Uint8ClampedArray(png.data), width: png.width, height: png.height };
+    // View over the decoded buffer — copying it would double an already width×height×4 allocation.
+    return { data: new Uint8ClampedArray(png.data.buffer, png.data.byteOffset, png.data.length), width: png.width, height: png.height };
   }
-  const jpeg = jpegJs.decode(new Uint8Array(bytes), { useTArray: true, formatAsRGBA: true });
-  return { data: new Uint8ClampedArray(jpeg.data), width: jpeg.width, height: jpeg.height };
+  const jpeg = jpegJs.decode(bytes, { useTArray: true, formatAsRGBA: true });
+  return { data: new Uint8ClampedArray(jpeg.data.buffer, jpeg.data.byteOffset, jpeg.data.length), width: jpeg.width, height: jpeg.height };
 }
 
 function scanQrFromBytes(format: string, bytes: Buffer): string | null {

@@ -166,7 +166,7 @@ describe("logger edge cases", () => {
       const vector = [-0.0254506804049, 0.0178525932133];
       const body = JSON.stringify({ embeddings: { "amazon.titan-embed-text-v2:0": vector } });
 
-      logger.error("side-effect failed", { code: "handler.sqs.retry_threshold_exceeded", body });
+      logger.error("side-effect failed", { code: "handler.sqs.repeated_failure", body });
 
       const output = errorSpy.mock.calls[0]![0] as Record<string, unknown>;
       // body was a JSON string on input; it is emitted as a parsed object.

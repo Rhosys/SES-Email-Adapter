@@ -141,8 +141,20 @@ interface BounceInfo {
   finalRecipient?: string;
 }
 
+/**
+ * Memory the sanitizer's execution environment has used, reported on every response so
+ * the processor can warn before invocations start dying with Runtime.OutOfMemory.
+ * `maxRssMb` is the process's peak RSS — a high-water mark for the whole (possibly warm,
+ * reused) execution environment, not just this invocation.
+ */
+interface SanitizerMemoryUsage {
+  maxRssMb: number;
+  limitMb: number;
+}
+
 interface ContentSanitizeResponse {
   success: true;
+  memory?: SanitizerMemoryUsage;
   parsed: {
     from: EmailAddress;
     to: EmailAddress[];
@@ -164,6 +176,7 @@ interface ContentSanitizeResponse {
 
 interface ContentSanitizeError {
   success: false;
+  memory?: SanitizerMemoryUsage;
   error: {
     message: string;
     type: "parse_error" | "limits_exceeded" | "missing_sender" | "fetch_failed" | "internal_error";
@@ -327,29 +340,53 @@ export async function handler(event: ContentSanitizeRequest): Promise<ContentSan
   // Holds the raw MIME (full headers + body) once the fetch completes, so the slow
   // timer below can dump the exact message that is parsing slowly into CloudWatch —
   // the timer fires from its own closure and has no other way to reach the fetched bytes.
-  const diagnostics: { rawMime?: string } = {};
+  // Holds a reference to the fetched Buffer (not a string copy) — it is only converted to
+  // latin1 if the timer actually fires, so the common path keeps one copy of the MIME.
+  const diagnostics: { rawMime?: Buffer } = {};
 
   // Fires on its own clock at the 50s mark regardless of whether processEmail ever
   // settles — a stuck fetch/parse would never reach a `finally` after `await`, since
   // the await itself never returns. This is a plain timer, not a Promise.race, precisely
   // so it still fires even if the awaited work hangs all the way to the Lambda timeout.
   const slowInvocationTimer = setTimeout(() => {
-    logger?.track("Content sanitizer invocation exceeded 50s — at risk of Lambda timeout.", { code: "content_sanitizer.slow_invocation", elapsedMs: Date.now() - start, accountId: event.accountId, rawMime: diagnostics.rawMime });
+    logger?.track("Content sanitizer invocation exceeded 50s — at risk of Lambda timeout.", { code: "content_sanitizer.slow_invocation", elapsedMs: Date.now() - start, accountId: event.accountId, rawMime: diagnostics.rawMime?.toString("latin1") });
   }, SLOW_INVOCATION_THRESHOLD_MS);
 
+  // One happy-dom Window for the whole invocation (DOMPurify + post-processing + link
+  // extraction), closed in `finally` whatever happens — an unclosed Window keeps its DOM
+  // and timers alive in the warm execution environment across invocations.
+  const window = new Window({ url: "about:blank" });
+
+  let response: ContentSanitizeResponse | ContentSanitizeError;
   try {
-    return await processEmail(event, logger, diagnostics);
+    response = await processEmail(event, window, logger, diagnostics);
   } catch (e) {
-    return {
+    response = {
       success: false,
       error: { message: e instanceof Error ? e.message : String(e), type: "internal_error" },
     };
   } finally {
     clearTimeout(slowInvocationTimer);
+    delete diagnostics.rawMime;
+    try {
+      await window.happyDOM.close();
+    } catch (e) {
+      logger?.warn(`Failed to close happy-dom Window: ${e instanceof Error ? e.message : e}`, { code: "content_sanitizer.window_close_failed", error: e });
+    }
   }
+  response.memory = readMemoryUsage();
+  return response;
 }
 
-async function processEmail(event: ContentSanitizeRequest, logger?: Logger, diagnostics?: { rawMime?: string }): Promise<ContentSanitizeResponse | ContentSanitizeError> {
+function readMemoryUsage(): SanitizerMemoryUsage {
+  // resourceUsage().maxRSS is in kilobytes.
+  return {
+    maxRssMb: Math.round(process.resourceUsage().maxRSS / 1024),
+    limitMb: Number(process.env.AWS_LAMBDA_FUNCTION_MEMORY_SIZE ?? 0),
+  };
+}
+
+async function processEmail(event: ContentSanitizeRequest, window: Window, logger?: Logger, diagnostics?: { rawMime?: Buffer }): Promise<ContentSanitizeResponse | ContentSanitizeError> {
   // 1. Fetch raw MIME via presignedGetUrl
   logger?.trackPoint("fetch_mime_start");
   let rawMime: Buffer;
@@ -365,8 +402,8 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger, diag
     }
     rawMime = Buffer.from(await response.arrayBuffer());
     // Hand the fetched bytes to the slow-invocation timer so a near-timeout logs the
-    // exact message. latin1 is byte-faithful for arbitrary MIME, unlike utf8.
-    if (diagnostics) diagnostics.rawMime = rawMime.toString("latin1");
+    // exact message (converted to latin1 — byte-faithful, unlike utf8 — only if it fires).
+    if (diagnostics) diagnostics.rawMime = rawMime;
     logger?.trackPoint("fetch_mime_complete", { sizeBytes: rawMime.length });
   } catch (e) {
     return {
@@ -572,7 +609,7 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger, diag
 
   if (parsed.html) {
     const htmlInput = typeof parsed.html === "string" ? parsed.html : "";
-    const sanitized = sanitizeHtml(htmlInput);
+    const sanitized = sanitizeHtml(htmlInput, window);
     const inlineImageContentIds = new Set(inlineImageRefs.map(ref => ref.contentId));
     htmlBody = sanitized.html.replace(/cid:([^"'\s>]+)/g, (match, id: string) => {
       if (id in cidMap) return cidMap[id] ?? "";
@@ -582,7 +619,7 @@ async function processEmail(event: ContentSanitizeRequest, logger?: Logger, diag
     logger?.trackPoint("html_sanitized", { htmlLength: htmlInput.length });
 
     // Extract links from raw HTML using a DOM parser (before sanitization strips tracking pixels etc.)
-    const linkDoc = new Window({ url: "about:blank" }).document;
+    const linkDoc = window.document.implementation.createHTMLDocument();
     linkDoc.body.innerHTML = htmlInput;
     const seenUrls = new Set<string>();
     for (const anchor of linkDoc.querySelectorAll("a[href]")) {

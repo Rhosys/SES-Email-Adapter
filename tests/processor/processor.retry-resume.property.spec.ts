@@ -96,8 +96,8 @@ describe("Feature: signal-processor-retry-resilience, Property 1: Resume from pr
 
   // receiveCount values that matter for branching:
   // - 2: first retry (enters retry path, `receiveCount > 1`)
-  // - 30: at RETRY_TRACK_THRESHOLD (still logs at warn level)
-  // - 31: exceeds threshold (logs at error level on failure)
+  // - 30: at REPEATED_FAILURE_ERROR_THRESHOLD (still logs at info level)
+  // - 31: above it (logs at error level on failure; still redelivered — no retry limit)
   const RECEIVE_COUNTS = [2, 30, 31] as const;
 
   // Embedding variations that exercise different Aurora upsert paths:

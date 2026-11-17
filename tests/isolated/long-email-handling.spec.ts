@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterAll } from "vitest";
+import { Window } from "happy-dom";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { simpleParser } from "mailparser";
@@ -6,6 +7,9 @@ import { MailparserMimeParser } from "../../src/processor/mime.js";
 import { extractEmbedTextInput } from "../../src/embedding/embed-text.js";
 import { buildUserMessage } from "../../src/classifier/prompt-builder.js";
 import { sanitizeHtml } from "../../src/isolated/html-sanitizer.js";
+
+const testWindow = new Window({ url: "about:blank" });
+afterAll(() => testWindow.happyDOM.close());
 
 // ---------------------------------------------------------------------------
 // Validates that the full pipeline handles a real-world ~128 KB newsletter
@@ -149,14 +153,14 @@ describe("long email handling — tl;dr sec newsletter (~128 KB)", () => {
 
       expect(htmlInput.length).toBeGreaterThan(50_000);
 
-      const result = sanitizeHtml(htmlInput);
+      const result = sanitizeHtml(htmlInput, testWindow);
       expect(result.html.length).toBeGreaterThan(0);
     });
 
     it("preserves newsletter section headings through sanitization", async () => {
       const parsed = await simpleParser(RAW);
       const htmlInput = typeof parsed.html === "string" ? parsed.html : "";
-      const result = sanitizeHtml(htmlInput);
+      const result = sanitizeHtml(htmlInput, testWindow);
 
       expect(result.html).toContain("AppSec");
       expect(result.html).toContain("Cloud Security");
@@ -167,7 +171,7 @@ describe("long email handling — tl;dr sec newsletter (~128 KB)", () => {
     it("strips tracking pixels and scripts", async () => {
       const parsed = await simpleParser(RAW);
       const htmlInput = typeof parsed.html === "string" ? parsed.html : "";
-      const result = sanitizeHtml(htmlInput);
+      const result = sanitizeHtml(htmlInput, testWindow);
 
       expect(result.html).not.toContain("<script");
       expect(result.html).not.toContain("onclick");
