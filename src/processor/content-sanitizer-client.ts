@@ -129,16 +129,18 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
       if (response.FunctionError) {
         const { detail, lambdaRequestId, errorType } = this.extractInvocationErrorDetail(response.Payload);
         if (errorType === "Runtime.OutOfMemory") {
-          // No handling exists for this yet: the SQS record is failed and redelivered, and
-          // the same email will run out of memory again on every redelivery. Surface it as an
-          // ERROR on every occurrence rather than waiting for the repeated-failure log.
-          this.logger.error(`Content Sanitizer Lambda ran out of memory (v${executedVersion}) — no handling exists; the message will be redelivered and fail again.`, {
+          // No handling exists for this: the error bubbles up, the SQS record is failed and
+          // redelivered, and the same email will most likely run out of memory again. Surface
+          // it as an ERROR on every occurrence rather than waiting for the repeated-failure log.
+          const message = `Content Sanitizer ran out of memory while processing this email (v${executedVersion}) — the SQS message will be redelivered and will most likely fail the same way again.`;
+          this.logger.error(message, {
             code: "content_sanitizer.out_of_memory",
             executedVersion,
             accountId: request.accountId,
             keyPrefix: request.keyPrefix,
             ...(lambdaRequestId ? { lambdaRequestId } : {}),
           });
+          return err(dbError(message, lambdaRequestId ? { lambdaRequestId } : undefined));
         }
         return err(dbError(
           `Content Sanitizer Lambda error (v${executedVersion}): ${response.FunctionError}${detail ? ` — ${detail}` : ""}`,

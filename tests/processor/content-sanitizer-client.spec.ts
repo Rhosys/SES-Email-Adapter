@@ -90,6 +90,10 @@ describe("LambdaContentSanitizer", () => {
     const result = await client.invoke(REQUEST);
 
     expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.message).toBe("Content Sanitizer ran out of memory while processing this email (v$LATEST) — the SQS message will be redelivered and will most likely fail the same way again.");
+      expect(result.error.lambdaRequestId).toBe("0fdb18b6-f166-4949-b101-e5e2e495fe54");
+    }
     const errors = logger.calls.filter(c => c.method === "error");
     expect(errors).toHaveLength(1);
     expect(errors[0]!.message).toContain("ran out of memory");
