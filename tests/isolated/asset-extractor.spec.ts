@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import QRCode from "qrcode";
 import { PNG } from "pngjs";
 import JSZip from "jszip";
-import { extractQrFromInlineImages, extractQrFromAttachments, extractPkPassAssets, extractAssets } from "../../src/isolated/asset-extractor.js";
+import * as jpegJs from "jpeg-js";
+import { extractQrFromInlineImages, extractQrFromAttachments, extractPkPassAssets, extractAssets, readImageDimensions } from "../../src/isolated/asset-extractor.js";
 
 async function makeQrPngBuffer(text: string): Promise<Buffer> {
   const dataUrl: string = await QRCode.toDataURL(text, { margin: 1, width: 100 });
@@ -217,5 +218,34 @@ describe("extractAssets (orchestrator)", () => {
   it("returns [] when no inline images and no attachments", async () => {
     const assets = await extractAssets([], []);
     expect(assets).toEqual([]);
+  });
+});
+
+describe("readImageDimensions", () => {
+  it("reads width and height from a PNG header", () => {
+    expect(readImageDimensions("png", makePlainPngBuffer(120, 80))).toEqual({ width: 120, height: 80 });
+  });
+
+  it("reads width and height from a JPEG SOF segment", () => {
+    const jpeg = jpegJs.encode({ data: Buffer.alloc(64 * 48 * 4, 255), width: 64, height: 48 }, 90).data;
+    expect(readImageDimensions("jpeg", jpeg)).toEqual({ width: 64, height: 48 });
+  });
+
+  it("returns null for bytes that are not a PNG/JPEG", () => {
+    expect(readImageDimensions("png", Buffer.from("not an image"))).toBeNull();
+    expect(readImageDimensions("jpeg", Buffer.from("not an image"))).toBeNull();
+  });
+});
+
+describe("QR scan megapixel cap", () => {
+  it("skips QR scanning for an image whose header declares more than 12MP, without decoding it", async () => {
+    // Real QR PNG with the IHDR rewritten to claim 5000×5000 (25MP). If it were decoded the
+    // pixel data would not match the header and decoding would fail; the cap must reject it first.
+    const qrBuf = Buffer.from(await makeQrPngBuffer("https://example.com/ticket/big"));
+    qrBuf.writeUInt32BE(5000, 16);
+    qrBuf.writeUInt32BE(5000, 20);
+
+    expect(extractQrFromInlineImages([{ mimeType: "image/png", content: qrBuf }])).toEqual([]);
+    expect(extractQrFromAttachments([{ filename: "big.png", mimeType: "image/png", content: qrBuf }])).toEqual([]);
   });
 });

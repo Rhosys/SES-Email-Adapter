@@ -9,6 +9,13 @@ const jsQR = require("jsqr") as (data: Uint8ClampedArray, width: number, height:
 const MAX_INLINE_IMAGES = 10;
 const MAX_ATTACHMENT_IMAGES = 5;
 const MIN_QR_DIMENSION = 50;
+// QR scanning needs the image fully decoded to RGBA (4 bytes/pixel) plus jsQR's own
+// greyscale + binarized copies — ~7 bytes/pixel at peak, so 12MP ≈ 85MB. Images above this
+// are not scanned for QR codes (they are still stored and displayed as normal). Checked from
+// the file header before decoding, so a small file that decodes huge is never decoded.
+const MAX_QR_SCAN_MEGAPIXELS = 12;
+// Backstop inside jpeg-js itself (its default is 512MB) in case the header check is fooled.
+const MAX_JPEG_DECODE_MEMORY_MB = 100;
 
 export interface ExtractedAsset {
   type: "qr_code" | "pkpass";
@@ -24,17 +31,44 @@ interface AttachmentWithBytes {
   s3Key?: string;
 }
 
+/** Reads width/height from a PNG IHDR chunk or a JPEG SOF segment without decoding. */
+export function readImageDimensions(format: string, bytes: Buffer): { width: number; height: number } | null {
+  if (format === "png") {
+    // 8-byte signature, then IHDR: length(4) "IHDR"(4) width(4) height(4)
+    if (bytes.length < 24 || bytes.toString("latin1", 12, 16) !== "IHDR") return null;
+    return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+  }
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  let offset = 2;
+  while (offset + 4 <= bytes.length) {
+    if (bytes[offset] !== 0xff) return null;
+    const marker = bytes[offset + 1]!;
+    if (marker === 0xff) { offset++; continue; } // fill byte
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd9)) { offset += 2; continue; } // no length
+    const length = bytes.readUInt16BE(offset + 2);
+    const isSof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (isSof) {
+      if (offset + 9 > bytes.length) return null;
+      return { height: bytes.readUInt16BE(offset + 5), width: bytes.readUInt16BE(offset + 7) };
+    }
+    offset += 2 + length;
+  }
+  return null;
+}
+
 function decodePixels(format: string, bytes: Buffer): { data: Uint8ClampedArray; width: number; height: number } | null {
   if (format === "png") {
     const png = PNG.sync.read(bytes);
     // View over the decoded buffer — copying it would double an already width×height×4 allocation.
     return { data: new Uint8ClampedArray(png.data.buffer, png.data.byteOffset, png.data.length), width: png.width, height: png.height };
   }
-  const jpeg = jpegJs.decode(bytes, { useTArray: true, formatAsRGBA: true });
+  const jpeg = jpegJs.decode(bytes, { useTArray: true, formatAsRGBA: true, maxResolutionInMP: MAX_QR_SCAN_MEGAPIXELS, maxMemoryUsageInMB: MAX_JPEG_DECODE_MEMORY_MB });
   return { data: new Uint8ClampedArray(jpeg.data.buffer, jpeg.data.byteOffset, jpeg.data.length), width: jpeg.width, height: jpeg.height };
 }
 
 function scanQrFromBytes(format: string, bytes: Buffer): string | null {
+  const dimensions = readImageDimensions(format, bytes);
+  if (!dimensions || dimensions.width * dimensions.height > MAX_QR_SCAN_MEGAPIXELS * 1_000_000) return null;
   const pixels = decodePixels(format, bytes);
   if (!pixels || pixels.width < MIN_QR_DIMENSION || pixels.height < MIN_QR_DIMENSION) return null;
   const qr = jsQR(pixels.data, pixels.width, pixels.height);
