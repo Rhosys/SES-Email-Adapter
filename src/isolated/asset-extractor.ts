@@ -24,6 +24,21 @@ export interface ExtractedAsset {
   s3Key?: string;
 }
 
+/**
+ * An image that was not (fully) scanned for a QR code. Returned to the processor in the
+ * sanitizer response so it can log it — nothing here is user-facing.
+ */
+export interface QrScanIssue {
+  source: "inline_image" | "attachment" | "extraction";
+  reason: "over_megapixel_cap" | "unreadable_dimensions" | "decode_failed" | "over_image_count_limit" | "extraction_failed";
+  mimeType?: string;
+  filename?: string;
+  sizeBytes?: number;
+  width?: number;
+  height?: number;
+  detail?: string;
+}
+
 interface AttachmentWithBytes {
   filename: string;
   mimeType: string;
@@ -66,54 +81,68 @@ function decodePixels(format: string, bytes: Buffer): { data: Uint8ClampedArray;
   return { data: new Uint8ClampedArray(jpeg.data.buffer, jpeg.data.byteOffset, jpeg.data.length), width: jpeg.width, height: jpeg.height };
 }
 
-function scanQrFromBytes(format: string, bytes: Buffer): string | null {
+type ScanOutcome = { value: string | null } | { issue: Pick<QrScanIssue, "reason" | "width" | "height" | "detail"> };
+
+function scanQrFromBytes(format: string, bytes: Buffer): ScanOutcome {
   const dimensions = readImageDimensions(format, bytes);
-  if (!dimensions || dimensions.width * dimensions.height > MAX_QR_SCAN_MEGAPIXELS * 1_000_000) return null;
-  const pixels = decodePixels(format, bytes);
-  if (!pixels || pixels.width < MIN_QR_DIMENSION || pixels.height < MIN_QR_DIMENSION) return null;
+  if (!dimensions) return { issue: { reason: "unreadable_dimensions" } };
+  if (dimensions.width * dimensions.height > MAX_QR_SCAN_MEGAPIXELS * 1_000_000) {
+    return { issue: { reason: "over_megapixel_cap", width: dimensions.width, height: dimensions.height, detail: `cap is ${MAX_QR_SCAN_MEGAPIXELS}MP` } };
+  }
+  let pixels;
+  try {
+    pixels = decodePixels(format, bytes);
+  } catch (e) {
+    return { issue: { reason: "decode_failed", width: dimensions.width, height: dimensions.height, detail: e instanceof Error ? e.message : String(e) } };
+  }
+  if (!pixels || pixels.width < MIN_QR_DIMENSION || pixels.height < MIN_QR_DIMENSION) return { value: null };
   const qr = jsQR(pixels.data, pixels.width, pixels.height);
-  return qr?.data || null;
+  return { value: qr?.data || null };
 }
 
-export function extractQrFromInlineImages(inlineImages: Array<{ mimeType: string; content: Buffer }>): ExtractedAsset[] {
+function scanImages(
+  images: Array<{ mimeType: string; content: Buffer; filename?: string }>,
+  limit: number,
+  source: "inline_image" | "attachment",
+  issues?: QrScanIssue[],
+): ExtractedAsset[] {
   const assets: ExtractedAsset[] = [];
   const seen = new Set<string>();
+  const describe = (img: { mimeType: string; content: Buffer; filename?: string }) => ({
+    source, mimeType: img.mimeType, sizeBytes: img.content.length, ...(img.filename ? { filename: img.filename } : {}),
+  });
 
-  for (const img of inlineImages.slice(0, MAX_INLINE_IMAGES)) {
+  for (const img of images.slice(limit)) {
+    issues?.push({ ...describe(img), reason: "over_image_count_limit", detail: `only the first ${limit} are scanned` });
+  }
+  for (const img of images.slice(0, limit)) {
+    const format = img.mimeType.includes("png") ? "png" : "jpeg";
+    let outcome: ScanOutcome;
     try {
-      const format = img.mimeType.includes("png") ? "png" : "jpeg";
-      const value = scanQrFromBytes(format, img.content);
-      if (value && !seen.has(value)) {
-        seen.add(value);
-        assets.push({ type: "qr_code", label: "QR code", rawValue: value });
-      }
-    } catch {
-      // corrupt image — skip
+      outcome = scanQrFromBytes(format, img.content);
+    } catch (e) {
+      outcome = { issue: { reason: "decode_failed", detail: e instanceof Error ? e.message : String(e) } };
+    }
+    if ("issue" in outcome) {
+      issues?.push({ ...describe(img), ...outcome.issue });
+      continue;
+    }
+    if (outcome.value && !seen.has(outcome.value)) {
+      seen.add(outcome.value);
+      assets.push({ type: "qr_code", label: "QR code", rawValue: outcome.value });
     }
   }
 
   return assets;
 }
 
-export function extractQrFromAttachments(attachments: AttachmentWithBytes[]): ExtractedAsset[] {
-  const assets: ExtractedAsset[] = [];
-  const seen = new Set<string>();
-  const images = attachments.filter(a => /^image\/(png|jpeg|jpg)$/i.test(a.mimeType)).slice(0, MAX_ATTACHMENT_IMAGES);
+export function extractQrFromInlineImages(inlineImages: Array<{ mimeType: string; content: Buffer }>, issues?: QrScanIssue[]): ExtractedAsset[] {
+  return scanImages(inlineImages, MAX_INLINE_IMAGES, "inline_image", issues);
+}
 
-  for (const att of images) {
-    try {
-      const format = att.mimeType.includes("png") ? "png" : "jpeg";
-      const value = scanQrFromBytes(format, att.content);
-      if (value && !seen.has(value)) {
-        seen.add(value);
-        assets.push({ type: "qr_code", label: "QR code", rawValue: value });
-      }
-    } catch {
-      // decode failure — skip
-    }
-  }
-
-  return assets;
+export function extractQrFromAttachments(attachments: AttachmentWithBytes[], issues?: QrScanIssue[]): ExtractedAsset[] {
+  const images = attachments.filter(a => /^image\/(png|jpeg|jpg)$/i.test(a.mimeType));
+  return scanImages(images, MAX_ATTACHMENT_IMAGES, "attachment", issues);
 }
 
 export async function extractPkPassAssets(attachments: AttachmentWithBytes[]): Promise<ExtractedAsset[]> {
@@ -153,11 +182,12 @@ export async function extractPkPassAssets(attachments: AttachmentWithBytes[]): P
 export async function extractAssets(
   inlineImages: Array<{ mimeType: string; content: Buffer }>,
   attachments: AttachmentWithBytes[],
+  issues?: QrScanIssue[],
 ): Promise<ExtractedAsset[]> {
   try {
     const [inlineQr, attachmentQr, pkpass] = await Promise.all([
-      Promise.resolve(extractQrFromInlineImages(inlineImages)),
-      Promise.resolve(extractQrFromAttachments(attachments)),
+      Promise.resolve(extractQrFromInlineImages(inlineImages, issues)),
+      Promise.resolve(extractQrFromAttachments(attachments, issues)),
       extractPkPassAssets(attachments),
     ]);
 
@@ -169,7 +199,8 @@ export async function extractAssets(
       seen.add(a.rawValue);
       return true;
     });
-  } catch {
+  } catch (e) {
+    issues?.push({ source: "extraction", reason: "extraction_failed", detail: e instanceof Error ? e.message : String(e) });
     return [];
   }
 }

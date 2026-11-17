@@ -48,6 +48,18 @@ export interface ContentSanitizeRequest {
   invocationId?: string;
 }
 
+/** Mirrors QrScanIssue in src/isolated/asset-extractor.ts. */
+export interface QrScanIssue {
+  source: "inline_image" | "attachment" | "extraction";
+  reason: "over_megapixel_cap" | "unreadable_dimensions" | "decode_failed" | "over_image_count_limit" | "extraction_failed";
+  mimeType?: string;
+  filename?: string;
+  sizeBytes?: number;
+  width?: number;
+  height?: number;
+  detail?: string;
+}
+
 interface ExtractedAsset {
   type: "qr_code" | "pkpass";
   label: string;
@@ -152,7 +164,19 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
         return err(dbError(`Content Sanitizer Lambda returned empty payload (v${executedVersion})`));
       }
 
-      const wireResult = JSON.parse(new TextDecoder().decode(response.Payload)) as { success: boolean; parsed?: ContentSanitizeResponse["parsed"]; error?: { message: string; type: string }; memory?: { maxRssMb: number; limitMb: number } };
+      const wireResult = JSON.parse(new TextDecoder().decode(response.Payload)) as { success: boolean; parsed?: ContentSanitizeResponse["parsed"]; error?: { message: string; type: string }; memory?: { maxRssMb: number; limitMb: number }; qrScanIssues?: QrScanIssue[] };
+
+      const qrScanIssues = wireResult.qrScanIssues;
+      if (qrScanIssues && qrScanIssues.length > 0) {
+        const reasons = [...new Set(qrScanIssues.map(i => i.reason))].join(", ");
+        this.logger.track(`Content Sanitizer skipped or failed QR scanning for ${qrScanIssues.length} image(s): ${reasons}`, {
+          code: "content_sanitizer.qr_scan_issues",
+          executedVersion,
+          accountId: request.accountId,
+          keyPrefix: request.keyPrefix,
+          qrScanIssues,
+        });
+      }
 
       const memory = wireResult.memory;
       if (memory && memory.limitMb > 0 && memory.maxRssMb > memory.limitMb * MEMORY_WARN_RATIO) {

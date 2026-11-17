@@ -2,7 +2,7 @@ import { simpleParser } from "mailparser";
 import { createHash } from "node:crypto";
 import { Window } from "happy-dom";
 import { sanitizeHtml } from "./html-sanitizer.js";
-import { extractAssets, type ExtractedAsset } from "./asset-extractor.js";
+import { extractAssets, type ExtractedAsset, type QrScanIssue } from "./asset-extractor.js";
 import { buildDisplayRawEmail } from "./raw-email-display.js";
 import type { Logger } from "../logger.js";
 import { S3ObjectStorage, type PresignedPost, type UploadField, type S3UploadError } from "../s3-object-storage.js";
@@ -155,6 +155,8 @@ interface SanitizerMemoryUsage {
 interface ContentSanitizeResponse {
   success: true;
   memory?: SanitizerMemoryUsage;
+  /** Images skipped or failed during QR scanning — logged (TRACK) by the processor, not stored. */
+  qrScanIssues?: QrScanIssue[];
   parsed: {
     from: EmailAddress;
     to: EmailAddress[];
@@ -729,16 +731,19 @@ async function processEmail(event: ContentSanitizeRequest, window: Window, logge
 
   // 7. Extract scannable assets (QR codes, PKPass barcodes) — best-effort
   let extractedAssets: ExtractedAsset[] = [];
+  const qrScanIssues: QrScanIssue[] = [];
   try {
-    extractedAssets = await extractAssets(inlineImages, attachmentsWithBytes);
-    logger?.trackPoint("assets_extracted", { assetCount: extractedAssets.length });
-  } catch {
+    extractedAssets = await extractAssets(inlineImages, attachmentsWithBytes, qrScanIssues);
+    logger?.trackPoint("assets_extracted", { assetCount: extractedAssets.length, qrScanIssueCount: qrScanIssues.length });
+  } catch (e) {
     // extraction failure must never fail the sanitizer
+    qrScanIssues.push({ source: "extraction", reason: "extraction_failed", detail: e instanceof Error ? e.message : String(e) });
     logger?.trackPoint("assets_extraction_failed");
   }
 
   const result: ContentSanitizeResponse = {
     success: true,
+    ...(qrScanIssues.length > 0 ? { qrScanIssues } : {}),
     parsed: {
       from,
       to,

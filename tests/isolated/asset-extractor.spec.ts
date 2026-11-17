@@ -3,7 +3,7 @@ import QRCode from "qrcode";
 import { PNG } from "pngjs";
 import JSZip from "jszip";
 import * as jpegJs from "jpeg-js";
-import { extractQrFromInlineImages, extractQrFromAttachments, extractPkPassAssets, extractAssets, readImageDimensions } from "../../src/isolated/asset-extractor.js";
+import { extractQrFromInlineImages, extractQrFromAttachments, extractPkPassAssets, extractAssets, readImageDimensions, type QrScanIssue } from "../../src/isolated/asset-extractor.js";
 
 async function makeQrPngBuffer(text: string): Promise<Buffer> {
   const dataUrl: string = await QRCode.toDataURL(text, { margin: 1, width: 100 });
@@ -245,7 +245,54 @@ describe("QR scan megapixel cap", () => {
     qrBuf.writeUInt32BE(5000, 16);
     qrBuf.writeUInt32BE(5000, 20);
 
-    expect(extractQrFromInlineImages([{ mimeType: "image/png", content: qrBuf }])).toEqual([]);
-    expect(extractQrFromAttachments([{ filename: "big.png", mimeType: "image/png", content: qrBuf }])).toEqual([]);
+    const issues: QrScanIssue[] = [];
+    expect(extractQrFromInlineImages([{ mimeType: "image/png", content: qrBuf }], issues)).toEqual([]);
+    expect(extractQrFromAttachments([{ filename: "big.png", mimeType: "image/png", content: qrBuf }], issues)).toEqual([]);
+    expect(issues).toEqual([
+      expect.objectContaining({ source: "inline_image", reason: "over_megapixel_cap", width: 5000, height: 5000 }),
+      expect.objectContaining({ source: "attachment", reason: "over_megapixel_cap", filename: "big.png", width: 5000, height: 5000 }),
+    ]);
+  });
+});
+
+describe("QR scan issues", () => {
+  it("reports an image whose header cannot be read", () => {
+    const issues: QrScanIssue[] = [];
+    extractQrFromInlineImages([{ mimeType: "image/png", content: Buffer.from("not a png at all") }], issues);
+    expect(issues).toEqual([expect.objectContaining({ source: "inline_image", reason: "unreadable_dimensions", mimeType: "image/png" })]);
+  });
+
+  it("reports an image that fails to decode, with the decoder error", () => {
+    // Valid header, truncated body.
+    const truncated = makePlainPngBuffer(100, 100).subarray(0, 40);
+    const issues: QrScanIssue[] = [];
+    extractQrFromInlineImages([{ mimeType: "image/png", content: truncated }], issues);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ reason: "decode_failed", width: 100, height: 100 });
+    expect(issues[0]!.detail).toBeTruthy();
+  });
+
+  it("reports images beyond the per-message scan count", () => {
+    const plain = makePlainPngBuffer(60, 60);
+    const issues: QrScanIssue[] = [];
+    extractQrFromAttachments(Array.from({ length: 7 }, (_, i) => ({ filename: `img${i}.png`, mimeType: "image/png", content: plain })), issues);
+    expect(issues.map(i => i.reason)).toEqual(["over_image_count_limit", "over_image_count_limit"]);
+    expect(issues.map(i => i.filename)).toEqual(["img5.png", "img6.png"]);
+  });
+
+  it("reports nothing for a normal image with no QR code", () => {
+    const issues: QrScanIssue[] = [];
+    extractQrFromInlineImages([{ mimeType: "image/png", content: makePlainPngBuffer(100, 100) }], issues);
+    expect(issues).toEqual([]);
+  });
+
+  it("extractAssets collects issues from both inline images and attachments", async () => {
+    const issues: QrScanIssue[] = [];
+    await extractAssets(
+      [{ mimeType: "image/png", content: Buffer.from("bad") }],
+      [{ filename: "bad.jpg", mimeType: "image/jpeg", content: Buffer.from("bad") }],
+      issues,
+    );
+    expect(issues.map(i => i.source).sort()).toEqual(["attachment", "inline_image"]);
   });
 });

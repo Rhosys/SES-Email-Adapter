@@ -145,4 +145,29 @@ describe("LambdaContentSanitizer", () => {
 
     expect(logger.calls.filter(c => c.method === "warn")).toHaveLength(0);
   });
+
+  it("logs a TRACK when the sanitizer reports QR scan issues", async () => {
+    const qrScanIssues = [{ source: "attachment", reason: "over_megapixel_cap", filename: "big.png", width: 5000, height: 5000 }];
+    lambdaMock.on(InvokeCommand).resolves({
+      Payload: payloadFrom({ success: true, qrScanIssues, parsed: { from: { address: "a@b.c" }, to: [], cc: [], subject: "", attachments: [], headers: {} } }),
+    });
+
+    const result = await client.invoke(REQUEST);
+
+    expect(result.isOk()).toBe(true);
+    const tracks = logger.calls.filter(c => c.method === "track");
+    expect(tracks).toHaveLength(1);
+    expect(tracks[0]!.message).toContain("over_megapixel_cap");
+    expect(tracks[0]!.context).toMatchObject({ code: "content_sanitizer.qr_scan_issues", accountId: "acc-123", qrScanIssues });
+  });
+
+  it("does not log a QR scan TRACK when there are no issues", async () => {
+    lambdaMock.on(InvokeCommand).resolves({
+      Payload: payloadFrom({ success: true, parsed: { from: { address: "a@b.c" }, to: [], cc: [], subject: "", attachments: [], headers: {} } }),
+    });
+
+    await client.invoke(REQUEST);
+
+    expect(logger.calls.filter(c => c.method === "track")).toHaveLength(0);
+  });
 });
