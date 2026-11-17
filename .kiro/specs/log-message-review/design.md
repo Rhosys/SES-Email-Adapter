@@ -104,7 +104,7 @@ Each verbose message follows this structure (not all parts required for every le
 |-------|---------------|---------|
 | ERROR | WHAT + HOW + WHY + DO | "Failed to upsert embedding to Aurora cluster. The Data API call returned a connection error. This signal's embedding won't be searchable until the next reindex. Check Aurora cluster health and retry via reindex job." |
 | WARN | WHAT + HOW + WHY + DO | "Search query returned an unusually large result set before client-side filtering. DynamoDB scan fetched more items than expected. Repeated occurrences indicate the account's arc count exceeds efficient scan limits. Consider adding a secondary index or pagination." |
-| TRACK | WHAT + HOW + WHY | "Signal processing failed after exceeding retry threshold. SQS message was redelivered beyond the configured limit. Tracked for dead-letter queue monitoring and alerting dashboards." |
+| TRACK | WHAT + HOW + WHY | "Signal processing has failed repeatedly. The SQS message has been redelivered many times and will keep being redelivered until queue retention expires (there is no DLQ or retry limit). Tracked for alerting dashboards." |
 | CRITICAL | WHAT + HOW + WHY + DO | (same as ERROR but for system-compromising failures) |
 
 ### Code Field Convention
@@ -140,7 +140,7 @@ Rules:
 
 | Original Message | Level | New Message | Code |
 |-----------------|-------|-------------|------|
-| `"processor.signal.failed"` | error | "Signal processing failed after exceeding retry threshold. SQS message was redelivered {receiveCount} times without successful completion. This message will move to the DLQ and the email won't be processed. Investigate the root cause in earlier track-level logs for this messageId." | `processor.signal.failed` |
+| `"processor.signal.failed"` | error | "Signal processing has failed {receiveCount} times. The SQS message will keep being redelivered until queue retention expires (there is no DLQ or retry limit). Investigate the root cause in earlier track-level logs for this messageId." | `processor.signal.failed` |
 | `"processor.signal.failed"` | track | "Signal processing failed on attempt {receiveCount}. The SQS message will be retried automatically. Tracked for retry-rate monitoring." | `processor.signal.failed` |
 | `"pong_reply_failed"` | error | "Failed to send pong reply to test email sender. The SES send call returned an error. The sender won't receive the automated test confirmation. Check SES sending limits and verify the from-address domain is configured." | `processor.pong_reply_failed` |
 | `"s3_retention_failed"` | error | "Failed to apply S3 retention policy to signal object. The S3 tagging or copy operation returned an error. The signal is saved but will use the default 5-year lifecycle rule instead of the plan-specific retention. Non-fatal — no operator action required unless pattern persists." | `processor.s3_retention_failed` |
@@ -158,7 +158,7 @@ Rules:
 
 | Original Message | Level | New Message | Code |
 |-----------------|-------|-------------|------|
-| `"reindex.worker.segment_failed"` | error | "Reindex segment failed after exceeding retry threshold. SQS message was redelivered {receiveCount} times without successful completion. This segment's signals won't be reindexed until the job is re-triggered. Investigate DynamoDB scan or Aurora write failures." | `reindex.worker.segment_failed` |
+| `"reindex.worker.segment_failed"` | error | "Reindex segment has failed {receiveCount} times and will keep being redelivered until queue retention expires. This segment's signals won't be reindexed until the job is re-triggered. Investigate DynamoDB scan or Aurora write failures." | `reindex.worker.segment_failed` |
 | `"reindex.worker.segment_failed"` | track | "Reindex segment failed on attempt {receiveCount}. The SQS message will be retried automatically. Tracked for segment retry-rate monitoring." | `reindex.worker.segment_failed` |
 | `"reindex.worker.malformed_signal"` | track | "Skipped malformed signal during reindex scan. The DynamoDB item is missing required fields (accountId, arcId, or recipientAddress). This signal cannot be reindexed and will be counted as unrecoverable. Tracked for data quality monitoring." | `reindex.worker.malformed_signal` |
 | `"reindex.worker.signal_upsert_failed"` | track | "Failed to upsert cached embedding to Aurora during reindex pure-copy. The Aurora Data API call returned an error for this signal. The signal will be skipped and counted toward failure metrics. Tracked for per-signal reindex reliability." | `reindex.worker.signal_upsert_failed` |
@@ -218,7 +218,7 @@ After (new):
 ```json
 {
   "level": "error",
-  "message": "Signal processing failed after exceeding retry threshold. SQS message was redelivered 35 times without successful completion. This message will move to the DLQ and the email won't be processed. Investigate the root cause in earlier track-level logs for this messageId.",
+  "message": "Signal processing has failed 35 times. The SQS message will keep being redelivered until queue retention expires (there is no DLQ or retry limit). Investigate the root cause in earlier track-level logs for this messageId.",
   "code": "processor.signal.failed",
   "timestamp": "2025-01-15T10:30:00.000Z",
   "invocationId": "a1b2c3d4-...",

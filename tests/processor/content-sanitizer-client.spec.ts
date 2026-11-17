@@ -76,4 +76,98 @@ describe("LambdaContentSanitizer", () => {
       expect(result.error.lambdaRequestId).toBeUndefined();
     }
   });
+
+  it("logs an immediate ERROR when the sanitizer runs out of memory", async () => {
+    lambdaMock.on(InvokeCommand).resolves({
+      FunctionError: "Unhandled",
+      ExecutedVersion: "$LATEST",
+      Payload: payloadFrom({
+        errorType: "Runtime.OutOfMemory",
+        errorMessage: "RequestId: 0fdb18b6-f166-4949-b101-e5e2e495fe54 Error: Runtime exited with error: signal: killed",
+      }),
+    });
+
+    const result = await client.invoke(REQUEST);
+
+    expect(result.isErr()).toBe(true);
+    if (result.isErr()) {
+      expect(result.error.message).toBe("Content Sanitizer ran out of memory while processing this email (v$LATEST) — the SQS message will be redelivered and will most likely fail the same way again.");
+      expect(result.error.lambdaRequestId).toBe("0fdb18b6-f166-4949-b101-e5e2e495fe54");
+    }
+    const errors = logger.calls.filter(c => c.method === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.message).toContain("ran out of memory");
+    expect(errors[0]!.context).toMatchObject({ code: "content_sanitizer.out_of_memory", accountId: "acc-123", lambdaRequestId: "0fdb18b6-f166-4949-b101-e5e2e495fe54" });
+  });
+
+  it("does not log an out-of-memory ERROR for other unhandled errors", async () => {
+    lambdaMock.on(InvokeCommand).resolves({
+      FunctionError: "Unhandled",
+      Payload: payloadFrom({ errorType: "Error", errorMessage: "Something went wrong" }),
+    });
+
+    await client.invoke(REQUEST);
+
+    expect(logger.calls.filter(c => c.method === "error")).toHaveLength(0);
+  });
+
+  it("WARNs when reported memory usage is above 60% of the limit", async () => {
+    lambdaMock.on(InvokeCommand).resolves({
+      Payload: payloadFrom({ success: true, parsed: { from: { address: "a@b.c" }, to: [], cc: [], subject: "", attachments: [], headers: {} }, memory: { maxRssMb: 160, limitMb: 256 } }),
+    });
+
+    const result = await client.invoke(REQUEST);
+
+    expect(result.isOk()).toBe(true);
+    const warns = logger.calls.filter(c => c.method === "warn");
+    expect(warns).toHaveLength(1);
+    expect(warns[0]!.message).toContain("160MB");
+    expect(warns[0]!.context).toMatchObject({ code: "content_sanitizer.high_memory_usage", maxRssMb: 160, limitMb: 256 });
+  });
+
+  it("WARNs on high memory usage even when the sanitizer returns a handled error", async () => {
+    lambdaMock.on(InvokeCommand).resolves({
+      Payload: payloadFrom({ success: false, error: { message: "bad", type: "parse_error" }, memory: { maxRssMb: 200, limitMb: 256 } }),
+    });
+
+    const result = await client.invoke(REQUEST);
+
+    expect(result.isErr()).toBe(true);
+    expect(logger.calls.filter(c => c.method === "warn")[0]?.context).toMatchObject({ code: "content_sanitizer.high_memory_usage" });
+  });
+
+  it("does not WARN when memory usage is at or below 60% of the limit", async () => {
+    lambdaMock.on(InvokeCommand).resolves({
+      Payload: payloadFrom({ success: true, parsed: { from: { address: "a@b.c" }, to: [], cc: [], subject: "", attachments: [], headers: {} }, memory: { maxRssMb: 150, limitMb: 256 } }),
+    });
+
+    await client.invoke(REQUEST);
+
+    expect(logger.calls.filter(c => c.method === "warn")).toHaveLength(0);
+  });
+
+  it("logs a TRACK when the sanitizer reports QR scan issues", async () => {
+    const qrScanIssues = [{ source: "attachment", reason: "over_megapixel_cap", filename: "big.png", width: 5000, height: 5000 }];
+    lambdaMock.on(InvokeCommand).resolves({
+      Payload: payloadFrom({ success: true, qrScanIssues, parsed: { from: { address: "a@b.c" }, to: [], cc: [], subject: "", attachments: [], headers: {} } }),
+    });
+
+    const result = await client.invoke(REQUEST);
+
+    expect(result.isOk()).toBe(true);
+    const tracks = logger.calls.filter(c => c.method === "track");
+    expect(tracks).toHaveLength(1);
+    expect(tracks[0]!.message).toContain("over_megapixel_cap");
+    expect(tracks[0]!.context).toMatchObject({ code: "content_sanitizer.qr_scan_issues", accountId: "acc-123", qrScanIssues });
+  });
+
+  it("does not log a QR scan TRACK when there are no issues", async () => {
+    lambdaMock.on(InvokeCommand).resolves({
+      Payload: payloadFrom({ success: true, parsed: { from: { address: "a@b.c" }, to: [], cc: [], subject: "", attachments: [], headers: {} } }),
+    });
+
+    await client.invoke(REQUEST);
+
+    expect(logger.calls.filter(c => c.method === "track")).toHaveLength(0);
+  });
 });

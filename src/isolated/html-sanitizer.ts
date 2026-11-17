@@ -1,4 +1,4 @@
-import { Window } from "happy-dom";
+import type { Window } from "happy-dom";
 import DOMPurify from "dompurify";
 
 // ---------------------------------------------------------------------------
@@ -98,10 +98,12 @@ function removeHiddenElements(doc: any): void {
 // Main sanitize function
 // ---------------------------------------------------------------------------
 
-export function sanitizeHtml(rawHtml: string): SanitizeResult {
+// The caller owns `window` and must close it (window.happyDOM.close()) — happy-dom
+// Windows hold timers/DOM state that is not released by GC alone. Reusing one Window per
+// sanitizer invocation also avoids building several full DOM environments per email.
+export function sanitizeHtml(rawHtml: string, window: Window): SanitizeResult {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const window = new Window() as any;
-  const purify = DOMPurify(window);
+  const purify = DOMPurify(window as any);
 
   // Configure DOMPurify to strip dangerous elements
   const clean = purify.sanitize(rawHtml, {
@@ -112,7 +114,7 @@ export function sanitizeHtml(rawHtml: string): SanitizeResult {
   });
 
   // Parse the sanitized HTML into a document for post-processing
-  const doc = new Window({ url: "about:blank" }).document;
+  const doc = window.document.implementation.createHTMLDocument();
   doc.body.innerHTML = clean;
 
   // Remove hidden elements

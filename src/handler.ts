@@ -16,7 +16,10 @@ import { isRsvpReplyAddress } from "./processor/inbound-router.js";
 import type { WsClientFrame, WsConnectedFrame } from "./notifier/types.js";
 
 const [MSG_TYPE_REINDEX, MSG_TYPE_SIDE_EFFECT, MSG_TYPE_DRAFT_SEND, MSG_TYPE_SIGNAL_FOLLOWUP, MSG_TYPE_RSVP_REMINDER, MSG_TYPE_DIGEST_DISPATCH, MSG_TYPE_DIGEST_SEND, MSG_TYPE_EMX_INBOUND, MSG_TYPE_EMX_DISPATCH, MSG_TYPE_EMX_IDLE] = SQS_MESSAGE_TYPES;
-const RETRY_TRACK_THRESHOLD = 30;
+// Not a retry limit: the signals queue has no redrive policy/DLQ, so a failing message is
+// redelivered until its 14-day retention expires. Past this receive count the failure is
+// logged at ERROR instead of INFO, because it is clearly not a transient problem.
+const REPEATED_FAILURE_ERROR_THRESHOLD = 30;
 
 const root = new CompositeRoot();
 const { logger, processor, rsvpProcessor, mailDomain, onboardingHandler, domainHealthJob, healthcheckJob, reindexWorker, draftSendWorker, followupHandler, rsvpReminderHandler, digestDispatcher, digestWorker, sesFeedbackProcessor, authService, deviceStore, emxInboundWorker, emxDispatchWorker, emxIdleWorker, wsDeliverer, app } = root;
@@ -150,8 +153,8 @@ async function handlerInner(
       }
 
       if (result.isErr()) {
-        if (receiveCount > RETRY_TRACK_THRESHOLD) {
-          logger.error(`SQS message failed after exceeding retry threshold: ${errorMessage(result.error)}`, { code: "handler.sqs.retry_threshold_exceeded", messageId: record.messageId, receiveCount, messageType: resolvedMessageType, error: result.error, record });
+        if (receiveCount > REPEATED_FAILURE_ERROR_THRESHOLD) {
+          logger.error(`SQS message has failed ${receiveCount} times and will keep being redelivered until queue retention expires: ${errorMessage(result.error)}`, { code: "handler.sqs.repeated_failure", messageId: record.messageId, receiveCount, messageType: resolvedMessageType, error: result.error, record });
         } else {
           logger.info("SQS message processing failed. Will be retried automatically.", { code: "handler.sqs.processing_failed", messageId: record.messageId, receiveCount, messageType: resolvedMessageType, error: result.error, record });
         }

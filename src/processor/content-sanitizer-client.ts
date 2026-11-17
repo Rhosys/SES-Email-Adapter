@@ -48,6 +48,18 @@ export interface ContentSanitizeRequest {
   invocationId?: string;
 }
 
+/** Mirrors QrScanIssue in src/isolated/asset-extractor.ts. */
+export interface QrScanIssue {
+  source: "inline_image" | "attachment" | "extraction";
+  reason: "over_megapixel_cap" | "unreadable_dimensions" | "decode_failed" | "over_image_count_limit" | "extraction_failed";
+  mimeType?: string;
+  filename?: string;
+  sizeBytes?: number;
+  width?: number;
+  height?: number;
+  detail?: string;
+}
+
 interface ExtractedAsset {
   type: "qr_code" | "pkpass";
   label: string;
@@ -97,6 +109,9 @@ export interface ContentSanitizerClient {
   invoke(request: ContentSanitizeRequest): Promise<Result<ContentSanitizeResponse, DbError>>;
 }
 
+/** Fraction of the sanitizer's configured memory above which a successful invoke still WARNs. */
+const MEMORY_WARN_RATIO = 0.6;
+
 // ---------------------------------------------------------------------------
 // Implementation
 // ---------------------------------------------------------------------------
@@ -124,7 +139,21 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
       const executedVersion = response.ExecutedVersion ?? "unknown";
 
       if (response.FunctionError) {
-        const { detail, lambdaRequestId } = this.extractInvocationErrorDetail(response.Payload);
+        const { detail, lambdaRequestId, errorType } = this.extractInvocationErrorDetail(response.Payload);
+        if (errorType === "Runtime.OutOfMemory") {
+          // No handling exists for this: the error bubbles up, the SQS record is failed and
+          // redelivered, and the same email will most likely run out of memory again. Surface
+          // it as an ERROR on every occurrence rather than waiting for the repeated-failure log.
+          const message = `Content Sanitizer ran out of memory while processing this email (v${executedVersion}) — the SQS message will be redelivered and will most likely fail the same way again.`;
+          this.logger.error(message, {
+            code: "content_sanitizer.out_of_memory",
+            executedVersion,
+            accountId: request.accountId,
+            keyPrefix: request.keyPrefix,
+            ...(lambdaRequestId ? { lambdaRequestId } : {}),
+          });
+          return err(dbError(message, lambdaRequestId ? { lambdaRequestId } : undefined));
+        }
         return err(dbError(
           `Content Sanitizer Lambda error (v${executedVersion}): ${response.FunctionError}${detail ? ` — ${detail}` : ""}`,
           lambdaRequestId ? { lambdaRequestId } : undefined,
@@ -135,7 +164,31 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
         return err(dbError(`Content Sanitizer Lambda returned empty payload (v${executedVersion})`));
       }
 
-      const wireResult = JSON.parse(new TextDecoder().decode(response.Payload)) as { success: boolean; parsed?: ContentSanitizeResponse["parsed"]; error?: { message: string; type: string } };
+      const wireResult = JSON.parse(new TextDecoder().decode(response.Payload)) as { success: boolean; parsed?: ContentSanitizeResponse["parsed"]; error?: { message: string; type: string }; memory?: { maxRssMb: number; limitMb: number }; qrScanIssues?: QrScanIssue[] };
+
+      const qrScanIssues = wireResult.qrScanIssues;
+      if (qrScanIssues && qrScanIssues.length > 0) {
+        const reasons = [...new Set(qrScanIssues.map(i => i.reason))].join(", ");
+        this.logger.track(`Content Sanitizer skipped or failed QR scanning for ${qrScanIssues.length} image(s): ${reasons}`, {
+          code: "content_sanitizer.qr_scan_issues",
+          executedVersion,
+          accountId: request.accountId,
+          keyPrefix: request.keyPrefix,
+          qrScanIssues,
+        });
+      }
+
+      const memory = wireResult.memory;
+      if (memory && memory.limitMb > 0 && memory.maxRssMb > memory.limitMb * MEMORY_WARN_RATIO) {
+        this.logger.warn(`Content Sanitizer memory usage ${memory.maxRssMb}MB is above ${MEMORY_WARN_RATIO * 100}% of its ${memory.limitMb}MB limit.`, {
+          code: "content_sanitizer.high_memory_usage",
+          executedVersion,
+          accountId: request.accountId,
+          keyPrefix: request.keyPrefix,
+          maxRssMb: memory.maxRssMb,
+          limitMb: memory.limitMb,
+        });
+      }
 
       if (!wireResult.success || !wireResult.parsed) {
         const errorPayload = wireResult.error;
@@ -151,7 +204,7 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
     }
   }
 
-  private extractInvocationErrorDetail(payload: Uint8Array | undefined): { detail?: string; lambdaRequestId?: string } {
+  private extractInvocationErrorDetail(payload: Uint8Array | undefined): { detail?: string; lambdaRequestId?: string; errorType?: string } {
     if (!payload) return {};
     try {
       const decoded = JSON.parse(new TextDecoder().decode(payload)) as { errorType?: string; errorMessage?: string };
@@ -166,6 +219,7 @@ export class LambdaContentSanitizer implements ContentSanitizerClient {
       return {
         ...(detail ? { detail } : {}),
         ...(requestIdMatch ? { lambdaRequestId: requestIdMatch[1] } : {}),
+        ...(decoded.errorType ? { errorType: decoded.errorType } : {}),
       };
     } catch {
       return {};

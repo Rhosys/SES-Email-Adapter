@@ -217,7 +217,7 @@ async process(event: SQSEvent): Promise<{ batchItemFailures: Array<{ itemIdentif
     if (result.isErr()) {
       const record = event.Records[i]!;
       const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
-      const level = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "track";
+      const level = receiveCount > REPEATED_FAILURE_ERROR_THRESHOLD ? "error" : "track";
       log(level, "processor.signal.failed", {
         messageId: result.error.messageId,
         receiveCount,
@@ -336,7 +336,7 @@ export class ReindexWorker {
       if (result.isErr()) {
         const record = event.Records[i]!;
         const receiveCount = Number(record.attributes?.ApproximateReceiveCount ?? "1");
-        const level = receiveCount > RETRY_TRACK_THRESHOLD ? "error" : "track";
+        const level = receiveCount > REPEATED_FAILURE_ERROR_THRESHOLD ? "error" : "track";
         logAtLevel(level, "reindex.worker.segment_failed", {
           messageId: record.messageId,
           receiveCount,
