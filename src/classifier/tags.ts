@@ -1,6 +1,6 @@
-// Closed vocabulary of recognized spam-related tags.
-// The classifier validates LLM output against this list — unknown tags are logged and discarded.
-// Adding a new tag: append here. No migration needed.
+// Recognized spam-related tags (shown to the LLM in the prompt).
+// The LLM may return other tags — those are kept and logged as WARN (classifier.unknown_tag).
+// Frequently seen unknown tags can be promoted by appending here. No migration needed.
 export const SPAM_TAGS = [
   "phishing",
   "bulk-unsolicited",

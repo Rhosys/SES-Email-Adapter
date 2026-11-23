@@ -222,18 +222,18 @@ export class SignalClassifier {
     for (const tag of rawTags) {
       if (typeof tag !== "string") continue;
       if (!TAG_FORMAT.test(tag) || tag.length < 2 || tag.length > 40) continue;
-      if ((SPAM_TAGS as readonly string[]).includes(tag)) {
-        validTags.push(tag);
-      } else {
-        unknownTags.push(tag);
-      }
+      // Unknown tags are kept — SPAM_TAGS is the promoted vocabulary, not an allowlist.
+      validTags.push(tag);
+      if (!(SPAM_TAGS as readonly string[]).includes(tag)) unknownTags.push(tag);
     }
     const tags = validTags.slice(0, 10);
 
     // When unknown tags appear, re-run classification with explanation request and log everything
     if (unknownTags.length > 0) {
       const explanationResponse = await this.classifyWithExplanations(input);
-      this.logger.track("Classifier received unknown tag from LLM — potential vocabulary expansion candidate.", {
+      const knownTags = tags.filter((t) => (SPAM_TAGS as readonly string[]).includes(t));
+      const workflowLabel = [raw.workflow, raw.workflowData?.noticeType].filter((v) => typeof v === "string").join("/");
+      this.logger.warn(`Classifier returned tag [${unknownTags.join(", ")}] not in SPAM_TAGS — kept (workflow: ${workflowLabel}, known: [${knownTags.join(", ")}]).`, {
         code: "classifier.unknown_tag",
         unknownTags,
         signalId: input.signalId,

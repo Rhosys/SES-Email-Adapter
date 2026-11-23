@@ -153,7 +153,7 @@ Select ONLY from the numbered link index provided in the user message. Never fab
   // Tags section
   sections.push(`## Tags
 
-tags captures spam-related attributes detected in the email. Include zero or more tags from this vocabulary:
+tags captures spam-related attributes detected in the email. Prefer tags from this vocabulary; a new kebab-case tag is allowed only for a clear spam attribute none of these cover. Never put workflow or workflowData values (e.g. noticeType) in tags:
 
 ${SPAM_TAGS.map((t) => `- "${t}"`).join("\n")}
 
