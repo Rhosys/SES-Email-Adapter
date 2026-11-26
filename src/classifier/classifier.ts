@@ -217,35 +217,27 @@ export class SignalClassifier {
     // Validate and filter tags to recognized vocabulary
     const TAG_FORMAT = /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/;
     const rawTags = Array.isArray(raw.tags) ? raw.tags : [];
+    const isKnownTag = (t: unknown): boolean => (SPAM_TAGS as readonly string[]).includes(t as string);
+    const knownTags = rawTags.filter(isKnownTag);
+    const workflowLabel = [raw.workflow, raw.workflowData?.noticeType].filter((v) => typeof v === "string").join("/");
     const validTags: string[] = [];
-    const unknownTags: string[] = [];
     for (const tag of rawTags) {
       if (typeof tag !== "string") continue;
       if (!TAG_FORMAT.test(tag) || tag.length < 2 || tag.length > 40) continue;
       // Unknown tags are kept — SPAM_TAGS is the promoted vocabulary, not an allowlist.
       validTags.push(tag);
-      if (!(SPAM_TAGS as readonly string[]).includes(tag)) unknownTags.push(tag);
-    }
-    const tags = validTags.slice(0, 10);
-
-    // When unknown tags appear, re-run classification with explanation request and log everything
-    if (unknownTags.length > 0) {
-      const explanationResponse = await this.classifyWithExplanations(input);
-      const knownTags = tags.filter((t) => (SPAM_TAGS as readonly string[]).includes(t));
-      const workflowLabel = [raw.workflow, raw.workflowData?.noticeType].filter((v) => typeof v === "string").join("/");
-      // One WARN per unknown tag so each tag can be counted/aggregated on its own
-      for (const unknownTag of unknownTags) {
-        this.logger.warn(`Classifier returned tag [${unknownTag}] not in SPAM_TAGS — kept (workflow: ${workflowLabel}, known: [${knownTags.join(", ")}]).`, {
+      if (!isKnownTag(tag)) {
+        this.logger.warn(`Classifier returned tag [${tag}] not in SPAM_TAGS — kept (workflow: ${workflowLabel}, known: [${knownTags.join(", ")}]).`, {
           code: "classifier.unknown_tag",
-          unknownTag,
+          unknownTag: tag,
           signalId: input.signalId,
           accountId: input.accountId,
           input,
-          firstClassificationRaw: jsonText,
-          explanationClassificationRaw: explanationResponse,
+          rawResponse: jsonText,
         });
       }
     }
+    const tags = validTags.slice(0, 10);
 
     // Filter labels to subset of allowedLabels
     const labels = Array.isArray(raw.labels)
@@ -360,42 +352,6 @@ export class SignalClassifier {
       ...(language ? { language } : {}),
       ...(locale ? { locale } : {}),
     });
-  }
-
-  /**
-   * Re-runs classification with the same prompt + an additional instruction to explain each tag.
-   * Returns the raw text response (unparsed) for diagnostic logging.
-   */
-  private async classifyWithExplanations(input: ClassificationInput): Promise<string> {
-    const systemPrompt = buildSystemPrompt(CLASSIFIER_WORKFLOW_REGISTRY.filter(w => w.classifierAssignable !== false));
-    const userMessage = buildUserMessage(input)
-      + "\n\nAdditionally, for every tag you assign, include a field \"tagExplanations\" in your JSON response: an object mapping each tag to a one-sentence explanation of why you assigned it.";
-
-    const requestBody = {
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userMessage },
-      ],
-      max_tokens: 2048,
-      temperature: 0.1,
-      enable_thinking: false,
-    };
-
-    try {
-      const response = await this.client.send(
-        new InvokeModelCommand({
-          modelId: CLASSIFICATION_MODEL_ID,
-          contentType: "application/json",
-          accept: "application/json",
-          body: new TextEncoder().encode(JSON.stringify(requestBody)),
-        }),
-      );
-      const responseBody = new TextDecoder().decode(response.body);
-      const result = JSON.parse(responseBody) as BedrockResponseWithTrace;
-      return result.choices?.[0]?.message?.content ?? responseBody;
-    } catch (e) {
-      return `[explanation call failed: ${e instanceof Error ? e.message : "unknown"}]`;
-    }
   }
 
   private handleGuardrailTrace(response: BedrockResponseWithTrace, signalId?: string, accountId?: string): void {
