@@ -218,7 +218,6 @@ export class SignalClassifier {
     const TAG_FORMAT = /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/;
     const rawTags = Array.isArray(raw.tags) ? raw.tags : [];
     const isKnownTag = (t: unknown): boolean => (SPAM_TAGS as readonly string[]).includes(t as string);
-    const knownTags = rawTags.filter(isKnownTag);
     const workflowLabel = [raw.workflow, raw.workflowData?.noticeType].filter((v) => typeof v === "string").join("/");
     const validTags: string[] = [];
     for (const tag of rawTags) {
@@ -227,7 +226,7 @@ export class SignalClassifier {
       // Unknown tags are kept — SPAM_TAGS is the promoted vocabulary, not an allowlist.
       validTags.push(tag);
       if (!isKnownTag(tag)) {
-        this.logger.warn(`Classifier returned tag [${tag}] not in SPAM_TAGS — kept (workflow: ${workflowLabel}, known: [${knownTags.join(", ")}]).`, {
+        this.logger.warn(`Classifier returned tag [${tag}] not in SPAM_TAGS — kept (workflow: ${workflowLabel}).`, {
           code: "classifier.unknown_tag",
           unknownTag: tag,
           signalId: input.signalId,

@@ -161,7 +161,7 @@ describe("SignalClassifier — output validation", () => {
     expect(output.tags).toEqual(["phishing", "totally-made-up-tag", "not-a-real-tag"]);
     for (const unknownTag of ["totally-made-up-tag", "not-a-real-tag"]) {
       expect(mockLogger.warn).toHaveBeenCalledWith(
-        `Classifier returned tag [${unknownTag}] not in SPAM_TAGS — kept (workflow: content, known: [phishing]).`,
+        `Classifier returned tag [${unknownTag}] not in SPAM_TAGS — kept (workflow: content).`,
         expect.objectContaining({ code: "classifier.unknown_tag", unknownTag }),
       );
     }
