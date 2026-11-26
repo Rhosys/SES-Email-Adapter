@@ -159,10 +159,12 @@ describe("SignalClassifier — output validation", () => {
     expect(result.isOk()).toBe(true);
     const output = result._unsafeUnwrap();
     expect(output.tags).toEqual(["phishing", "totally-made-up-tag", "not-a-real-tag"]);
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      "Classifier returned tag [totally-made-up-tag, not-a-real-tag] not in SPAM_TAGS — kept (workflow: content, known: [phishing]).",
-      expect.objectContaining({ code: "classifier.unknown_tag", unknownTags: ["totally-made-up-tag", "not-a-real-tag"] }),
-    );
+    for (const unknownTag of ["totally-made-up-tag", "not-a-real-tag"]) {
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        `Classifier returned tag [${unknownTag}] not in SPAM_TAGS — kept (workflow: content, known: [phishing]).`,
+        expect.objectContaining({ code: "classifier.unknown_tag", unknownTag }),
+      );
+    }
   });
 
   // -------------------------------------------------------------------------

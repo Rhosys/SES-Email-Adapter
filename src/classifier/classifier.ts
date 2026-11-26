@@ -233,15 +233,18 @@ export class SignalClassifier {
       const explanationResponse = await this.classifyWithExplanations(input);
       const knownTags = tags.filter((t) => (SPAM_TAGS as readonly string[]).includes(t));
       const workflowLabel = [raw.workflow, raw.workflowData?.noticeType].filter((v) => typeof v === "string").join("/");
-      this.logger.warn(`Classifier returned tag [${unknownTags.join(", ")}] not in SPAM_TAGS — kept (workflow: ${workflowLabel}, known: [${knownTags.join(", ")}]).`, {
-        code: "classifier.unknown_tag",
-        unknownTags,
-        signalId: input.signalId,
-        accountId: input.accountId,
-        input,
-        firstClassificationRaw: jsonText,
-        explanationClassificationRaw: explanationResponse,
-      });
+      // One WARN per unknown tag so each tag can be counted/aggregated on its own
+      for (const unknownTag of unknownTags) {
+        this.logger.warn(`Classifier returned tag [${unknownTag}] not in SPAM_TAGS — kept (workflow: ${workflowLabel}, known: [${knownTags.join(", ")}]).`, {
+          code: "classifier.unknown_tag",
+          unknownTag,
+          signalId: input.signalId,
+          accountId: input.accountId,
+          input,
+          firstClassificationRaw: jsonText,
+          explanationClassificationRaw: explanationResponse,
+        });
+      }
     }
 
     // Filter labels to subset of allowedLabels
