@@ -142,10 +142,10 @@ describe("SignalClassifier — output validation", () => {
   });
 
   // -------------------------------------------------------------------------
-  // Tag validation — unknown tags filtered out
+  // Tag validation — unknown tags kept and logged as WARN
   // -------------------------------------------------------------------------
 
-  it("filters out unknown tags not in the allowed vocabulary", async () => {
+  it("keeps unknown tags not in the vocabulary and logs a WARN naming them", async () => {
     mockClassifyResponse({
       workflow: "content",
       workflowData: { workflow: "content", contentType: "newsletter", publisher: "Test" },
@@ -158,9 +158,13 @@ describe("SignalClassifier — output validation", () => {
 
     expect(result.isOk()).toBe(true);
     const output = result._unsafeUnwrap();
-    expect(output.tags).toContain("phishing");
-    expect(output.tags).not.toContain("totally-made-up-tag");
-    expect(output.tags).not.toContain("not-a-real-tag");
+    expect(output.tags).toEqual(["phishing", "totally-made-up-tag", "not-a-real-tag"]);
+    for (const unknownTag of ["totally-made-up-tag", "not-a-real-tag"]) {
+      expect(mockLogger.warn).toHaveBeenCalledWith(
+        `Classifier returned tag [${unknownTag}] not in SPAM_TAGS — kept (workflow: content).`,
+        expect.objectContaining({ code: "classifier.unknown_tag", unknownTag }),
+      );
+    }
   });
 
   // -------------------------------------------------------------------------
